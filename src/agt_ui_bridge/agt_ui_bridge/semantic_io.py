@@ -29,6 +29,26 @@ class SemanticFileError(ValueError):
     pass
 
 
+READ_ONLY_VALIDATION_CODES = {
+    "unsupported_schema_version",
+    "invalid_frame",
+    "missing_map_id",
+    "unsupported_coverage_schema",
+    "map_id_mismatch",
+    "coverage_frame_mismatch",
+    "base_map_missing",
+    "base_map_hash_mismatch",
+}
+
+
+def validation_requires_read_only(report):
+    """Reserve read-only mode for document/base-map integrity failures."""
+    return any(
+        issue.severity == "ERROR" and issue.code in READ_ONLY_VALIDATION_CODES
+        for issue in report.issues
+    )
+
+
 def sha256_file(path):
     digest = hashlib.sha256()
     with Path(path).open("rb") as stream:
@@ -84,7 +104,7 @@ def load_semantic_task(semantic_path, coverage_path=None):
         ),
     )
     if not report.valid:
-        read_only = True
+        read_only = read_only or validation_requires_read_only(report)
         warnings.extend(issue.code for issue in report.issues)
 
     return LoadedSemanticTask(

@@ -45,6 +45,10 @@ semantic_map:
       geometry: LineString
       minimum_count: 0
       minimum_points: 2
+    access_lane:
+      geometry: LineString
+      minimum_count: 0
+      minimum_points: 2
     headland_zone:
       geometry: Polygon
       minimum_count: 0

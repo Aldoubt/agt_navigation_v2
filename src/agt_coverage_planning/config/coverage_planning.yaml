@@ -48,6 +48,8 @@ coverage_path_repair:
     published_footprint_tolerance: 0.03
     repair_endpoint_tolerance: 0.25
     maximum_sample_count: 200000
+    auto_repair: false
+    auto_repair_period: 0.50
 
 coverage_task_server:
   ros__parameters:

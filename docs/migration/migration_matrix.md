@@ -17,7 +17,7 @@
 | `agt_localization_fusion` | 6 | 仅骨架 | package 和领域边界已建立 | 定义融合状态与诊断接口，接入 LIO、轮速和 IMU；后续扩展 RTK/UWB 与失效降级 |
 | `agt_perception` | 6/8 | baseline 完成 | 已实现 base frame 高度/量程/车体裁剪的局部障碍点云，并接入 Nav2 costmap 和 Collision Monitor；裁剪边界已由契约测试约束到 BUNKER profile | 使用典型场景点云评估地面/障碍精度、误检漏检和频率，再增加可靠地面分割 |
 | `agt_navigation` | 6/8 | TASK-07 离线完成 | 原 1 m 闭环继续通过；FilterInfo、global `Static -> Keepout -> Inflation`、跨禁行墙规划失败及 toggle 后恢复规划已验证 | 使用真实语义地图与重定位验证边界误差、切换时延、规划成功率和窄通道通过性 |
-| `agt_coverage_planning` | 8 | TASK-00~15 完成，TASK-16 部分 | 外部锁定依赖已构建；当前大棚任务完成 6 种路线/连接/方向候选，彩色 Marker、几何时间排名和 JSON 报告通过；面积指标对零长度 SWATH 保持 null | 修复上游零长度 SWATH，恢复 authoritative 覆盖率/重叠率；再实现 CUSTOM 跨行排序和专用鱼尾策略 |
+| `agt_coverage_planning` | 8 | TASK-00~15 完成，TASK-16 部分；新增 planner-only 修复实验 | 外部锁定依赖已构建；Coverage Server configure 前消费 canonical 几何；临时 GML 统一为至少三点，并由已验证请求几何补正锁定 PathComponents 漏失端点；离线预览可自动调用 Hybrid-A* 修复无效 CONNECTION，并单独规划入口 approach，均复用底图、keepout、完整 footprint 和转弯半径验证 | 真实大棚已确认 planner/keepout ACTIVE；继续定位 Row Coverage 偶发无结果，并根据 repair report 调整地头/禁行语义，任何 invalid SWATH 仍禁止修复和执行 |
 | `agt_safety` | 6 | baseline 完成 | BUNKER 履带仲裁、手动优先、限速、输入超时、急停锁存和复位保持禁用的合成消息回归通过 | 架空履带验证方向和急停，再完成低速制动距离、进程退出和通信中断验收 |
 | `agt_chassis` | 6 | baseline 完成 | 官方 `bunker_ros2`、状态桥接、TF 隔离和双层命令 watchdog 已接入并离线构建 | CAN 实机验证协议版本、轮速里程计、错误码、方向、断连归零和长时间通讯稳定性 |
 | `agt_ui_bridge` | 6/8 | Bunker 双 profile baseline；TASK-15 总控接入完成；保留 CloudCompare 修图与同窗路线预览 | 上游 Qt5 源码不修改；mapping/navigation 模板分别绑定工作图/导航图和 `odom`/`map`，运行配置隔离；手动速度统一进入 `/agt/cmd_vel_manual` | 实机验证 Qt 地图刷新、位姿、初始位姿、单点目标和手动控制；语义编辑器后续独立验收 |

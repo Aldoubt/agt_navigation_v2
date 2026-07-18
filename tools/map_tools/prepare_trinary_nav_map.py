@@ -83,7 +83,11 @@ def classify_point_topology(
         raise ValueError("--closure-size must be a positive odd integer")
 
     background = (image >= background_low) & (image <= background_high)
-    point_mask = ~background
+    return classify_point_mask(~background, closure_size)
+
+
+def classify_point_mask(point_mask: np.ndarray, closure_size: int) -> np.ndarray:
+    """Classify an explicit observed-point mask using its closed outer topology."""
 
     # Closing is only a flood-fill barrier; output obstacles keep their source width.
     barrier_image = Image.fromarray(point_mask.astype(np.uint8) * 255, mode="L")
@@ -93,7 +97,7 @@ def classify_point_topology(
     barrier = np.asarray(barrier_image, dtype=np.uint8) > 0
     outside = edge_connected_mask(~barrier)
 
-    result = np.full(image.shape, FREE_PIXEL, dtype=np.uint8)
+    result = np.full(point_mask.shape, FREE_PIXEL, dtype=np.uint8)
     result[outside] = UNKNOWN_PIXEL
     result[point_mask] = OCCUPIED_PIXEL
     return result
@@ -104,16 +108,22 @@ def main() -> None:
     if not args.input.is_file():
         raise FileNotFoundError(f"input image not found: {args.input}")
 
-    image = np.asarray(Image.open(args.input).convert("L"), dtype=np.uint8)
+    with Image.open(args.input) as source_image:
+        image = np.asarray(source_image.convert("L"), dtype=np.uint8)
+        alpha = np.asarray(source_image.convert("RGBA"), dtype=np.uint8)[:, :, 3]
+    alpha_point_mask = (alpha > 0) if np.any(alpha == 0) and np.any(alpha > 0) else None
     histogram = np.bincount(image.reshape(-1), minlength=256)
     dominant = int(histogram.argmax()) if args.unknown_value is None else args.unknown_value
     unknown_low = max(0, dominant - args.unknown_margin)
     unknown_high = min(255, dominant + args.unknown_margin)
 
     if args.classification == "point-topology":
-        result = classify_point_topology(
-            image, unknown_low, unknown_high, args.closure_size
-        )
+        if alpha_point_mask is not None:
+            result = classify_point_mask(alpha_point_mask, args.closure_size)
+        else:
+            result = classify_point_topology(
+                image, unknown_low, unknown_high, args.closure_size
+            )
     else:
         result = np.full(image.shape, FREE_PIXEL, dtype=np.uint8)
         unknown_mask = (image >= unknown_low) & (image <= unknown_high)
@@ -131,6 +141,7 @@ def main() -> None:
     print(f"Classification     : {args.classification}")
     if args.classification == "point-topology":
         print(f"Boundary closure   : {args.closure_size} px")
+        print(f"Point mask source  : {'alpha' if alpha_point_mask is not None else 'gray'}")
     else:
         print(f"Occupied threshold : >= {args.occupied_threshold}")
     unique, counts = np.unique(result, return_counts=True)

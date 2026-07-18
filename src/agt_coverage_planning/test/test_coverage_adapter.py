@@ -124,6 +124,16 @@ def test_crop_centerlines_are_converted_to_inter_row_swaths():
         row.id = f"crop_{index:02d}"
         row.coordinates = [[1.0, y_value], [7.0, y_value]]
         task.semantic_map.features.append(row)
+    lane = deepcopy(next(
+        feature
+        for feature in _task().semantic_map.features
+        if feature.feature_type == "row_centerline"
+    ))
+    lane.id = "lane_01"
+    lane.feature_type = "access_lane"
+    lane.name = "Top access"
+    lane.coordinates = [[1.0, 5.5], [7.0, 5.5]]
+    task.semantic_map.features.append(lane)
 
     request = prepare_coverage_request(task, _platform())
     root = ET.fromstring(request.gml_text)
@@ -134,7 +144,58 @@ def test_crop_centerlines_are_converted_to_inter_row_swaths():
         )
     ]
 
-    assert coordinates == ["1,4 7,4", "1,2 7,2"]
+    parsed = [
+        [[float(value) for value in point.split(",")] for point in text.split()]
+        for text in coordinates
+    ]
+    assert [points[0] for points in parsed] == [[1.0, 4.0], [1.0, 2.0], [1.0, 5.5]]
+    assert [points[-1] for points in parsed] == [[7.0, 4.0], [7.0, 2.0], [7.0, 5.5]]
+    assert all(len(points) == 3 for points in parsed)
+
+
+def test_direct_swaths_include_explicit_access_lanes():
+    task = _task()
+    task.coverage.planning_mode = "annotated_rows"
+    lane = deepcopy(next(
+        feature
+        for feature in task.semantic_map.features
+        if feature.feature_type == "row_centerline"
+    ))
+    lane.id = "lane_01"
+    lane.feature_type = "access_lane"
+    lane.coordinates = [[1.0, 5.5], [7.0, 5.5]]
+    task.semantic_map.features.append(lane)
+
+    request = prepare_coverage_request(task, _platform())
+    root = ET.fromstring(request.gml_text)
+
+    assert len(root.findall("Row")) == 2
+
+
+def test_mixed_polyline_sizes_are_resampled_for_opennav_width_calculation():
+    task = _task()
+    task.coverage.planning_mode = "annotated_rows"
+    lane = deepcopy(next(
+        feature
+        for feature in task.semantic_map.features
+        if feature.feature_type == "row_centerline"
+    ))
+    lane.id = "lane_01"
+    lane.feature_type = "access_lane"
+    lane.coordinates = [[1.0, 5.5], [4.0, 5.7], [7.0, 5.5]]
+    task.semantic_map.features.append(lane)
+
+    request = prepare_coverage_request(task, _platform())
+    root = ET.fromstring(request.gml_text)
+    coordinate_elements = root.findall(
+        f"./Row/geometry/{{{GML_NAMESPACE}}}LineString/"
+        f"{{{GML_NAMESPACE}}}coordinates"
+    )
+
+    assert len(coordinate_elements) == 2
+    counts = [len(item.text.split()) for item in coordinate_elements]
+    assert len(set(counts)) == 1
+    assert counts[0] >= 3
 
 
 def test_versioned_annotated_rows_example_is_directly_convertible():

@@ -31,6 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--origin-y", type=float, default=0.0)
     parser.add_argument("--origin-yaw", type=float, default=0.0)
     parser.add_argument(
+        "--image-format",
+        choices=("png", "pgm"),
+        default="png",
+        help="Nav2 map image format",
+    )
+    parser.add_argument(
         "--runtime-root",
         type=Path,
         default=DEFAULT_RUNTIME_ROOT,
@@ -86,6 +92,18 @@ def validate_args(args: argparse.Namespace) -> None:
         raise ValueError("resolution must be greater than zero")
     if not args.map_id.strip():
         raise ValueError("map_id must not be empty")
+    if (args.min_center_x is None) != (args.min_center_y is None):
+        raise ValueError("min-center-x and min-center-y must be provided together")
+
+
+def resolve_nav_origin(args: argparse.Namespace) -> list[float]:
+    if args.min_center_x is not None:
+        return [
+            float(args.min_center_x - args.resolution / 2.0),
+            float(args.min_center_y - args.resolution / 2.0),
+            float(args.origin_yaw),
+        ]
+    return [float(args.origin_x), float(args.origin_y), float(args.origin_yaw)]
 
 
 def write_yaml(path: Path, content: dict[str, Any]) -> None:
@@ -103,7 +121,7 @@ def main() -> None:
     runtime_root = args.runtime_root.resolve()
     map_dir = runtime_root / args.map_id
     semantic_dir = map_dir / "semantic"
-    map_image_name = f"{args.map_id}.png"
+    map_image_name = f"{args.map_id}.{args.image_format}"
     map_yaml_name = f"{args.map_id}.yaml"
     observed_name = f"{args.map_id}_observed.png"
 
@@ -122,7 +140,7 @@ def main() -> None:
         grayscale.save(map_dir / map_image_name)
         grayscale.save(map_dir / observed_name)
 
-    origin = [float(args.origin_x), float(args.origin_y), float(args.origin_yaw)]
+    origin = resolve_nav_origin(args)
     nav_yaml = {
         "image": map_image_name,
         "mode": "trinary",
@@ -158,15 +176,34 @@ def main() -> None:
             "origin": origin,
             "width_cells": int(width),
             "height_cells": int(height),
+            "width_m": float(width * args.resolution),
+            "height_m": float(height * args.resolution),
+            "bounds_m": {
+                "min_x": origin[0],
+                "min_y": origin[1],
+                "max_x": float(origin[0] + width * args.resolution),
+                "max_y": float(origin[1] + height * args.resolution),
+            },
         },
         "rasterize_metadata": {
             "min_center_x": args.min_center_x,
             "min_center_y": args.min_center_y,
+            "max_center_x": (
+                float(args.min_center_x + (width - 1) * args.resolution)
+                if args.min_center_x is not None
+                else None
+            ),
+            "max_center_y": (
+                float(args.min_center_y + (height - 1) * args.resolution)
+                if args.min_center_y is not None
+                else None
+            ),
+            "extent_source": "png_dimensions_times_resolution",
             "origin_from_min_center": (
                 [
                     float(args.min_center_x - args.resolution / 2.0),
                     float(args.min_center_y - args.resolution / 2.0),
-                    0.0,
+                    float(args.origin_yaw),
                 ]
                 if args.min_center_x is not None and args.min_center_y is not None
                 else None

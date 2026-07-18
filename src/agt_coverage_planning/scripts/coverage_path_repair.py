@@ -76,6 +76,8 @@ class CoveragePathRepair(Node):
         self.declare_parameter("published_footprint_tolerance", 0.03)
         self.declare_parameter("repair_endpoint_tolerance", 0.25)
         self.declare_parameter("maximum_sample_count", 200000)
+        self.declare_parameter("auto_repair", False)
+        self.declare_parameter("auto_repair_period", 0.50)
 
         profile_path = str(self.get_parameter("platform_profile").value)
         if not profile_path:
@@ -132,6 +134,8 @@ class CoveragePathRepair(Node):
         self.pending = None
         self.last_repaired_path = None
         self.last_report_json = ""
+        self.auto_repair = bool(self.get_parameter("auto_repair").value)
+        self._auto_attempt_key = None
 
         self.repaired_path_publisher = self.create_publisher(
             NavPath, "/agt/coverage/path_repaired", LATCHED_QOS
@@ -189,6 +193,11 @@ class CoveragePathRepair(Node):
             ComputePathToPose,
             str(self.get_parameter("planner_action").value),
         )
+        if self.auto_repair:
+            period = float(self.get_parameter("auto_repair_period").value)
+            if not math.isfinite(period) or period <= 0.0:
+                raise RuntimeError("auto_repair_period must be positive")
+            self.auto_timer = self.create_timer(period, self._auto_repair_tick)
 
     def _path_callback(self, message):
         self.path_message = deepcopy(message)
@@ -214,6 +223,38 @@ class CoveragePathRepair(Node):
     def _repair_callback(self, _request, response):
         response.success, response.message = self._start_repair()
         return response
+
+    def _auto_repair_tick(self):
+        if self.pending is not None:
+            return
+        required = (
+            self.path_message,
+            self.semantics_message,
+            self.validation_message,
+            self.costmap_message,
+            self.footprint_message,
+            self.semantic_status_message,
+            self.keepout_mask_message,
+        )
+        if any(value is None for value in required) or not self.planner_action.server_is_ready():
+            return
+        try:
+            validation = json.loads(self.validation_message.data)
+            key = (
+                validation.get("path_fingerprint"),
+                tuple(validation.get("invalid_component_ids", [])),
+                tuple(validation.get("invalid_swath_ids", [])),
+                bool(validation.get("valid", False)),
+            )
+        except (json.JSONDecodeError, TypeError, ValueError):
+            return
+        if key == self._auto_attempt_key:
+            return
+        self._auto_attempt_key = key
+        success, detail = self._start_repair()
+        self.get_logger().info(
+            f"automatic preview repair {'started' if success else 'rejected'}: {detail}"
+        )
 
     def _start_repair(self):
         if self.pending is not None:

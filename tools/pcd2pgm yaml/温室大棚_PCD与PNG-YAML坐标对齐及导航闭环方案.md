@@ -209,6 +209,19 @@ resolution = 0.05
 origin: [-2.475, -30.475, 0.0]
 ```
 
+当前 `greenhouse_ground.png` 第二次导出文件以实际像素尺寸为真值：
+
+```text
+image = 641 x 783 px
+resolution = 0.05 m/px
+map outer extent = 32.05 x 39.15 m
+center X range = [-2.45, 29.55]
+center Y range = [-30.45, 8.65]
+outer bounds = [-2.475, -30.475] -> [29.575, 8.675]
+```
+
+早期手填的 `32.15 x 39.80 m` 不再作为该版本地图真值；不得据此拉伸已经完成语义标注的 PNG。
+
 ### 重要规则
 
 - 不要为了让数值好看而把原点改成整数。

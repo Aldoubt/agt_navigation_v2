@@ -11,6 +11,16 @@ runtime/results/
 runtime/cache/
 runtime/gui/
 
+# Local map-production assets (keep small records, matrices, and READMEs trackable)
+runtime/*.pcd
+runtime/*.pgm
+runtime/*.png
+runtime/*.yaml
+runtime/map_projects/**/*.pcd
+runtime/map_projects/**/*.pgm
+runtime/map_projects/**/*.png
+runtime/map_projects/**/50_nav2/**/*.yaml
+
 # Python
 __pycache__/
 *.pyc

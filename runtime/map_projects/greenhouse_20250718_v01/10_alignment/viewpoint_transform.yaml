@@ -1,0 +1,14 @@
+schema: agt_map_alignment/v1
+map_id: greenhouse_20250718_v01
+status: complete
+decision: bake_pcd_viewpoint
+reason: No ground leveling was needed; the source PCD VIEWPOINT pose was baked into XYZ so the PCD matches the CloudCompare Rasterize coordinates.
+source_viewpoint: [-0.416609, -0.062993, -0.163129, 0.999425, 0.0130382, -0.0146857, -0.0276274]
+raw_to_map_matrix_4x4:
+- [0.998042112537, 0.054840118429, -0.030074956584, -0.416609]
+- [-0.055606019364, 0.998133462854, -0.025249969129, -0.062993]
+- [0.028634109263, 0.026872881149, 0.999228670548, -0.163129]
+- [0.0, 0.0, 0.0, 1.0]
+leveling_transform: identity
+output_viewpoint: [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+coordinate_effect: source VIEWPOINT applied once to XYZ and normals

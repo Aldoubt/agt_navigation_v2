@@ -135,7 +135,7 @@ ros2 launch agt_ui_bridge semantic_editor.launch.py \
   platform_profile:="$PLATFORM_PROFILE"
 ```
 
-编辑器支持 field boundary、exclusion zone、row centerline、entry pose 和 work direction
+编辑器支持 field boundary、exclusion zone、row centerline、access lane、entry pose 和 work direction
 绘制，选择对象后可拖动顶点，提供对象图层显隐、footprint 预览、undo/redo、保存/另存、重载
 及未保存退出提示。地图首次显示时自动适配窗口，光标位于地图上时可使用滚轮缩放、中键拖动
 平移，也可通过“适配地图”恢复全图视野。语义线采用深色分类色和白色外描边，绘制预览、已完成
@@ -149,9 +149,16 @@ ros2 launch agt_ui_bridge semantic_editor.launch.py \
 
 “路线预览”面板提供三种只读离线输入解释：区域自动覆盖、标注线即道路、作物行间道路。
 “作物行间道路”按作业方向统一各行端点后，将相邻作物行两端分别取中点，临时生成 `N-1`
-条道路中心线；它不改写源 GeoJSON。面板可选择允许倒车的 Reeds-Shepp 或仅前进 Dubins，
-启动固定 `execution_enabled=false` 且 `start_rviz=false` 的 Coverage 预览，在当前画布叠加红色
-路线，并显示点数、长度、预计时间、转弯、倒车距离和稳定错误码。编辑器为该预览创建专属
+条道路中心线；作业方向线的位置不作为道路或首行，只使用其首尾向量的角度。该过程不改写源
+GeoJSON。“通行道路”工具绘制独立 `access_lane` 折线，启用时会与上述派生道路合并，适合标注
+温室边缘道路和入口联络线；其中心线必须位于作业区内且不穿过内部障碍。面板会显示当前解释
+规则，并可选择允许倒车的 Reeds-Shepp 或仅前进 Dubins；二者都是不读取栅格与语义障碍的
+几何连接，仅用于产生待审计候选。入口位姿不属于 OpenNav action 输入，面板会显示入口到
+候选首点的距离，并明确标记入口 approach 尚未规划。
+启动固定 `execution_enabled=false` 且 `start_rviz=false` 的 Coverage 预览，在当前画布叠加橙色
+候选路线，并以红色叉号显示 canonical footprint 与黑色/unknown 底图、field 外部或 semantic
+exclusion/keepout 的冲突采样。面板显示点数、长度、预计时间、转弯、倒车距离、底图/语义碰撞
+数量和稳定错误码；安全审计始终不可执行，不替代 TASK-10。编辑器为该预览创建专属
 ROS Domain，并让订阅端与子进程使用同一 Domain，避免已退出或
 异常遗留的预览节点向新一轮面板回灌状态；停止预览时优先等待 ROS launch 正常清理子节点。
 启动编辑器前必须 source 外部 coverage 工作区，否则面板会明确报告找不到规划包。

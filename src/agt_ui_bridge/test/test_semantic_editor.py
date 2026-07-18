@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -15,7 +16,7 @@ from diagnostic_msgs.msg import (  # noqa: E402
     KeyValue,
 )
 from nav_msgs.msg import Path as NavPath  # noqa: E402
-from geometry_msgs.msg import PoseStamped  # noqa: E402
+from geometry_msgs.msg import Pose, PoseArray, PoseStamped  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 import numpy as np  # noqa: E402
 import pytest  # noqa: E402
@@ -503,6 +504,15 @@ def test_preview_mode_derives_aisles_and_selects_dubins(window):
                 coordinates=[[1.0, y_value], [7.0, y_value]],
             )
         )
+    window.add_feature(
+        SemanticFeature(
+            id="lane_01",
+            feature_type="access_lane",
+            name="Top access",
+            geometry_type="LineString",
+            coordinates=[[1.0, 5.5], [7.0, 5.5]],
+        )
+    )
     window.preview_mode_combo.setCurrentIndex(
         window.preview_mode_combo.findData("inter_row_aisles")
     )
@@ -513,12 +523,29 @@ def test_preview_mode_derives_aisles_and_selects_dubins(window):
     semantic_map, coverage = window._preview_task()
     rows = [item for item in semantic_map.features if item.feature_type == "row_centerline"]
 
-    assert len(rows) == 2
+    assert len(rows) == 3
+    assert any(item.id == "lane_01" for item in rows)
     assert coverage.planning_mode == "annotated_rows"
     assert not coverage.allow_reverse
 
 
+def test_access_lane_tool_creates_independent_linestring(window):
+    assert window.finish_feature_from_scene(
+        "access_lane",
+        _scene_points(window, [[1.0, 5.5], [7.0, 5.5]]),
+        feature_id="lane_01",
+        name="Top access",
+    )
+
+    lane = window.model_scene.get("lane_01")
+    assert lane.feature_type == "access_lane"
+    assert lane.geometry_type == "LineString"
+    assert lane.coordinates == [[1.0, 5.5], [7.0, 5.5]]
+    assert window._layer_checks["access_lane"].isChecked()
+
+
 def test_preview_path_is_rendered_and_summarized(window):
+    window.add_feature(_required_features()[2])
     window._preview_run_active = True
     window._preview_accept_after_ns = 0
     message = NavPath()
@@ -532,7 +559,47 @@ def test_preview_path_is_rendered_and_summarized(window):
 
     assert window._preview_path_summary["路径点"] == 3
     assert window._preview_path_summary["长度"] == "3.00 m"
+    assert window._preview_path_summary["入口接入"] == "首点与入口重合"
     assert window._preview_world_points == [(1.0, 1.0), (2.0, 1.0), (4.0, 1.0)]
+
+
+def test_preview_audit_and_collision_points_match_current_path_stamp(window):
+    window._preview_run_active = True
+    window._preview_accept_after_ns = 0
+    path = NavPath()
+    path.header.stamp.sec = 12
+    for x_value in (1.0, 2.0):
+        pose = PoseStamped()
+        pose.pose.position.x = x_value
+        pose.pose.position.y = 1.0
+        path.poses.append(pose)
+    window._preview_path_callback(path)
+
+    audit = String()
+    audit.data = json.dumps(
+        {
+            "status": "CONFLICT",
+            "path_stamp_ns": 12_000_000_000,
+            "base_collision_pose_count": 4,
+            "keepout_collision_pose_count": 7,
+            "invalid_segment_count": 2,
+            "turning_radius_violation": True,
+        }
+    )
+    window._preview_audit_callback(audit)
+    collisions = PoseArray()
+    collisions.header.stamp.sec = 12
+    collision = Pose()
+    collisions.poses.append(collision)
+    collision.position.x = 1.5
+    collision.position.y = 1.0
+    window._preview_collision_callback(collisions)
+
+    assert window._preview_audit_summary["安全审计"] == "存在冲突（不可执行）"
+    assert window._preview_audit_summary["底图碰撞采样"] == 4
+    assert window._preview_audit_summary["语义禁行碰撞采样"] == 7
+    assert window._preview_audit_summary["转弯半径违规"] == "是"
+    assert window._preview_collision_points == [(1.5, 1.0)]
 
 
 def test_preview_ignores_latched_metrics_until_current_path_arrives(window):
@@ -607,3 +674,19 @@ def test_preview_rejection_exposes_diagnostic_detail(window):
 
     assert window._preview_path_summary["错误码"] == "task_load_failed"
     assert window._preview_path_summary["详情"] == "example load failure"
+
+
+def test_stopped_preview_snapshot_survives_until_editor_cleanup(window):
+    snapshot = tempfile.TemporaryDirectory(prefix="agt_editor_preview_test_")
+    semantic_path = Path(snapshot.name) / "semantic_map.geojson"
+    semantic_path.write_text("{}", encoding="utf-8")
+    window._preview_tempdir = snapshot
+    window._preview_tempdirs.append(snapshot)
+
+    window.stop_coverage_preview()
+
+    assert semantic_path.exists()
+    window._cleanup_all_preview_tempdirs()
+    assert not semantic_path.exists()
+    assert window._preview_tempdir is None
+    assert window._preview_tempdirs == []

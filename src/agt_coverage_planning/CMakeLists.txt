@@ -12,6 +12,8 @@ install(PROGRAMS
   scripts/coverage_path_repair.py
   scripts/coverage_task_server.py
   scripts/coverage_time_simulator.py
+  scripts/coverage_preview_auditor.py
+  scripts/coverage_approach_preview.py
   scripts/coverage_variant_comparator.py
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -46,7 +48,14 @@ if(BUILD_TESTING)
   )
   ament_add_pytest_test(test_path_repair test/test_path_repair.py)
   ament_add_pytest_test(test_path_repair_node test/test_path_repair_node.py)
+  ament_add_pytest_test(
+    test_approach_preview_node test/test_approach_preview_node.py
+  )
   ament_add_pytest_test(test_path_validator test/test_path_validator.py)
+  ament_add_pytest_test(test_preview_audit test/test_preview_audit.py)
+  ament_add_pytest_test(
+    test_preview_auditor_node test/test_preview_auditor_node.py
+  )
   ament_add_pytest_test(test_coverage_task test/test_coverage_task.py)
   ament_add_pytest_test(
     test_coverage_task_server_node

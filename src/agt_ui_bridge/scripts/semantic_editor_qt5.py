@@ -14,8 +14,9 @@ import tempfile
 
 import numpy as np
 from diagnostic_msgs.msg import DiagnosticArray
+from geometry_msgs.msg import PoseArray
 from nav_msgs.msg import Path as NavPath
-from PyQt5.QtCore import QPoint, QPointF, QProcess, QProcessEnvironment, QTimer, Qt
+from PyQt5.QtCore import QLineF, QPoint, QPointF, QProcess, QProcessEnvironment, QTimer, Qt
 from PyQt5.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QPixmap
 from PyQt5.QtWidgets import (
     QAction,
@@ -73,6 +74,7 @@ from agt_ui_bridge.semantic_io import (
     load_semantic_task,
     save_semantic_task,
     sha256_file,
+    validation_requires_read_only,
 )
 from agt_ui_bridge.semantic_model import (
     CoverageParameters,
@@ -87,6 +89,7 @@ FEATURE_LABELS = {
     "field_boundary": "作业区",
     "exclusion_zone": "内部障碍",
     "row_centerline": "作物行",
+    "access_lane": "通行道路",
     "entry_pose": "入口位姿",
     "work_direction": "作业方向",
     "headland_zone": "地头区",
@@ -96,6 +99,7 @@ FEATURE_COLORS = {
     "field_boundary": QColor("#007a3d"),
     "exclusion_zone": QColor("#d00000"),
     "row_centerline": QColor("#8a5800"),
+    "access_lane": QColor("#126a8b"),
     "entry_pose": QColor("#0057d9"),
     "work_direction": QColor("#007c83"),
     "headland_zone": QColor("#a44800"),
@@ -105,6 +109,7 @@ DRAW_TO_FEATURE = {
     "field_boundary": "field_boundary",
     "exclusion_zone": "exclusion_zone",
     "row_centerline": "row_centerline",
+    "access_lane": "access_lane",
     "entry_pose": "entry_pose",
     "work_direction": "work_direction",
 }
@@ -328,6 +333,17 @@ class SemanticGraphicsScene(QGraphicsScene):
                 f"当前对象至少需要 {minimum} 个点", 3000
             )
             return
+        if (
+            self.editor.tool == "access_lane"
+            and QLineF(self.draw_points[0], self.draw_points[-1]).length() <= 4.0
+        ):
+            QMessageBox.warning(
+                self.editor,
+                "通行道路不能闭合",
+                "通行道路表示一条开放的道路中心线，不是区域边框。\n"
+                "请按 Backspace 撤回闭合点；多条道路请分别绘制。",
+            )
+            return
         if self.editor.tool in {"field_boundary", "exclusion_zone"}:
             polygon = Polygon([(point.x(), point.y()) for point in self.draw_points])
             if not polygon.is_valid:
@@ -393,6 +409,7 @@ class SemanticGraphicsScene(QGraphicsScene):
             "field_boundary",
             "exclusion_zone",
             "row_centerline",
+            "access_lane",
         }:
             if not self.draw_points or self.draw_points[-1] != event.scenePos():
                 self.draw_points.append(QPointF(event.scenePos()))
@@ -520,8 +537,15 @@ class SemanticEditorWindow(QMainWindow):
         self._fit_after_first_show = True
         self._preview_process = None
         self._preview_tempdir = None
+        self._preview_tempdirs = []
         self._preview_world_points = []
+        self._preview_approach_points = []
+        self._preview_collision_points = []
         self._preview_path_summary = {}
+        self._preview_audit_summary = {}
+        self._preview_path_stamp_ns = 0
+        self._pending_preview_audit = None
+        self._pending_preview_collisions = None
         self._preview_status = "尚未生成路线"
         self._preview_run_active = False
         self._preview_accept_after_ns = 0
@@ -595,6 +619,7 @@ class SemanticEditorWindow(QMainWindow):
             ("field_boundary", "作业区"),
             ("exclusion_zone", "内部障碍"),
             ("row_centerline", "作物行"),
+            ("access_lane", "通行道路"),
             ("entry_pose", "入口位姿"),
             ("work_direction", "作业方向"),
         ):
@@ -718,8 +743,12 @@ class SemanticEditorWindow(QMainWindow):
         layout.addWidget(self.preview_mode_combo)
         layout.addWidget(QLabel("连接模型"))
         self.preview_path_combo = QComboBox()
-        self.preview_path_combo.addItem("Reeds-Shepp（允许倒车）", "reeds_shepp")
-        self.preview_path_combo.addItem("Dubins（仅前进）", "dubins")
+        self.preview_path_combo.addItem(
+            "Reeds-Shepp（几何连接，允许倒车，不避障）", "reeds_shepp"
+        )
+        self.preview_path_combo.addItem(
+            "Dubins（几何连接，仅前进，不避障）", "dubins"
+        )
         layout.addWidget(self.preview_path_combo)
         buttons = QHBoxLayout()
         generate_button = QPushButton("生成路线")
@@ -750,6 +779,30 @@ class SemanticEditorWindow(QMainWindow):
             NavPath, "/agt/coverage/path_preview", self._preview_path_callback, LATCHED_QOS
         )
         self._preview_node.create_subscription(
+            NavPath,
+            "/agt/coverage/path_repaired",
+            self._preview_repaired_path_callback,
+            LATCHED_QOS,
+        )
+        self._preview_node.create_subscription(
+            NavPath,
+            "/agt/coverage/path_approach_preview",
+            self._preview_approach_path_callback,
+            LATCHED_QOS,
+        )
+        self._preview_node.create_subscription(
+            String,
+            "/agt/coverage/repair_report",
+            self._preview_repair_report_callback,
+            LATCHED_QOS,
+        )
+        self._preview_node.create_subscription(
+            String,
+            "/agt/coverage/approach_report",
+            self._preview_approach_report_callback,
+            LATCHED_QOS,
+        )
+        self._preview_node.create_subscription(
             DiagnosticArray,
             "/agt/coverage/status",
             self._preview_status_callback,
@@ -759,6 +812,18 @@ class SemanticEditorWindow(QMainWindow):
             String,
             "/agt/coverage/simulation_report",
             self._preview_report_callback,
+            LATCHED_QOS,
+        )
+        self._preview_node.create_subscription(
+            String,
+            "/agt/coverage/preview_audit",
+            self._preview_audit_callback,
+            LATCHED_QOS,
+        )
+        self._preview_node.create_subscription(
+            PoseArray,
+            "/agt/coverage/preview_collision_poses",
+            self._preview_collision_callback,
             LATCHED_QOS,
         )
         self._preview_spin_timer = QTimer(self)
@@ -780,6 +845,7 @@ class SemanticEditorWindow(QMainWindow):
             self._preview_tempdir = tempfile.TemporaryDirectory(
                 prefix="agt_editor_coverage_preview_"
             )
+            self._preview_tempdirs.append(self._preview_tempdir)
             root = Path(self._preview_tempdir.name)
             semantic_path = root / "semantic_map.geojson"
             coverage_path = root / "coverage.yaml"
@@ -825,6 +891,11 @@ class SemanticEditorWindow(QMainWindow):
         self._preview_status = "正在启动离线规划（执行始终关闭）..."
         self._preview_run_active = True
         self._preview_has_current_path = False
+        self._preview_path_stamp_ns = 0
+        self._preview_collision_points = []
+        self._preview_audit_summary = {}
+        self._pending_preview_audit = None
+        self._pending_preview_collisions = None
         self._preview_accept_after_ns = (
             self._preview_node.get_clock().now().nanoseconds
             if self._preview_node is not None
@@ -837,6 +908,7 @@ class SemanticEditorWindow(QMainWindow):
             self._preview_status = (
                 "规划进程启动失败。请先 source 覆盖依赖工作区和本仓库 install。"
             )
+            self._cleanup_preview_tempdir(self._preview_tempdir)
             self._update_preview_info()
             return False
         return True
@@ -867,18 +939,32 @@ class SemanticEditorWindow(QMainWindow):
             if not process.waitForFinished(8000):
                 process.kill()
                 process.waitForFinished(2000)
-        self._cleanup_preview_tempdir()
         if clear_route:
             self._preview_world_points = []
+            self._preview_approach_points = []
+            self._preview_collision_points = []
             self._preview_path_summary = {}
+            self._preview_audit_summary = {}
+            self._preview_path_stamp_ns = 0
+            self._pending_preview_audit = None
+            self._pending_preview_collisions = None
             self.refresh_scene()
         self._preview_status = "预览已停止" if process is not None else self._preview_status
         self._update_preview_info()
 
-    def _cleanup_preview_tempdir(self):
-        if self._preview_tempdir is not None:
-            self._preview_tempdir.cleanup()
+    def _cleanup_preview_tempdir(self, tempdir=None):
+        target = tempdir or self._preview_tempdir
+        if target is None:
+            return
+        target.cleanup()
+        if target in self._preview_tempdirs:
+            self._preview_tempdirs.remove(target)
+        if target is self._preview_tempdir:
             self._preview_tempdir = None
+
+    def _cleanup_all_preview_tempdirs(self):
+        for tempdir in list(self._preview_tempdirs):
+            self._cleanup_preview_tempdir(tempdir)
 
     def _preview_process_output(self, process):
         if process is not self._preview_process:
@@ -917,13 +1003,19 @@ class SemanticEditorWindow(QMainWindow):
         ]
         self._preview_world_points = points
         self._preview_has_current_path = bool(points)
+        self._preview_path_stamp_ns = self._message_stamp_ns(message)
         if not points:
+            self._preview_collision_points = []
+            self._preview_audit_summary = {}
+            self._pending_preview_audit = None
+            self._pending_preview_collisions = None
             for key in (
                 "路径点",
                 "长度",
                 "预计时间",
                 "预计转弯",
                 "倒车距离",
+                "入口接入",
             ):
                 self._preview_path_summary.pop(key, None)
             self.refresh_scene()
@@ -931,9 +1023,104 @@ class SemanticEditorWindow(QMainWindow):
             return
         length = sum(math.dist(a, b) for a, b in zip(points, points[1:]))
         self._preview_path_summary.update(
-            {"路径点": len(points), "长度": f"{length:.2f} m"}
+            {
+                "路径点": len(points),
+                "长度": f"{length:.2f} m",
+                "地图分辨率": f"{self.transformer.geometry.resolution:.3f} m/px",
+                "地图实际范围": (
+                    f"{self.transformer.geometry.width * self.transformer.geometry.resolution:.2f}"
+                    f" × {self.transformer.geometry.height * self.transformer.geometry.resolution:.2f} m"
+                ),
+            }
         )
+        self._preview_audit_summary = {"安全审计": "自动检查中..."}
+        entry = next(
+            (
+                feature
+                for feature in self.model_scene.features
+                if feature.enabled and feature.feature_type == "entry_pose"
+            ),
+            None,
+        )
+        if entry is None:
+            self._preview_path_summary["入口接入"] = "未标注"
+        else:
+            gap = math.dist(entry.coordinates, points[0])
+            self._preview_path_summary["入口接入"] = (
+                "首点与入口重合"
+                if gap <= 0.10
+                else f"未规划（入口到首点直线距离 {gap:.2f} m）"
+            )
+        self._apply_pending_preview_audit()
+        self._apply_pending_preview_collisions()
         self.refresh_scene()
+        self._update_preview_info()
+
+    def _preview_repaired_path_callback(self, message):
+        if not self._preview_message_is_current(message) or not message.poses:
+            return
+        self._preview_path_callback(message)
+        self._preview_path_summary["路线来源"] = "Hybrid-A* 修复候选（不可执行）"
+        self._update_preview_info()
+
+    def _preview_approach_path_callback(self, message):
+        if not self._preview_message_is_current(message):
+            return
+        self._preview_approach_points = [
+            (float(pose.pose.position.x), float(pose.pose.position.y))
+            for pose in message.poses
+        ]
+        self.refresh_scene()
+
+    def _preview_repair_report_callback(self, message):
+        if not self._preview_run_active:
+            return
+        try:
+            report = json.loads(message.data)
+        except (TypeError, ValueError):
+            return
+        if report.get("success"):
+            count = int(report.get("repaired_segment_count", 0))
+            self._preview_path_summary["连接修复"] = f"成功（{count} 段）"
+            self._preview_path_summary.pop("修复错误", None)
+            final_validation = report.get("final_validation", {})
+            if final_validation.get("valid") is True:
+                self._preview_audit_summary = {
+                    "修复后复验": "通过（仍为不可执行预览）",
+                    "修复后冲突姿态": int(
+                        final_validation.get("collision_pose_count", 0)
+                    ),
+                    "修复后转弯半径": "通过",
+                }
+        else:
+            self._preview_path_summary["连接修复"] = "失败"
+            self._preview_path_summary["修复错误"] = report.get(
+                "error_code", "unknown"
+            )
+            detail = report.get("detail")
+            if detail:
+                self._preview_path_summary["修复详情"] = detail
+        self._update_preview_info()
+
+    def _preview_approach_report_callback(self, message):
+        if not self._preview_run_active:
+            return
+        try:
+            report = json.loads(message.data)
+        except (TypeError, ValueError):
+            return
+        if report.get("success"):
+            self._preview_path_summary["入口接入"] = (
+                "已在首点"
+                if report.get("state") == "ALREADY_AT_START"
+                else f"Hybrid-A* 已规划（{float(report.get('length', 0.0)):.2f} m）"
+            )
+            self._preview_path_summary.pop("接入错误", None)
+        else:
+            self._preview_path_summary["入口接入"] = "规划失败"
+            self._preview_path_summary["接入错误"] = report.get(
+                "error_code", "unknown"
+            )
         self._update_preview_info()
 
     def _preview_status_callback(self, message):
@@ -986,15 +1173,103 @@ class SemanticEditorWindow(QMainWindow):
                 self._preview_path_summary[label] = f"{float(value):.2f}{suffix}"
         self._update_preview_info()
 
+    def _preview_audit_callback(self, message):
+        if not self._preview_run_active:
+            return
+        try:
+            report = json.loads(message.data)
+        except (TypeError, ValueError):
+            return
+        if not report:
+            self._preview_audit_summary = {}
+            self._pending_preview_audit = None
+            self._update_preview_info()
+            return
+        self._pending_preview_audit = report
+        self._apply_pending_preview_audit()
+
+    def _apply_pending_preview_audit(self):
+        report = self._pending_preview_audit
+        if not self._preview_has_current_path or not report:
+            return
+        if int(report.get("path_stamp_ns", -1)) != self._preview_path_stamp_ns:
+            return
+        status = report.get("status", "FAILED")
+        summary = {
+            "安全审计": (
+                "存在冲突（不可执行）"
+                if status == "CONFLICT"
+                else "未发现栅格冲突（仍不可执行）"
+                if status == "CLEAR"
+                else "审计失败（不可执行）"
+            )
+        }
+        if status in {"CONFLICT", "CLEAR"}:
+            summary.update(
+                {
+                    "底图碰撞采样": int(
+                        report.get("base_collision_pose_count", 0)
+                    ),
+                    "语义禁行碰撞采样": int(
+                        report.get("keepout_collision_pose_count", 0)
+                    ),
+                    "冲突路径段": int(report.get("invalid_segment_count", 0)),
+                    "转弯半径违规": (
+                        "是" if report.get("turning_radius_violation") else "否"
+                    ),
+                }
+            )
+        elif report.get("detail"):
+            summary["审计详情"] = report["detail"]
+        self._preview_audit_summary = summary
+        self._update_preview_info()
+
+    def _preview_collision_callback(self, message):
+        if not self._preview_message_is_current(message):
+            return
+        self._pending_preview_collisions = (
+            self._message_stamp_ns(message),
+            [
+                (float(pose.position.x), float(pose.position.y))
+                for pose in message.poses
+            ],
+        )
+        self._apply_pending_preview_collisions()
+
+    def _apply_pending_preview_collisions(self):
+        if (
+            not self._preview_has_current_path
+            or self._pending_preview_collisions is None
+        ):
+            return
+        stamp_ns, points = self._pending_preview_collisions
+        if stamp_ns != self._preview_path_stamp_ns:
+            return
+        self._preview_collision_points = points
+        self.refresh_scene()
+
+    @staticmethod
+    def _message_stamp_ns(message):
+        stamp = message.header.stamp
+        return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+
     def _update_preview_info(self):
         if not hasattr(self, "preview_info"):
             return
         mode = self.preview_mode_combo.currentText()
         model = self.preview_path_combo.currentText()
-        details = "\n".join(
-            f"{key}: {value}" for key, value in self._preview_path_summary.items()
-        )
-        text = f"{mode}\n{model}\n状态: {self._preview_status}"
+        combined = dict(self._preview_path_summary)
+        combined.update(self._preview_audit_summary)
+        details = "\n".join(f"{key}: {value}" for key, value in combined.items())
+        interpretation = {
+            "inter_row_aisles": "作业方向仅提供角度，不作为道路；相邻作物行生成行间道路",
+            "annotated_rows": "每条启用的标注线直接作为道路",
+            "polygon": "在作业区内按方向自动生成覆盖线",
+        }.get(self.preview_mode_combo.currentData(), "")
+        text = f"{mode}\n{model}"
+        if interpretation:
+            text += f"\n解释: {interpretation}"
+        text += f"\n状态: {self._preview_status}"
         if details:
             text += "\n" + details
         self.preview_info.setText(text)
@@ -1091,7 +1366,9 @@ class SemanticEditorWindow(QMainWindow):
             context=self._validation_context(),
         )
         if not full_report.valid:
-            self.read_only = True
+            self.read_only = self.read_only or validation_requires_read_only(
+                full_report
+            )
             task.warnings.extend(issue.code for issue in full_report.issues)
         self.selected_feature_id = None
         self.refresh_scene()
@@ -1100,8 +1377,17 @@ class SemanticEditorWindow(QMainWindow):
         if task.warnings:
             QMessageBox.warning(
                 self,
-                "任务以只读方式打开",
-                "\n".join(dict.fromkeys(task.warnings)),
+                (
+                    "任务以只读方式打开"
+                    if self.read_only
+                    else "任务包含待修复问题"
+                ),
+                "\n".join(dict.fromkeys(task.warnings))
+                + (
+                    ""
+                    if self.read_only
+                    else "\n\n可编辑修复；任务合法前禁止保存和生成路线。"
+                ),
             )
 
     def _set_platform_profile(self, path):
@@ -1169,8 +1455,18 @@ class SemanticEditorWindow(QMainWindow):
             self.statusBar().showMessage("选择对象或拖动顶点；中键平移，滚轮缩放")
         elif tool in MAP_EDIT_TO_PIXEL:
             self._show_map_tool_status()
-        elif tool in {"field_boundary", "exclusion_zone", "row_centerline"}:
-            self.statusBar().showMessage("左键添加顶点，双击/右键/Enter 完成，Esc 取消")
+        elif tool in {
+            "field_boundary",
+            "exclusion_zone",
+            "row_centerline",
+            "access_lane",
+        }:
+            if tool == "access_lane":
+                self.statusBar().showMessage(
+                    "绘制单条开放道路中心线：左键加点，双击/右键/Enter 完成；不要闭合或往返"
+                )
+            else:
+                self.statusBar().showMessage("左键添加顶点，双击/右键/Enter 完成，Esc 取消")
         else:
             self.statusBar().showMessage("点击位置，再点击方向点")
 
@@ -1283,7 +1579,7 @@ class SemanticEditorWindow(QMainWindow):
         if feature_type in {"field_boundary", "exclusion_zone"}:
             coordinates = [world_points + [world_points[0]]]
             geometry_type = "Polygon"
-        elif feature_type == "row_centerline":
+        elif feature_type in {"row_centerline", "access_lane"}:
             coordinates = world_points
             geometry_type = "LineString"
         elif feature_type == "work_direction":
@@ -1334,6 +1630,7 @@ class SemanticEditorWindow(QMainWindow):
             "field_boundary": "field",
             "exclusion_zone": "exclusion",
             "row_centerline": "row",
+            "access_lane": "lane",
             "entry_pose": "entry",
             "work_direction": "direction",
         }[feature_type]
@@ -1549,12 +1846,44 @@ class SemanticEditorWindow(QMainWindow):
         for point in self._preview_world_points[1:]:
             path.lineTo(self._world_point(point))
         item = ContrastPathItem(path)
-        pen = QPen(QColor("#ff3b30"), 3.0)
+        pen = QPen(QColor("#f0a43b"), 3.0)
         pen.setCosmetic(True)
         item.setPen(pen)
         item.setZValue(45)
         item.setToolTip("离线覆盖路线预览：不可执行")
         self.graphics_scene.addItem(item)
+
+        if len(self._preview_approach_points) >= 2:
+            approach = QPainterPath(
+                self._world_point(self._preview_approach_points[0])
+            )
+            for point in self._preview_approach_points[1:]:
+                approach.lineTo(self._world_point(point))
+            approach_item = ContrastPathItem(approach)
+            approach_pen = QPen(QColor("#22c7dc"), 3.0, Qt.DashLine)
+            approach_pen.setCosmetic(True)
+            approach_item.setPen(approach_pen)
+            approach_item.setZValue(46)
+            approach_item.setToolTip("入口到首条作业线：Hybrid-A* 离线候选")
+            self.graphics_scene.addItem(approach_item)
+
+        if not self._preview_collision_points:
+            return
+        markers = QPainterPath()
+        radius = max(0.12 / self.transformer.geometry.resolution, 2.0)
+        for coordinate in self._preview_collision_points:
+            point = self._world_point(coordinate)
+            markers.moveTo(point.x() - radius, point.y() - radius)
+            markers.lineTo(point.x() + radius, point.y() + radius)
+            markers.moveTo(point.x() - radius, point.y() + radius)
+            markers.lineTo(point.x() + radius, point.y() - radius)
+        marker_item = QGraphicsPathItem(markers)
+        marker_pen = QPen(QColor("#ff2f2f"), 2.5)
+        marker_pen.setCosmetic(True)
+        marker_item.setPen(marker_pen)
+        marker_item.setZValue(50)
+        marker_item.setToolTip("完整车辆 footprint 与底图/语义禁行区冲突")
+        self.graphics_scene.addItem(marker_item)
 
     def _layer_visible(self, name):
         checkbox = self._layer_checks.get(name)
@@ -1890,6 +2219,9 @@ class SemanticEditorWindow(QMainWindow):
     def closeEvent(self, event):
         if self._confirm_discard_changes():
             self.stop_coverage_preview()
+            # ros2 launch may have child processes that finish after QProcess stops.
+            # Keep every immutable preview snapshot alive until the editor closes.
+            self._cleanup_all_preview_tempdirs()
             if self._preview_spin_timer is not None:
                 self._preview_spin_timer.stop()
             if self._preview_node is not None:

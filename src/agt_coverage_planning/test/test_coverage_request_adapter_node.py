@@ -105,6 +105,38 @@ def test_semantic_products_reject_unordered_or_wrong_frame_components():
     assert frame.value.code == "invalid_path_components_frame"
 
 
+def test_semantic_products_identify_zero_length_swath_index_and_position():
+    components = _components()
+    components.swaths[1].end = components.swaths[1].start
+
+    with pytest.raises(ADAPTER.PathSemanticsError) as error:
+        ADAPTER._semantic_products(_path(), components)
+
+    assert error.value.code == "zero_length_swath"
+    assert "swath[1]" in str(error.value)
+    assert "identical endpoints" in str(error.value)
+
+
+def test_requested_rows_restore_locked_opennav_missing_final_segments():
+    components = _components()
+    components.swaths[0].end.x = 2.0
+    components.swaths[1].end.x = 2.0
+
+    semantics, _reconstructed, _message = ADAPTER._semantic_products(
+        _path(),
+        components,
+        swath_sample_step=0.5,
+        requested_swaths=(((0.0, 0.0), (4.0, 0.0)), ((0.0, 1.0), (4.0, 1.0))),
+    )
+
+    assert semantics.length_error <= semantics.length_tolerance
+    swath_components = [
+        component for component in semantics.components
+        if component.component_type == "SWATH"
+    ]
+    assert len(swath_components) == 2
+
+
 def test_planning_status_references_stable_swath_ids():
     node = ADAPTER.CoverageRequestAdapter()
     try:

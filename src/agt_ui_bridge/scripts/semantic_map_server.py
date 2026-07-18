@@ -38,6 +38,7 @@ FEATURE_COLORS = {
     "field_boundary": (0.18, 0.62, 0.45, 0.95),
     "exclusion_zone": (0.85, 0.36, 0.25, 0.95),
     "row_centerline": (0.90, 0.74, 0.33, 0.95),
+    "access_lane": (0.10, 0.52, 0.68, 0.95),
     "entry_pose": (0.25, 0.51, 0.84, 0.95),
     "work_direction": (0.21, 0.66, 0.71, 0.95),
     "headland_zone": (0.82, 0.54, 0.25, 0.95),

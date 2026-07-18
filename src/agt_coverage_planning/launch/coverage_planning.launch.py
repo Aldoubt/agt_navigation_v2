@@ -4,9 +4,44 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
+
+from agt_ui_bridge.platform_profile import load_platform_profile
+
+
+def _coverage_server_parameters(platform_profile):
+    platform = load_platform_profile(platform_profile)
+    return {
+        "robot_width": platform["robot_width"],
+        "min_turning_radius": platform["min_turning_radius"],
+    }
+
+
+def _launch_coverage_servers(
+    context, *, parameters, platform_profile, use_sim_time
+):
+    geometry = _coverage_server_parameters(platform_profile.perform(context))
+    server_parameters = [parameters, {"use_sim_time": use_sim_time}, geometry]
+    return [
+        Node(
+            package="opennav_coverage",
+            executable="opennav_coverage",
+            namespace="agt/coverage/polygon",
+            name="coverage_server",
+            output="screen",
+            parameters=server_parameters,
+        ),
+        Node(
+            package="opennav_row_coverage",
+            executable="opennav_row_coverage",
+            namespace="agt/coverage/rows",
+            name="row_coverage_server",
+            output="screen",
+            parameters=server_parameters,
+        ),
+    ]
 
 
 def generate_launch_description():
@@ -17,22 +52,15 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     plan_on_start = LaunchConfiguration("plan_on_start")
     execution_enabled = LaunchConfiguration("execution_enabled")
+    auto_repair = LaunchConfiguration("auto_repair")
 
-    polygon_server = Node(
-        package="opennav_coverage",
-        executable="opennav_coverage",
-        namespace="agt/coverage/polygon",
-        name="coverage_server",
-        output="screen",
-        parameters=[parameters, {"use_sim_time": use_sim_time}],
-    )
-    row_server = Node(
-        package="opennav_row_coverage",
-        executable="opennav_row_coverage",
-        namespace="agt/coverage/rows",
-        name="row_coverage_server",
-        output="screen",
-        parameters=[parameters, {"use_sim_time": use_sim_time}],
+    coverage_servers = OpaqueFunction(
+        function=_launch_coverage_servers,
+        kwargs={
+            "parameters": parameters,
+            "platform_profile": platform_profile,
+            "use_sim_time": use_sim_time,
+        },
     )
     polygon_lifecycle_manager = Node(
         package="nav2_lifecycle_manager",
@@ -87,6 +115,7 @@ def generate_launch_description():
             {
                 "platform_profile": platform_profile,
                 "use_sim_time": use_sim_time,
+                "auto_repair": auto_repair,
             },
         ],
     )
@@ -124,8 +153,8 @@ def generate_launch_description():
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("plan_on_start", default_value="false"),
             DeclareLaunchArgument("execution_enabled", default_value="false"),
-            polygon_server,
-            row_server,
+            DeclareLaunchArgument("auto_repair", default_value="false"),
+            coverage_servers,
             polygon_lifecycle_manager,
             row_lifecycle_manager,
             adapter,

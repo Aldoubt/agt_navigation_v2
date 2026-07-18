@@ -16,6 +16,7 @@ FEATURE_GEOMETRY = {
     "entry_pose": "Point",
     "work_direction": "LineString",
     "row_centerline": "LineString",
+    "access_lane": "LineString",
     "headland_zone": "Polygon",
     "keepout_zone": "Polygon",
 }
@@ -214,6 +215,36 @@ def _validate_geometry(feature, report):
                 object_id,
             )
             return False
+        line = LineString(coordinates)
+        if line.length <= GEOMETRY_EPSILON and feature.feature_type != "work_direction":
+            report.add(
+                "zero_length_line",
+                "LineString must contain at least two different points",
+                object_id,
+            )
+            return False
+        if feature.feature_type == "access_lane":
+            if any(
+                math.dist(first, second) <= GEOMETRY_EPSILON
+                for first, second in zip(coordinates, coordinates[1:])
+            ):
+                report.add(
+                    "duplicate_access_lane_vertex",
+                    "access_lane must not contain repeated consecutive points",
+                    object_id,
+                )
+            if coordinates[0] == coordinates[-1]:
+                report.add(
+                    "closed_access_lane_unsupported",
+                    "access_lane is an open centerline and must not be closed",
+                    object_id,
+                )
+            if not line.is_simple:
+                report.add(
+                    "access_lane_self_intersection",
+                    "access_lane centerline must not self-intersect",
+                    object_id,
+                )
         if feature.feature_type == "work_direction":
             start = coordinates[0]
             end = coordinates[-1]
@@ -260,6 +291,9 @@ def _validate_spatial_relationships(semantic_map, geometries, context, report):
     enabled = [feature for feature in semantic_map.features if feature.enabled]
     fields = _valid_polygons(enabled, geometries, "field_boundary")
     exclusions = _valid_polygons(enabled, geometries, "exclusion_zone")
+    directions = [
+        feature for feature in enabled if feature.feature_type == "work_direction"
+    ]
 
     for feature, exclusion in exclusions:
         containing_fields = [field for _, field in fields if field.covers(exclusion)]
@@ -288,6 +322,31 @@ def _validate_spatial_relationships(semantic_map, geometries, context, report):
                 feature.id,
             )
 
+    for feature in enabled:
+        geometry = geometries.get(feature.id)
+        if geometry is None or feature.feature_type != "access_lane":
+            continue
+        if not any(field.covers(geometry) for _, field in fields):
+            report.add(
+                "access_lane_outside_field",
+                "access_lane must be contained by an enabled field_boundary",
+                feature.id,
+            )
+        if any(geometry.intersects(exclusion) for _, exclusion in exclusions):
+            report.add(
+                "access_lane_intersects_exclusion",
+                "access_lane must not intersect an exclusion_zone",
+                feature.id,
+            )
+        if directions and _line_backtracks(
+            feature.coordinates, directions[0].coordinates
+        ):
+            report.add(
+                "access_lane_backtracks",
+                "one access_lane must not reverse along the work direction; draw each road as a separate open centerline",
+                feature.id,
+            )
+
     if context is None:
         return
     _validate_context(context, report)
@@ -302,6 +361,24 @@ def _validate_spatial_relationships(semantic_map, geometries, context, report):
                     feature.id,
                 )
     _validate_entry_footprints(enabled, geometries, fields, exclusions, context, report)
+
+
+def _line_backtracks(coordinates, direction_coordinates):
+    start, end = direction_coordinates[0], direction_coordinates[-1]
+    direction = (float(end[0]) - float(start[0]), float(end[1]) - float(start[1]))
+    length = math.hypot(*direction)
+    if length <= GEOMETRY_EPSILON:
+        return False
+    unit = (direction[0] / length, direction[1] / length)
+    signs = set()
+    for first, second in zip(coordinates, coordinates[1:]):
+        projection = (
+            (float(second[0]) - float(first[0])) * unit[0]
+            + (float(second[1]) - float(first[1])) * unit[1]
+        )
+        if abs(projection) > GEOMETRY_EPSILON:
+            signs.add(1 if projection > 0.0 else -1)
+    return len(signs) > 1
 
 
 def _validate_entry_footprints(enabled, geometries, fields, exclusions, context, report):

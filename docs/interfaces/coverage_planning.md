@@ -9,15 +9,21 @@ costmap 和同一 profile 的完整 footprint 对原始路径做离线安全验�
 
 1. 读取语义任务并重新执行 schema、SHA256、Shapely、地图范围及 footprint 校验。
 2. 校验 `robot_profile`、`robot_width` 和 `min_turning_radius` 快照与所选 profile 一致。
-3. `annotated_rows + crop_centerlines` 先将相邻作物行派生为 `N-1` 条道路中线；
-   `direct_swaths` 保持旧行为，直接使用标注线。
-4. 将车辆/机具参数原子写入目标 Coverage Server；拒绝更新时不发送 action goal。
-5. polygon 模式直接发送外环与 exclusion 孔洞；annotated rows 模式生成进程私有临时 GML。
-6. 校验结果为 `map` frame、非空路径和有效 orientation 后，原子发布本次产品。
+3. launch 在 Coverage Server lifecycle configure 前从同一 profile 注入 `robot_width` 和
+   `min_turning_radius`；不得依赖 Humble server 不完整的动态参数回调更新转弯半径。
+4. `annotated_rows + crop_centerlines` 先将相邻作物行派生为 `N-1` 条道路中线，再合并所有 enabled
+   `access_lane`；`direct_swaths` 直接使用 row 标注线并同样合并 enabled `access_lane`。
+5. 请求前将车辆/机具参数原子写入目标 Coverage Server；拒绝更新时不发送 action goal。
+6. polygon 模式直接发送外环与 exclusion 孔洞；annotated rows 模式生成进程私有临时 GML。
+7. 校验结果为 `map` frame、非空路径和有效 orientation 后，原子发布本次产品。
 
 Humble Row Coverage Server 只接受 GML 文件。临时文件位于系统临时目录，并随适配器退出删除；
 它不是运行时地图产物。第一版每次请求只支持一个 enabled field，row 模式至少需要两条 enabled
-`row_centerline`，并使用 `ROWSARESWATHS`。
+`row_centerline`/`access_lane` 临时道路，合计至少两条，并使用 `ROWSARESWATHS`。
+适配器在生成临时 GML 时将全部道路统一为相同点数且最少三点，满足锁定版 OpenNav
+`ROWSARESWATHS` 按点索引计算行宽的隐含前置条件。锁定版 PathComponents 会将 N 点 swath
+只转换为 N-1 个 SWATH 状态；适配器因此只在 annotated-row 事务内，用本次已验证并实际发送的
+道路首尾点恢复 SWATH 端点。该补正不从航向猜测语义，不修改源 GeoJSON，也不改变服务器连接段。
 
 ## ROS 接口
 
@@ -28,6 +34,8 @@ Humble Row Coverage Server 只接受 GML 文件。临时文件位于系统临时
 | `/agt/coverage/plan` | `std_srvs/srv/Trigger` | 使用参数指定的语义任务发起一次异步规划 |
 | `/agt/coverage/path_raw` | `nav_msgs/msg/Path` | 未经过 TASK-10 安全验证的原始覆盖路径 |
 | `/agt/coverage/path_preview` | `nav_msgs/msg/Path` | Coverage Server 基础结果，仅供 RViz 显示 |
+| `/agt/coverage/preview_audit` | `std_msgs/msg/String` | 静态底图、语义 mask 与 canonical footprint 的非行动性预览审计 JSON |
+| `/agt/coverage/preview_collision_poses` | `geometry_msgs/msg/PoseArray` | 预览审计抽样后的 footprint 冲突姿态，仅供显示 |
 | `/agt/coverage/path_components` | `opennav_coverage_msgs/msg/PathComponents` | swath、连接段、方向和速度组件 |
 | `/agt/coverage/path_reconstructed` | `nav_msgs/msg/Path` | TASK-11 从有序组件重建的扁平 Path |
 | `/agt/coverage/path_semantics` | `std_msgs/msg/String` | 每个原始 Path 区间的 SWATH/CONNECTION 稳定键序 JSON |
@@ -41,13 +49,17 @@ Humble Row Coverage Server 只接受 GML 文件。临时文件位于系统临时
 | `/agt/coverage/repair` | `std_srvs/srv/Trigger` | 显式启动一次无效连接段修复 |
 | `/agt/coverage/path_repaired` | `nav_msgs/msg/Path` | 所有替换和最终复验成功后的完整路径 |
 | `/agt/coverage/repair_report` | `std_msgs/msg/String` | 修复数量、耗时、ID、长度和最终验证 JSON |
+| `/agt/coverage/path_approach_preview` | `nav_msgs/msg/Path` | 入口到首个 repaired pose 的独立 Hybrid-A* 预览，不进入组件语义或执行链 |
+| `/agt/coverage/approach_report` | `std_msgs/msg/String` | 入口接入规划器、长度及完整 footprint 复验结果 |
 | `/agt/coverage/execute` | `agt_interfaces/action/ExecuteCoverageTask` | 可取消的覆盖任务总动作，只通过 Nav2 执行最终路径 |
 | `/agt/coverage/task_status` | `diagnostic_msgs/msg/DiagnosticArray` | 当前任务阶段、swath 进度和剩余距离 |
 | `/agt/coverage/simulation_report` | `std_msgs/msg/String` | 离线路径运行时间估算，稳定键序 JSON |
 
 两个 lifecycle server 分别位于 `/agt/coverage/polygon` 和 `/agt/coverage/rows` namespace，避免
 同名 `compute_coverage_path` action 冲突。每个 server 使用同 namespace 的 lifecycle manager，
-确保 bond 与自动激活正常。
+确保 bond 与自动激活正常。锁定的 Humble Row/Polygon Coverage Server 动态回调不会把
+`min_turning_radius` 写回其内部 Fields2Cover Robot，因此该值必须作为启动参数在 configure 前
+提供；请求期参数同步不能替代这个启动合同。
 
 ## 路径组件语义
 
@@ -88,6 +100,16 @@ KeepoutFilter 被关闭时越出允许区域。候选端点允许默认最多 `0
 `repaired_segment_count`、`repaired_component_ids`、`preserved_swath_ids`、`duration`、修复前后长度、
 `swath_coordinates_unchanged` 和 `final_validation`。任一步失败都会清空旧 `path_repaired`，源 Path
 保持不变。
+
+离线编辑器预览可将 `auto_repair=true` 显式传给修复器。该参数生产默认值为 `false`，只在收到
+同一事务的重建路径、语义、验证报告、global costmap、published footprint、keepout mask 和
+`LOADED` 语义状态，且 planner action 已就绪后触发一次。预览使用 profile 指定的
+`CoverageRepairHybrid`，只启动 planner_server 与静态全局 costmap；`robot_base_frame=map`，起点由
+每个 action goal 显式提供，因此不发布伪造 TF，也不启动定位、BT Navigator 或 controller。
+
+入口接入不新增 `APPROACH` 组件类型。独立节点从 enabled `entry_pose` 规划到 repaired coverage
+path 的首姿态，候选再次检查基础代价地图、语义 keepout、完整 canonical footprint 和最小转弯
+半径，只发布 preview-only topic。连接修复失败时不生成入口接入路径。
 
 BUNKER profile 当前启用 `GridBased`，履带差速允许原地旋转。MK-mini profile 仍声明
 `differential`，而任务规范要求 Ackermann Hybrid-A*/State Lattice 且需要正最小转弯半径，因此
@@ -166,6 +188,12 @@ SWATH、headland 和 keepout。`path_preview` 可在 PathComponents 语义重建
 安全验收或获得可执行批准。语义编辑器内嵌预览必须在每个编辑器实例专属的 ROS Domain 中同时创建订阅端和
 Coverage 子进程，禁止复用主导航 Domain，以免陈旧 transient-local 状态或遗留预览节点污染
 当前结果。
+
+`coverage_preview_auditor.py` 可将 `path_preview` 与静态基础 OccupancyGrid、同 metadata 的 semantic
+keepout mask 合并，复用完整 footprint、距离/角度插值和最小转弯半径几何内核。它只发布
+`preview_audit` JSON 和最多 500 个显示用冲突姿态，不发布任何 `Path`。报告固定
+`advisory_only=true`、`eligible_for_execution=false`；它缺少运行期 global costmap、动态障碍和
+published footprint 一致性检查，因此不是 TASK-10 验证结果，也不得输入 repair、Action 或 Nav2。
 
 ## 离线时间仿真
 

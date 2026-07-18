@@ -88,6 +88,34 @@ def test_hash_mismatch_degrades_to_read_only_without_modifying_files(tmp_path):
     assert (semantic_dir / "semantic_map.geojson").read_bytes() == original_semantic
 
 
+def test_repairable_feature_error_loads_editable_but_keeps_warning(tmp_path):
+    semantic_dir = _copy_task(tmp_path)
+    semantic_path = semantic_dir / "semantic_map.geojson"
+    document = json.loads(semantic_path.read_text(encoding="utf-8"))
+    document["features"].append(
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[1.0, 5.0], [7.0, 5.0], [2.0, 5.5]],
+            },
+            "properties": {
+                "id": "lane_01",
+                "feature_type": "access_lane",
+                "name": "Backtracking lane",
+                "enabled": True,
+                "frame_id": "map",
+            },
+        }
+    )
+    semantic_path.write_text(json.dumps(document), encoding="utf-8")
+
+    loaded = load_semantic_task(semantic_path)
+
+    assert not loaded.read_only
+    assert "access_lane_backtracks" in loaded.warnings
+
+
 def test_atomic_write_failure_preserves_existing_file(tmp_path, monkeypatch):
     destination = tmp_path / "semantic_map.geojson"
     destination.write_text("original", encoding="utf-8")

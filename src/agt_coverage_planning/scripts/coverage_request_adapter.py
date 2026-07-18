@@ -387,6 +387,7 @@ class CoverageRequestAdapter(Node):
                 relative_length_tolerance=float(
                     self.get_parameter("semantic_relative_length_tolerance").value
                 ),
+                requested_swaths=self.active_spec.requested_swaths,
             )
         except PathSemanticsError as exc:
             self._fail(
@@ -413,6 +414,7 @@ class CoverageRequestAdapter(Node):
 
     def _fail(self, code, detail):
         self.planning = False
+        self.get_logger().warning(f"coverage request failed [{code}]: {detail}")
         self._publish_status("FAILED", detail, code)
 
     def _publish_status(
@@ -493,19 +495,32 @@ def _semantic_products(
     swath_sample_step=0.10,
     absolute_length_tolerance=0.05,
     relative_length_tolerance=0.005,
+    requested_swaths=(),
 ):
     if components.header.frame_id != "map":
         raise PathSemanticsError(
             "invalid_path_components_frame", "PathComponents frame must be map"
         )
     raw_poses = [_pose_2d(stamped) for stamped in nav_path.poses]
-    swaths = [
-        SwathInput(
+    swaths = []
+    for index, swath in enumerate(components.swaths):
+        converted = SwathInput(
             Pose2D(float(swath.start.x), float(swath.start.y), 0.0),
             Pose2D(float(swath.end.x), float(swath.end.y), 0.0),
         )
-        for swath in components.swaths
-    ]
+        if math.hypot(
+            converted.end.x - converted.start.x,
+            converted.end.y - converted.start.y,
+        ) <= 1e-9:
+            raise PathSemanticsError(
+                "zero_length_swath",
+                f"PathComponents swath[{index}] has identical endpoints "
+                f"({converted.start.x:.6f}, {converted.start.y:.6f}); "
+                "the unvalidated server path remains preview-only",
+            )
+        swaths.append(converted)
+    if requested_swaths:
+        swaths = _restore_requested_swath_endpoints(swaths, requested_swaths)
     turns = []
     for turn in components.turns:
         if turn.header.frame_id not in {"", "map"}:
@@ -533,6 +548,40 @@ def _semantic_products(
     semantics_message = String()
     semantics_message.data = semantics.to_json()
     return semantics, reconstructed, semantics_message
+
+
+def _restore_requested_swath_endpoints(component_swaths, requested_swaths):
+    """Repair the locked OpenNav conversion using the exact requested row geometry."""
+    if len(component_swaths) != len(requested_swaths):
+        raise PathSemanticsError(
+            "requested_swath_count_mismatch",
+            "PathComponents swath count differs from the annotated-row request",
+        )
+    unused = set(range(len(requested_swaths)))
+    corrected = []
+    for index, component in enumerate(component_swaths):
+        candidates = []
+        for requested_index in unused:
+            first, last = requested_swaths[requested_index]
+            candidates.append(
+                (math.hypot(component.start.x - first[0], component.start.y - first[1]), requested_index, False)
+            )
+            candidates.append(
+                (math.hypot(component.start.x - last[0], component.start.y - last[1]), requested_index, True)
+            )
+        distance, requested_index, reversed_direction = min(candidates)
+        if distance > 0.25:
+            raise PathSemanticsError(
+                "requested_swath_endpoint_mismatch",
+                f"PathComponents swath[{index}] start is {distance:.3f} m from every requested endpoint",
+            )
+        unused.remove(requested_index)
+        first, last = requested_swaths[requested_index]
+        start, end = (last, first) if reversed_direction else (first, last)
+        corrected.append(
+            SwathInput(Pose2D(start[0], start[1], 0.0), Pose2D(end[0], end[1], 0.0))
+        )
+    return corrected
 
 
 def _pose_2d(stamped):

@@ -57,6 +57,38 @@ Visualization Manager:
     - Alpha: 1
       Buffer Length: 1
       Class: rviz_default_plugins/Path
+      Color: 255; 170; 30
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.08
+      Name: Repaired Coverage Preview
+      Pose Style: None
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/coverage/path_repaired
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 30; 200; 240
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.08
+      Name: Entry Approach Preview
+      Pose Style: None
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/coverage/path_approach_preview
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
       Color: 0; 200; 220
       Enabled: true
       Line Style: Lines

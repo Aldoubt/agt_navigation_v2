@@ -1,10 +1,16 @@
 # CloudCompare 栅格到 Qt5 可标注导航地图
 
+> 新地图的正式生产、找平、长轴定向、ROI、Rasterize 元数据和阶段验收统一遵循
+> `docs/workflows/reproducible_cloudcompare_map_production.md`。本文仅保留已有 CloudCompare
+> 栅格的封装与 Qt5 标注步骤，不再作为完整制图坐标契约。
+> 2026-07-18 起，本页涉及的旧试制品已移入 `runtime/maps/archive/`，命令仅供追溯，
+> 不应对当前温室数据集重新执行。
+
 更新时间：2026-07-16。
 
 ## 目标
 
-把 `runtime/maps/from cloudcompare/` 中的 CloudCompare 导出图整理成：
+把现位于 `runtime/maps/archive/from_cloudcompare_20260716/` 的 CloudCompare 导出图整理成：
 
 - 可被 Nav2 `map_server` 加载的 `PNG/YAML`；
 - 可被 `agt_ui_bridge` Qt5 地图工具继续编辑；
@@ -16,8 +22,8 @@
 
 输入示例：
 
-- `runtime/maps/from cloudcompare/greenhouse_obstacle_height.png`
-- `runtime/maps/from cloudcompare/greenhouse_aligned_full.pcd`
+- `runtime/maps/archive/from_cloudcompare_20260716/greenhouse_obstacle_height.png`
+- `runtime/maps/archive/from_cloudcompare_20260716/greenhouse_aligned_full.pcd`
 
 输出示例：
 
@@ -34,8 +40,8 @@
 cd ~/agt_navigation_v2
 
 python3 tools/map_tools/create_cloudcompare_runtime_map.py \
-  --source-image "runtime/maps/from cloudcompare/greenhouse_obstacle_height.png" \
-  --source-pcd "runtime/maps/from cloudcompare/greenhouse_aligned_full.pcd" \
+  --source-image runtime/maps/archive/from_cloudcompare_20260716/greenhouse_obstacle_height.png \
+  --source-pcd runtime/maps/archive/from_cloudcompare_20260716/greenhouse_aligned_full.pcd \
   --map-id greenhouse_cloudcompare \
   --resolution 0.05 \
   --origin-x 0.0 \
@@ -52,7 +58,7 @@ python3 tools/map_tools/create_cloudcompare_runtime_map.py \
 
 ```bash
 python3 tools/map_tools/create_cloudcompare_runtime_map.py \
-  --source-image "runtime/maps/from cloudcompare/greenhouse_obstacle_height.png" \
+  --source-image runtime/maps/archive/from_cloudcompare_20260716/greenhouse_obstacle_height.png \
   --map-id greenhouse_cloudcompare \
   --resolution 0.05 \
   --origin-x -2.475 \

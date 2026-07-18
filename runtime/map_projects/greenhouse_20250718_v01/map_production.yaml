@@ -1,0 +1,139 @@
+schema: agt_map_production/v1
+map_id: greenhouse_20250718_v01
+created_at: '2026-07-18T16:23:33+08:00'
+state: closed_loop_coordinate_baseline_frozen
+coordinate_contract:
+  frame_id: map
+  units: m
+  handedness: ROS right-handed
+  transform_policy: compose leveling and yaw once, then only delete points
+  image_policy: no resize, crop, rotate, mirror, or fit-to-content after rasterize
+source:
+  frontend_global_pcd:
+    path: runtime/map_projects/greenhouse_20250718_v01/00_source/frontend_global.pcd
+    sha256: 39f25371cd4d97b03f5e33fb20f4a509f07d26ef75c4c626cd1b66722be9e753
+    size_bytes: 99779286
+    points: 5369881
+    fields:
+    - Coord._Z
+    - curvature
+    - intensity
+    - normal_x
+    - normal_y
+    - normal_z
+    - x
+    - y
+    - z
+    data: binary_compressed
+  replay_bag: null
+  keyframe_optimization_dataset:
+    ready: false
+    required_products:
+    - keyframe index and timestamps
+    - local keyframe clouds in sensor/base frame
+    - frontend poses with frame convention
+    - pose quality/covariance
+    - keyframe adjacency and local visibility associations
+    - sensor calibration snapshot
+alignment:
+  status: complete
+  note: No ground leveling was applied. The source PCD VIEWPOINT was baked into XYZ and normals to match Rasterize map coordinates.
+  ground_seed_cloud: null
+  level_matrix_4x4:
+  - [1.0, 0.0, 0.0, 0.0]
+  - [0.0, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 1.0, 0.0]
+  - [0.0, 0.0, 0.0, 1.0]
+  yaw_reference_points_xy: null
+  yaw_matrix_4x4:
+  - [1.0, 0.0, 0.0, 0.0]
+  - [0.0, 1.0, 0.0, 0.0]
+  - [0.0, 0.0, 1.0, 0.0]
+  - [0.0, 0.0, 0.0, 1.0]
+  source_viewpoint_matrix_4x4: &raw_to_map
+  - [0.998042112537, 0.054840118429, -0.030074956584, -0.416609]
+  - [-0.055606019364, 0.998133462854, -0.025249969129, -0.062993]
+  - [0.028634109263, 0.026872881149, 0.999228670548, -0.163129]
+  - [0.0, 0.0, 0.0, 1.0]
+  composed_raw_to_map_matrix_4x4: *raw_to_map
+  transform_record:
+    path: runtime/map_projects/greenhouse_20250718_v01/10_alignment/viewpoint_transform.yaml
+    sha256: efad41ff38b6bdb73eb48a2bc7f5f42ec11e08929fbd923b6ef0313207705595
+  aligned_full_pcd:
+    path: runtime/map_projects/greenhouse_20250718_v01/20_aligned/frontend_global_map.pcd
+    sha256: e104121c81ac2c42c14cd21164f59f2aac09255a65f113cfb97cf4f0b1c611c0
+crop:
+  status: complete
+  policy: delete points only; never transform remaining coordinates
+  note: User accepted the existing 140691-point CloudCompare section and waived a separate ROI polygon record; the manual Rasterize window is recorded.
+  roi_record:
+    path: runtime/map_projects/greenhouse_20250718_v01/30_nav_source/roi_record.yaml
+    sha256: 486fae9a5f371b9e511d468808adfbc8885c3c176579092c230663141ee80967
+  nav_source_pcd:
+    path: runtime/map_projects/greenhouse_20250718_v01/30_nav_source/rasterize_section_map.pcd
+    sha256: 4becd357987520bbc8e96376232b3585082163a7a451ef371acbf9c3022d400f
+rasterize:
+  status: complete
+  grid_step: 0.05
+  grid_step_status: verified_from_rasterize_panel
+  projection_direction: Z
+  cell_height: Maximum
+  empty_cells: Leave empty
+  min_center_x: -2.42542696
+  min_center_y: -29.70424461
+  min_center_status: verified_from_rasterize_grid_editor
+  max_center_x: 29.72457304
+  max_center_y: 9.39575539
+  max_center_status: verified_from_grid_size_and_step
+  image_width_px: 644
+  image_height_px: 783
+  observed_image:
+    path: runtime/map_projects/greenhouse_20250718_v01/40_raster/observed_color.png
+    sha256: 7dbccc66d4651db2009806f8c5b8658486335e1da31ae7533f4ce56cfaf88a28
+  evidence:
+    rasterize_panel:
+      source: user_provided_session_screenshot
+      displayed_input_cloud: greenhouse_working.section.section
+      displayed_input_points: 140691
+      displayed_grid_step: 0.05
+      displayed_grid_size: [644, 783]
+      displayed_min_corner_x: -2.42542696
+      displayed_min_corner_y: -29.70424461
+      displayed_width_x: 32.15
+      displayed_width_y: 39.10
+    superseded_export:
+      path: runtime/map_projects/greenhouse_20250718_v01/40_raster/superseded/observed_color_643x782.png
+      sha256: 76a1259b2d2907e4687aa339ec8cc4d3908b23c2b1d562f14485652c38b5047f
+      reason: Image dimensions did not match the Rasterize grid.
+nav2:
+  status: complete
+  image_format: pgm
+  mode: trinary
+  origin_formula: '[min_center_x-grid_step/2, min_center_y-grid_step/2, 0]'
+  origin: [-2.45042696, -29.72924461, 0.0]
+  annotation_ready: true
+  closed_loop_navigation_ready: false
+  coordinate_baseline_frozen: true
+  image:
+    path: runtime/map_projects/greenhouse_20250718_v01/50_nav2/greenhouse_20250718_v01.pgm
+    sha256: 92671be9a16fbf3f7508fe38d1d7f76fe8877467df4e076655915d926c1d5911
+  yaml:
+    path: runtime/map_projects/greenhouse_20250718_v01/50_nav2/greenhouse_20250718_v01.yaml
+    sha256: b0db0d41c6e88ea00129d97651d862500ba0ee83ac4a4f024e4169b3128633e9
+validation:
+  status: coordinate_alignment_passed_runtime_acceptance_pending
+  minimum_landmark_count: 5
+  maximum_rms_error_m: 0.1
+  pcd_raster_overlay_passed: true
+  pcd_points_inside_raster: 140691
+  pcd_points_total: 140691
+  pcd_alpha_hits: 140689
+  pcd_alpha_hit_ratio: 0.9999857847325007
+  nav2_metadata_passed: true
+  localization_replay_passed: false
+freeze:
+  status: complete
+  frozen_at: '2026-07-18T18:51:43+08:00'
+  scope: coordinate baseline for closed-loop navigation and semantic annotation
+  mutable_working_copy: runtime/maps/greenhouse_20250718_v01/greenhouse_20250718_v01.pgm
+  rule: Re-freeze the edited runtime PGM as a new version before execution.

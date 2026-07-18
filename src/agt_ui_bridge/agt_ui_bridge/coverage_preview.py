@@ -11,7 +11,7 @@ class CoveragePreviewError(ValueError):
 
 
 def derive_inter_row_aisles(semantic_map):
-    """Return a copied map whose crop-row lines are replaced by aisle midlines."""
+    """Replace crop rows with aisle midlines and append explicit access lanes."""
     rows = [
         feature
         for feature in semantic_map.features
@@ -44,9 +44,32 @@ def derive_inter_row_aisles(semantic_map):
         )
 
     output = deepcopy(semantic_map)
+    access_lanes = [
+        _as_temporary_swath(feature)
+        for feature in output.features
+        if feature.enabled and feature.feature_type == "access_lane"
+    ]
     output.features = [
-        feature for feature in output.features if feature.feature_type != "row_centerline"
-    ] + aisles
+        feature
+        for feature in output.features
+        if feature.feature_type not in {"row_centerline", "access_lane"}
+    ] + aisles + access_lanes
+    return output
+
+
+def explicit_access_lane_swaths(semantic_map):
+    """Copy enabled access lanes as temporary row swaths without mutating source data."""
+    return [
+        _as_temporary_swath(feature)
+        for feature in semantic_map.features
+        if feature.enabled and feature.feature_type == "access_lane"
+    ]
+
+
+def _as_temporary_swath(feature):
+    output = deepcopy(feature)
+    output.feature_type = "row_centerline"
+    output.name = f"通行道路 · {feature.name}"
     return output
 
 

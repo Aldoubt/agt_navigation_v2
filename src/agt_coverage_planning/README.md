@@ -22,12 +22,13 @@ TASK-14 提供 `/agt/coverage/execute`，按语义加载、规划、验证、可
 | enabled `exclusion_zone` | `polygons[1..N]`；row GML 的内环 |
 | enabled `work_direction` | `SwathMode.SET_ANGLE`，角度归一到 `[0, pi)` |
 | `planning_mode: annotated_rows` | 临时 GML `Row`，`ROWSARESWATHS` |
+| enabled `access_lane` | 作为显式 GML `Row` 与 direct/派生 swath 合并 |
 | `allow_reverse` | `REEDS_SHEPP`；否则 `DUBIN` |
 | `headland_width` | polygon 模式 `CONSTANT` headland |
 
 `work_direction` 使用一条有方向的 LineString 表达角度：第一点指向第二点的方向决定平行作业行
 的排列角度，线段长度不代表路线长度，也不会要求机器人沿这条线行驶。编辑器中的顶点手柄用于
-修改几何控制点：作业区/障碍手柄调整边界，作物行手柄调整中心线，方向线两端手柄调整角度，
+修改几何控制点：作业区/障碍手柄调整边界，作物行和通行道路手柄调整中心线，方向线两端手柄调整角度，
 入口位姿手柄调整位置和朝向。拖动后仍须通过包含关系、footprint 和边界合法性检查。
 
 Humble 的 Row Coverage Server 只接受 GML 文件。适配器在进程私有临时目录生成 GML，退出时
@@ -66,8 +67,9 @@ ros2 topic echo /agt/coverage/repair_report --once
 
 ## 离线路线预览
 
-该入口只启动基础地图、语义服务器、Coverage Server 和 RViz，不启动定位、Nav2 controller、
-安全链或底盘。以当前 `mid360_map` 为例：
+该入口启动基础地图、语义服务器、Coverage Server，以及仅用于 CONNECTION 修复和入口接入的
+Nav2 planner_server/静态全局 costmap；不启动定位、BT Navigator、Nav2 controller、安全链或
+底盘，也不发布 TF。以当前 `mid360_map` 为例：
 
 ```bash
 cd ~/agt_navigation_v2
@@ -82,14 +84,17 @@ ros2 launch agt_coverage_planning coverage_preview.launch.py \
   platform_profile:="$(realpath profiles/platforms/bunker.yaml)"
 ```
 
-RViz 中红色为 `/agt/coverage/path_preview`，青色为通过 SWATH/CONNECTION 语义重建的路线，
-黄色 Marker 为作业行，半透明层为 keepout mask。`path_preview` 只用于检查 Fields2Cover 原始
-效果；即使组件语义校验失败也可显示，但永远不得送入 Validator、Nav2 或底盘。该轻量入口不启动 global costmap，因此绿色
-`path_validated` 为空属于预期；需要检查 footprint 碰撞时使用完整 Nav2 离线系统。
+RViz 中红色为 `/agt/coverage/path_preview`，青色为语义重建路线，橙色为 Hybrid-A* 修复候选，
+浅蓝色为独立入口接入，黄色 Marker 为作业行，半透明层为 keepout mask。`path_preview` 只用于检查 Fields2Cover 原始
+效果；即使组件语义校验失败也可显示，但永远不得送入 Validator、Nav2 或底盘。轻量入口额外
+运行 `coverage_preview_auditor.py`，使用静态底图、semantic keepout mask 和 canonical footprint
+输出 `/agt/coverage/preview_audit` 与显示用冲突姿态。该报告固定不可执行，不替代包含动态障碍、
+published footprint 和 global costmap 的 TASK-10；绿色 `path_validated` 为空属于预期。
 
-当前 `mid360_map` 已实测发布 `679` 个 `path_preview` 姿态。锁定版 OpenNav 的 PathComponents
-同时包含零长度 SWATH，因此状态会报告 `zero_length_swath`，青色重建路径和绿色验证路径为空；
-这是执行链主动拒绝不完整语义的预期行为，不影响先查看红色服务器路线。
+annotated-row 适配器对临时 GML 统一点数且至少三点，并使用本次请求的精确道路端点补正锁定版
+PathComponents 漏失的末段。该补正不改连接段；任何长度、指纹、SWATH 或完整 footprint 校验失败
+仍会清空后续输出。编辑器预览会自动尝试修复 invalid CONNECTION，生产 launch 默认仍需显式调用
+`/agt/coverage/repair`。
 
 离线预览会同步发布运行时间估算。另开终端查看：
 
@@ -98,6 +103,7 @@ source /opt/ros/humble/setup.bash
 source "$HOME/agt_coverage_ws/install/setup.bash"
 source install/setup.bash
 ros2 topic echo /agt/coverage/simulation_report --once
+ros2 topic echo /agt/coverage/preview_audit --once
 ```
 
 如需保存报告，在 launch 命令增加

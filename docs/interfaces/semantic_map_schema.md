@@ -56,6 +56,7 @@ runtime/maps/<map_id>/
 | `entry_pose` | Point | 至少 1 个 | 属性必须包含有限数值 `yaw`，位置在 field 内且不在 exclusion 内 |
 | `work_direction` | LineString | 至少 1 个 | 至少 2 点，首尾距离不得接近 0 |
 | `row_centerline` | LineString | 可选 | 至少 2 点，表示已有作物行中心线；是否直接作为道路必须由预览/规划模式显式选择 |
+| `access_lane` | LineString | 可选 | 至少 2 点的开放中心线；不得闭合、自交、连续重复或沿作业方向折返，必须位于 field 内且不得与 exclusion 相交 |
 | `headland_zone` | Polygon | 可选 | 调头区域，不直接等同于禁行区 |
 | `keepout_zone` | Polygon | 可选 | 仅用于 Nav2 语义禁行层 |
 
@@ -89,7 +90,15 @@ preferred_swath_angle: 0.0
 
 `row_interpretation` 可选，旧任务缺省为 `direct_swaths`。`direct_swaths` 表示每条
 `row_centerline` 本身就是可执行道路；`crop_centerlines` 表示线位于作物垄上，规划适配器必须
-按作业方向对齐端点，并将每对相邻作物行的中线作为临时道路。派生过程不得改写源 GeoJSON。
+按作业方向对齐端点，并将每对相邻作物行的中线作为临时道路。启用的 `access_lane` 在两种解释
+下都作为额外显式道路加入 annotated-row 请求；禁用道路不加入。派生过程不得改写源 GeoJSON。
+
+`work_direction` 只提供角度，线的位置不代表道路。需要覆盖温室边缘、入口联络线或其他不位于
+两条作物行之间的通道时，必须单独标注 `access_lane`，不得通过移动方向线隐式改变路线。
+`access_lane` 不是 free-space 覆盖物，也不改变基础 OccupancyGrid 或 keepout mask；其完整车辆
+footprint 可行性仍由预览审计和 TASK-10 使用栅格与语义 mask 检查。
+一条 `access_lane` 只描述一条道路，不描述边界框或预先画好的蛇形路线；多条道路必须创建为
+多个独立对象。闭合可通行区域需要单独的区域语义，不能用道路中心线代替。
 
 ## 加载与一致性
 
@@ -99,8 +108,12 @@ preferred_swath_angle: 0.0
 2. `map_id` 和 `frame_id` 一致；
 3. `base_map` 存在，SHA256 与记录值一致，其 image 文件存在；
 4. Feature 必填属性、ID 唯一性和 Geometry 类型正确；
+
+底图缺失、底图哈希不匹配、schema/frame/map identity 错误必须只读打开。Feature 几何、拓扑或
+空间关系错误属于可修复问题：编辑器允许选择、移动或删除对象，但在完整校验通过前仍禁止保存
+和路线预览。
 5. 坐标位于基础 OccupancyGrid 范围；
-6. 多边形拓扑、包含关系、入口位姿和方向长度合法。
+6. 多边形拓扑、包含关系、入口位姿、方向长度和显式通行道路包含关系合法。
 
 哈希不一致时只允许只读显示，禁止覆盖已有文件和启动覆盖规划。加载失败不得替换上一份已生效
 语义地图，也不得自动修改基础 PGM/YAML 或用户语义文件。

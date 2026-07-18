@@ -247,6 +247,7 @@ def test_async_compute_path_action_repairs_connection_and_preserves_swaths():
             time.sleep(0.01)
         success, _detail = node._start_repair()
         assert success
+        deadline = time.monotonic() + 3.0
         while node.pending is not None and time.monotonic() < deadline:
             time.sleep(0.01)
         assert node.pending is None

@@ -169,6 +169,63 @@ def test_entry_must_be_inside_field_and_outside_exclusion():
     assert "entry_inside_exclusion" in _error_codes(blocked)
 
 
+def test_access_lane_must_stay_inside_field_and_outside_exclusion():
+    outside = _valid_document()
+    outside["features"].append(
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[1.0, 5.5], [9.0, 5.5]],
+            },
+            "properties": {
+                "id": "lane_01",
+                "feature_type": "access_lane",
+                "name": "Outside lane",
+                "enabled": True,
+                "frame_id": "map",
+            },
+        }
+    )
+    assert "access_lane_outside_field" in _error_codes(outside)
+
+    blocked = _valid_document()
+    blocked["features"].append(deepcopy(outside["features"][-1]))
+    blocked["features"][-1]["geometry"]["coordinates"] = [[2.5, 2.5], [4.5, 2.5]]
+    assert "access_lane_intersects_exclusion" in _error_codes(blocked)
+
+
+def test_access_lane_must_be_an_open_simple_non_backtracking_centerline():
+    document = _valid_document()
+    document["features"].append(
+        {
+            "type": "Feature",
+            "geometry": {
+                "type": "LineString",
+                "coordinates": [[1.0, 5.0], [7.0, 5.0], [1.0, 5.0]],
+            },
+            "properties": {
+                "id": "lane_01",
+                "feature_type": "access_lane",
+                "name": "Lane",
+                "enabled": True,
+                "frame_id": "map",
+            },
+        }
+    )
+    assert "closed_access_lane_unsupported" in _error_codes(document)
+
+    document["features"][-1]["geometry"]["coordinates"] = [
+        [1.0, 4.5], [7.0, 5.5], [1.0, 5.5], [7.0, 4.5]
+    ]
+    assert "access_lane_self_intersection" in _error_codes(document)
+
+    document["features"][-1]["geometry"]["coordinates"] = [
+        [1.0, 5.0], [7.0, 5.0], [2.0, 5.5]
+    ]
+    assert "access_lane_backtracks" in _error_codes(document)
+
+
 def test_all_feature_coordinates_must_be_inside_rotated_map_extent():
     document = _valid_document()
     row = _feature(document, "row_centerline")

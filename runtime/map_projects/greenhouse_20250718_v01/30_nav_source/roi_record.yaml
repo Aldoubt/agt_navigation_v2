@@ -1,0 +1,16 @@
+schema: agt_map_crop/v1
+map_id: greenhouse_20250718_v01
+status: accepted
+method: cloudcompare_section_and_manual_rasterize_window
+source_cloud_points: 5369881
+section_cloud_points: 140691
+raw_section_cloud: ../00_source/rasterize_section_raw.pcd
+map_frame_section_cloud: rasterize_section_map.pcd
+roi_polygon: null
+roi_polygon_status: explicitly_waived_by_user
+rasterize_window:
+  min_center: [-2.42542696, -29.70424461]
+  max_center: [29.72457304, 9.39575539]
+  grid_step: 0.05
+  grid_size: [644, 783]
+note: The section cloud extends beyond the manual Rasterize window; no additional transform is implied.
