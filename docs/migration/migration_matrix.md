@@ -13,7 +13,7 @@
 | `agt_sensor_adapters` | 3 | baseline 完成 | Livox 驱动已迁入，MID360 PointCloud2 到 CustomMsg 转换、统一 topic 和短 bag 回放通过 | 实机验证网络、QoS、频率、时间戳、丢包和长时间运行稳定性 |
 | `agt_mapping` | 3 | 大地图 PCD 持久化 Release 回放通过 | FAST-LIVO2 adapter、位姿/twist 外参和 TF 已接线；新增稀疏 int64 增量体素地图，过滤非有限/越界坐标并生成 ready 处理记录；x86 固定通用 ABI 以修复 Eigen/PCL 对齐导致的关机崩溃；完整 Bunker 大包将 56,263,430 输入点压至 369,970 点，关机落盘 0.134 s，峰值内存约 1.0 GiB、0 swap 并干净退出 | 使用最终 PCD 验证 NDT 收敛率和地图质量；完成车辆外参精测 |
 | `agt_map_processing` | 5 | baseline 可用 | OctoMap 动态射线原点、二维 OccupancyGrid 以及 PGM/YAML 保存已通过短回放 | 完整 bag 调整高度阈值并对比旧 `/projected_map`；后续增加 PCD 离线转换和几何地面分割后端 |
-| `agt_localization` | 4 | 实车重定位初验通过 | ICP/NDT core、局部点云输入、base/lidar 初值修正和唯一 `map -> odom` 发布逻辑已编译；修复 `ndt_num_threads=0` 导致的 NDT-OMP 越界，Bunker 使用 4 线程重定位成功且 fitness 约 `0.01`–`0.02` | 运行线程参数边界回归，并使用最终导航 PCD 验证收敛率、误差、恢复时间、TF 稳定性和错误初值拒绝 |
+| `agt_localization` | 4 | 实车与最终大地图离线重定位初验通过 | ICP/NDT core、局部点云输入、base/lidar 初值修正和唯一 `map -> odom` 发布逻辑已编译；修复 `ndt_num_threads=0` 越界并完成边界回归；Bunker 实车 4 线程 fitness 约 `0.01`–`0.02`，新 369,970 点大地图配合同包首段局部点云从原点初值成功，fitness `0.0401` | 批量验证不同位置/误差初值的收敛率、误差、恢复时间和 TF 稳定性；当前离线样本达到 100 次迭代上限，需继续调参并验证错误初值拒绝 |
 | `agt_localization_fusion` | 6 | 仅骨架 | package 和领域边界已建立 | 定义融合状态与诊断接口，接入 LIO、轮速和 IMU；后续扩展 RTK/UWB 与失效降级 |
 | `agt_perception` | 6/8 | baseline 完成 | 已实现 base frame 高度/量程/车体裁剪的局部障碍点云，并接入 Nav2 costmap 和 Collision Monitor；裁剪边界已由契约测试约束到 BUNKER profile | 使用典型场景点云评估地面/障碍精度、误检漏检和频率，再增加可靠地面分割 |
 | `agt_navigation` | 6/8 | TASK-07 离线完成 | 原 1 m 闭环继续通过；FilterInfo、global `Static -> Keepout -> Inflation`、跨禁行墙规划失败及 toggle 后恢复规划已验证 | 使用真实语义地图与重定位验证边界误差、切换时延、规划成功率和窄通道通过性 |
