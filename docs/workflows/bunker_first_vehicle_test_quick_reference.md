@@ -218,17 +218,20 @@ tools/save_mapping_outputs.sh first_vehicle_test
 
 ```bash
 ls -lh runtime/maps/first_vehicle_test/first_vehicle_test.{pgm,yaml}
-find runtime/maps/first_vehicle_test/pcd -type f -size +0c -print
+test -s runtime/maps/first_vehicle_test/pcd/localization_map.pcd
+grep -E '^(state|input_points|accepted_points|rejected_nonfinite|rejected_coordinate_range|output_points|min_xyz|max_xyz):' \
+  runtime/maps/first_vehicle_test/pcd/localization_map.processing.yaml
 ```
 
-PGM/YAML 与导航使用的全局 PCD 必须来自本次同一建图任务。
+处理记录必须显示 `state: ready`。PGM/YAML 与导航使用的全局 PCD 必须来自本次同一建图任务；
+不要使用曾因 PCL 整数网格溢出而与 raw 文件逐字节相同的 `all_downsampled_points.pcd`。
 
 ## 9. 阶段 C：导航只读检查，保持运动禁用
 
 ```bash
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 MAP_YAML="$REPO_ROOT/runtime/maps/first_vehicle_test/first_vehicle_test.yaml"
-GLOBAL_PCD="$REPO_ROOT/runtime/maps/first_vehicle_test/pcd/<实际PCD文件>.pcd"
+GLOBAL_PCD="$REPO_ROOT/runtime/maps/first_vehicle_test/pcd/localization_map.pcd"
 
 test -f "$MAP_YAML"
 test -s "$GLOBAL_PCD"

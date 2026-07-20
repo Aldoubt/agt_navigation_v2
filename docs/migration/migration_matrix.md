@@ -11,7 +11,7 @@
 | `agt_description` | 2/8 | 离线完成 | 固定 TF、MK-mini/BUNKER profile、Xacro 展开、TF 单父节点和可配置 MID360 外参通过；BUNKER 已录入 2026-07-19 粗测的雷达中心平移 `[0.2615, 0.0, 0.3000] m` 和向前 `30 deg` pitch；新增温室阿克曼 canonical profile，记录用户提供几何、1.5 m 转弯半径和 Hybrid-A* repair 合同 | 精测 BUNKER `base_link` 高度和 MID360 六自由度外参；实测温室车 `base_link` 相对后轴位置与运动限速，确认各平台几何校验状态 |
 | `agt_bringup` | 1/3/4/5/6/8 | Bunker Qt5 FAST-LIO baseline 已接线 | mapping/navigation 共用总入口；mapping 启动独立 Qt5 profile，navigation 保持语义与覆盖默认关闭；单一 TF 和安全速度链由契约测试约束 | 实机完成建图保存、同源 PCD 重定位、Qt 初始位姿与单点导航闭环 |
 | `agt_sensor_adapters` | 3 | baseline 完成 | Livox 驱动已迁入，MID360 PointCloud2 到 CustomMsg 转换、统一 topic 和短 bag 回放通过 | 实机验证网络、QoS、频率、时间戳、丢包和长时间运行稳定性 |
-| `agt_mapping` | 3 | baseline 完成 | 指定 FAST-LIVO2 分支已 vendor 和编译；adapter、位姿/twist 外参换算、TF 与局部雷达帧点云回放通过 | 标定车辆外参，使用完整 bag 生成新旧轨迹、点云数量和数值精度对比报告 |
+| `agt_mapping` | 3 | 大地图 PCD 持久化 Release 回放通过 | FAST-LIVO2 adapter、位姿/twist 外参和 TF 已接线；新增稀疏 int64 增量体素地图，过滤非有限/越界坐标并生成 ready 处理记录；x86 固定通用 ABI 以修复 Eigen/PCL 对齐导致的关机崩溃；完整 Bunker 大包将 56,263,430 输入点压至 369,970 点，关机落盘 0.134 s，峰值内存约 1.0 GiB、0 swap 并干净退出 | 使用最终 PCD 验证 NDT 收敛率和地图质量；完成车辆外参精测 |
 | `agt_map_processing` | 5 | baseline 可用 | OctoMap 动态射线原点、二维 OccupancyGrid 以及 PGM/YAML 保存已通过短回放 | 完整 bag 调整高度阈值并对比旧 `/projected_map`；后续增加 PCD 离线转换和几何地面分割后端 |
 | `agt_localization` | 4 | 实车重定位初验通过 | ICP/NDT core、局部点云输入、base/lidar 初值修正和唯一 `map -> odom` 发布逻辑已编译；修复 `ndt_num_threads=0` 导致的 NDT-OMP 越界，Bunker 使用 4 线程重定位成功且 fitness 约 `0.01`–`0.02` | 运行线程参数边界回归，并使用最终导航 PCD 验证收敛率、误差、恢复时间、TF 稳定性和错误初值拒绝 |
 | `agt_localization_fusion` | 6 | 仅骨架 | package 和领域边界已建立 | 定义融合状态与诊断接口，接入 LIO、轮速和 IMU；后续扩展 RTK/UWB 与失效降级 |

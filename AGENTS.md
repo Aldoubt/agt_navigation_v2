@@ -77,6 +77,12 @@
 - NDT-OMP must never size per-thread work buffers from an unchecked thread count.
 - A successful field trial and low fitness score do not replace parameter-boundary regression tests or validation with the map PCD used for navigation.
 
+## PCD Persistence Runtime Contract
+- LIO-only Bunker mapping must build the navigation PCD incrementally with sparse signed 64-bit voxel keys; it must not retain the complete raw accumulated cloud merely to downsample at shutdown.
+- Non-finite points and finite points outside the configured absolute coordinate bound must be rejected before voxel insertion, and the saved processing record must report both rejection counts and observed bounds.
+- A navigation PCD is ready only when `localization_map.processing.yaml` reports `state: ready`; legacy raw/downsampled files that are byte-identical or produced after PCL grid-index overflow are not valid localization inputs.
+- x86 FAST-LIVO builds that exchange Eigen-aligned point storage with distribution PCL binaries must preserve the distribution's 16-byte alignment ABI; native AVX alignment flags are forbidden unless PCL is rebuilt with the same ABI.
+
 ## Coverage Path Validation Contract
 - TASK-10 consumes `/agt/coverage/path_raw`, `/global_costmap/costmap`, and `/global_costmap/published_footprint`, all in `map` frame.
 - Collision checking must use the complete canonical `navigation_footprint` polygon against costmap cells; center-only and corner-only checks are forbidden.
