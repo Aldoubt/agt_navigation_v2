@@ -99,6 +99,11 @@
   clicks target the explicitly selected task row and topology mutations must
   refresh all task selectors. The default operator language is `zh_CN`;
   `en_US` is a persisted, restart-applied frontend preference.
+- Offline waypoint preview is planner-only: its Qt profile must disable task
+  execution, and its launch may start only the map server, planner server,
+  preview adapter, lifecycle managers, and GUI. It publishes advisory `/plan`
+  from explicit task points and must not start control, BT navigation, safety
+  enablement, velocity publishers, localization, or chassis nodes.
 
 ## Navigation Task Orchestration Contract
 - Navigation is an Action capability, not a frontend-owned workflow. Qt, Web, autostart, and future mission managers must consume project Actions and their explicit result/cancel semantics.

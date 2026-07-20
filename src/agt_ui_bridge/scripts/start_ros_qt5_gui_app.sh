@@ -13,7 +13,7 @@ RESET_CONFIG=false
 MAP_YAML=""
 
 usage() {
-  echo "Usage: $0 [--profile mapping|navigation] [--map MAP.yaml] [--reset-config]" >&2
+  echo "Usage: $0 [--profile mapping|navigation|offline] [--map MAP.yaml] [--reset-config]" >&2
 }
 
 while (( $# > 0 )); do
@@ -51,8 +51,8 @@ while (( $# > 0 )); do
   esac
 done
 
-if [[ "${PROFILE}" != "mapping" && "${PROFILE}" != "navigation" ]]; then
-  echo "Invalid profile '${PROFILE}'; expected mapping or navigation" >&2
+if [[ "${PROFILE}" != "mapping" && "${PROFILE}" != "navigation" && "${PROFILE}" != "offline" ]]; then
+  echo "Invalid profile '${PROFILE}'; expected mapping, navigation, or offline" >&2
   exit 64
 fi
 

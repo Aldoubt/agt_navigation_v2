@@ -190,7 +190,7 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     provenance = (ROOT / "third_party/README.md").read_text(encoding="utf-8")
     assert "https://github.com/Aldoubt/Ros_Qt5_Gui_App.git" in provenance
     assert "agt-navigation-v2" in provenance
-    assert "fb6d810bf7d7cc4bf749784ca976be5f348e7070" in provenance
+    assert "5948714c3d05011be9240be098696b9f9bdcc66f" in provenance
     config = json.loads(
         (ROOT / "src/agt_ui_bridge/config/ros_qt5_gui_app.json").read_text(
             encoding="utf-8"
@@ -230,6 +230,9 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     assert 'GET_CONFIG_VALUE("UiLanguage", "zh_CN")' in mainwindow
     assert 'GET_CONFIG_VALUE("UseNativeWindowFrame", "true")' in mainwindow
     assert 'GET_CONFIG_VALUE("EnableCostmapDisplay", "false")' in rclcomm
+    assert "QueueTaskChain(request)" in rclcomm
+    assert '"/agt/navigation/waypoint_preview_request"' in rclcomm
+    assert "signalPreviewTaskChain" in task_widget
     assert "absoluteDifference" not in task_widget
     assert "task_chain_.points.clear()" in task_widget
     assert "catch (const YAML::Exception &e)" in map_loader

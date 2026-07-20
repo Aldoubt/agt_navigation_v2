@@ -329,6 +329,18 @@ ros2 topic hz /agt/chassis/cmd_vel
 缩放会自动取消“跟随机器人”，避免离线地图被拉回机器人位置。窗口默认使用系统边框，
 可从左右边缘调整宽度。顶栏可选择中文或 English，保存后重启 Qt 应用生效。
 
+只查看离线路径时应关闭其他导航启动进程，再使用专用入口：
+
+```bash
+MAP_YAML="$(realpath runtime/maps/<map_id>/<map_id>.yaml)"
+ros2 launch agt_navigation waypoint_preview.launch.py \
+  map:="$MAP_YAML" \
+  platform_profile:="$(realpath profiles/platforms/bunker.yaml)"
+```
+
+Task 第一行作为预览起点，至少添加两行，然后点击“预览离线路径”；路径显示在 `/plan`。
+offline profile 中“开始多点任务”保持禁用，避免把离线查看误当真实执行。
+
 需要脱离 GUI 回放已保存 JSON 时，仍可使用：
 
 ```bash

@@ -60,6 +60,9 @@ bool rclcomm::Start() {
 
   nav_goal_publisher_ = node->create_publisher<geometry_msgs::msg::PoseStamped>(
       GET_TOPIC_NAME(DISPLAY_GOAL), 10);
+  waypoint_preview_publisher_ =
+      node->create_publisher<geometry_msgs::msg::PoseArray>(
+          "/agt/navigation/waypoint_preview_request", 10);
   reloc_pose_publisher_ =
       node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
           GET_TOPIC_NAME(MSG_ID_SET_RELOC_POSE), 10);
@@ -208,7 +211,11 @@ bool rclcomm::Start() {
   });
   SUBSCRIBE(MSG_ID_EXECUTE_TASK_CHAIN,
             [this](const TaskExecutionRequest &request) {
-              ExecuteTaskChain(request);
+              QueueTaskChain(request);
+            });
+  SUBSCRIBE(MSG_ID_PREVIEW_TASK_CHAIN,
+            [this](const TaskExecutionRequest &request) {
+              PreviewTaskChain(request);
             });
   SUBSCRIBE(MSG_ID_CANCEL_TASK_CHAIN, [this](const bool &) {
     CancelTaskChain();
@@ -216,6 +223,39 @@ bool rclcomm::Start() {
   
   init_flag_ = true;
   return true;
+}
+
+void rclcomm::QueueTaskChain(const TaskExecutionRequest &request) {
+  // Message-bus callbacks can originate on the Qt GUI thread. Move ROS graph
+  // readiness checks and Action dispatch onto the ROS executor so an absent
+  // server can never stall repaint/input handling.
+  std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+  task_request_timer_ = node->create_wall_timer(
+      std::chrono::milliseconds(1),
+      [this, request]() {
+        {
+          std::lock_guard<std::mutex> callback_lock(waypoint_task_mutex_);
+          if (task_request_timer_) task_request_timer_->cancel();
+        }
+        ExecuteTaskChain(request);
+      },
+      callback_group_other);
+}
+
+void rclcomm::PreviewTaskChain(const TaskExecutionRequest &request) {
+  geometry_msgs::msg::PoseArray poses;
+  poses.header.frame_id = "map";
+  poses.header.stamp = node->now();
+  for (const auto &point : request.points) {
+    geometry_msgs::msg::Pose pose;
+    pose.position.x = point.x;
+    pose.position.y = point.y;
+    tf2::Quaternion quaternion;
+    quaternion.setRPY(0.0, 0.0, point.theta);
+    pose.orientation = tf2::toMsg(quaternion);
+    poses.poses.push_back(pose);
+  }
+  waypoint_preview_publisher_->publish(poses);
 }
 
 void rclcomm::PublishTaskStatus(const TaskExecutionStatus &status) {
@@ -359,6 +399,11 @@ void rclcomm::CancelTaskChain() {
 }
 
 bool rclcomm::Stop() {
+  {
+    std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+    if (task_request_timer_) task_request_timer_->cancel();
+    task_request_timer_.reset();
+  }
   if (rclcpp::ok()) {
     rclcpp::shutdown();
   }

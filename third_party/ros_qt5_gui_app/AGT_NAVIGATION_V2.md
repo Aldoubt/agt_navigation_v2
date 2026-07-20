@@ -28,7 +28,11 @@ contract is:
 - offline map inspection uses view-level pan/zoom and manual navigation cancels
   robot-follow mode; the native window frame remains resizable;
 - `UiLanguage` selects persisted `zh_CN` (default) or `en_US` operator text and
-  applies after restart;
+  applies after restart; the settings pages use the same explicit bilingual
+  strings rather than relying on an absent Qt translation catalog;
+- `EnableOfflinePlanningPreview` exposes a preview-only request while the
+  offline profile keeps `EnableTaskExecution=false`; ROS Action dispatch is
+  queued off the GUI thread;
 - manual velocity remains on the configured project input and must pass through
   `agt_safety` before reaching a chassis driver.
 

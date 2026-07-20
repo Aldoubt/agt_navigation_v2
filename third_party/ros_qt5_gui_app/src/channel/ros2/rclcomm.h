@@ -19,6 +19,7 @@
 #include "geometry_msgs/msg/pose_with_covariance_stamped.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/polygon_stamped.hpp"
+#include "geometry_msgs/msg/pose_array.hpp"
 #include "nav_msgs/msg/occupancy_grid.hpp"
 #include "nav_msgs/msg/odometry.hpp"
 #include "nav_msgs/msg/path.hpp"
@@ -72,6 +73,8 @@ class rclcomm : public VirtualChannelNode {
   TopologyMap ConvertFromRosMsg(const topology_msgs::msg::TopologyMap::SharedPtr msg);
   topology_msgs::msg::TopologyMap ConvertToRosMsg(const TopologyMap& topology_map);
   void ExecuteTaskChain(const TaskExecutionRequest &request);
+  void QueueTaskChain(const TaskExecutionRequest &request);
+  void PreviewTaskChain(const TaskExecutionRequest &request);
   void CancelTaskChain();
   void PublishTaskStatus(const TaskExecutionStatus &status);
 
@@ -101,11 +104,14 @@ class rclcomm : public VirtualChannelNode {
       topology_map_subscriber_;
   rclcpp::Publisher<topology_msgs::msg::TopologyMap>::SharedPtr
       topology_map_update_publisher_;
+  rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr
+      waypoint_preview_publisher_;
   rclcpp_action::Client<WaypointTask>::SharedPtr waypoint_task_client_;
   WaypointTaskGoalHandle::SharedPtr waypoint_task_goal_handle_;
   bool waypoint_task_pending_{false};
   bool waypoint_task_cancel_requested_{false};
   std::mutex waypoint_task_mutex_;
+  rclcpp::TimerBase::SharedPtr task_request_timer_;
   std::vector<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr> image_subscriber_list_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> transform_listener_;

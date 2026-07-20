@@ -31,6 +31,7 @@
     "FixedFrameId": "map",
     "EnableTaskExecution": "true",
     "EnableCostmapDisplay": "false",
+    "EnableOfflinePlanningPreview": "true",
     "UiLanguage": "zh_CN",
     "UseNativeWindowFrame": "true"
   },

@@ -23,6 +23,7 @@ class NavGoalTableView : public QTableView {
   void AddItem();
   void UpdateSelectPoint(const TopologyMap::PointInfo &);
   void StartTaskChain(bool is_loop);
+  void PreviewTaskChain();
   void StopTaskChain();
   void UpdateTaskExecutionStatus(const TaskExecutionStatus &status);
   bool LoadTaskChain(const std::string &name);
@@ -30,6 +31,7 @@ class NavGoalTableView : public QTableView {
  signals:
   void signalSendNavGoal(const RobotPose &pose);
   void signalExecuteTaskChain(const TaskExecutionRequest &request);
+  void signalPreviewTaskChain(const TaskExecutionRequest &request);
   void signalCancelTaskChain();
   void signalTaskFinish();
 

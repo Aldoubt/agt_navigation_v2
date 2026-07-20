@@ -178,6 +178,31 @@ void NavGoalTableView::StartTaskChain(bool is_loop) {
   is_task_chain_running_ = true;
   emit signalExecuteTaskChain(request);
 }
+
+void NavGoalTableView::PreviewTaskChain() {
+  TaskExecutionRequest request;
+  request.loop_count = 1U;
+  for (int row = 0; row < table_model_->rowCount(); ++row) {
+    auto *combo_box = qobject_cast<QComboBox *>(
+        indexWidget(model()->index(row, 0)));
+    auto *label_status = qobject_cast<QLabel *>(
+        indexWidget(model()->index(row, 1)));
+    if (!combo_box || !label_status) continue;
+    const auto point =
+        topologyMap_.GetPoint(combo_box->currentText().toStdString());
+    if (point.name.empty()) {
+      label_status->setText(UiLanguage::Text("点位不存在", "Point not found"));
+      return;
+    }
+    label_status->setText(UiLanguage::Text("预览点", "Preview point"));
+    request.points.push_back(point);
+  }
+  if (request.points.size() < 2U) {
+    LOG_ERROR("Offline preview requires at least two task points");
+    return;
+  }
+  emit signalPreviewTaskChain(request);
+}
 bool NavGoalTableView::LoadTaskChain(const std::string &name) {
   // 清空模型
   table_model_->removeRows(0, table_model_->rowCount());

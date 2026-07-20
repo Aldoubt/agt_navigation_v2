@@ -10,6 +10,7 @@
                   OneValue(kRobotFootprint, ) OneValue(kOccMap, ) OneValue(kTopologyMap, ) \
                   OneValue(kDiagnostic, ) OneValue(kTopologyMapUpdate, ) \
                   OneValue(kExecuteTaskChain, ) OneValue(kCancelTaskChain, ) \
+                  OneValue(kPreviewTaskChain, ) \
                   OneValue(kTaskChainStatus, )
 
 DECLARE_ENUM(MsgId, SOME_ENUM)
@@ -35,6 +36,7 @@ DEFINE_ENUM(MsgId, SOME_ENUM)
 #define MSG_ID_TOPOLOGY_MAP_UPDATE ToString(MsgId::kTopologyMapUpdate)
 #define MSG_ID_EXECUTE_TASK_CHAIN ToString(MsgId::kExecuteTaskChain)
 #define MSG_ID_CANCEL_TASK_CHAIN ToString(MsgId::kCancelTaskChain)
+#define MSG_ID_PREVIEW_TASK_CHAIN ToString(MsgId::kPreviewTaskChain)
 #define MSG_ID_TASK_CHAIN_STATUS ToString(MsgId::kTaskChainStatus)
 
 #define DISPLAY_ROBOT ToString(MsgId::kRobotPose)

@@ -20,6 +20,7 @@
     "FixedFrameId": "odom",
     "EnableTaskExecution": "false",
     "EnableCostmapDisplay": "false",
+    "EnableOfflinePlanningPreview": "false",
     "UiLanguage": "zh_CN",
     "UseNativeWindowFrame": "true"
   },

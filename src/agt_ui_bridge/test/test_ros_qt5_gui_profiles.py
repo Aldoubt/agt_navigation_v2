@@ -34,6 +34,7 @@ def test_mapping_profile_contract():
         "FixedFrameId": "odom",
         "EnableTaskExecution": "false",
         "EnableCostmapDisplay": "false",
+        "EnableOfflinePlanningPreview": "false",
         "UiLanguage": "zh_CN",
         "UseNativeWindowFrame": "true",
     }
@@ -53,9 +54,18 @@ def test_navigation_profile_contract():
         "FixedFrameId": "map",
         "EnableTaskExecution": "true",
         "EnableCostmapDisplay": "false",
+        "EnableOfflinePlanningPreview": "true",
         "UiLanguage": "zh_CN",
         "UseNativeWindowFrame": "true",
     }
+
+
+def test_offline_profile_is_preview_only():
+    config = load_profile("offline")
+    assert topics(config)["kOccupancyMap"] == "/agt/map/global_occupancy"
+    assert topics(config)["kGlobalPath"] == "/plan"
+    assert config["key_value"]["EnableTaskExecution"] == "false"
+    assert config["key_value"]["EnableOfflinePlanningPreview"] == "true"
 
 
 def test_profiles_have_isolated_runtime_configs():
@@ -70,5 +80,9 @@ def test_profiles_have_isolated_runtime_configs():
 
 
 def test_gui_never_targets_chassis_command_topic():
-    for profile in (load_profile("mapping"), load_profile("navigation")):
+    for profile in (
+        load_profile("mapping"),
+        load_profile("navigation"),
+        load_profile("offline"),
+    ):
         assert "/agt/chassis/cmd_vel" not in topics(profile).values()

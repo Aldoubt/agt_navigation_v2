@@ -809,12 +809,18 @@ void MainWindow::setupUi() {
   QPushButton *btn_start_task_chain =
       new QPushButton(UiLanguage::Text("开始多点任务", "Start waypoint task"));
   btn_start_task_chain->setStyleSheet(modernButtonStyle);
+  QPushButton *btn_preview_task_chain =
+      new QPushButton(UiLanguage::Text("预览离线路径", "Preview offline path"));
+  btn_preview_task_chain->setStyleSheet(modernButtonStyle);
   
   QCheckBox *loop_task_checkbox = new QCheckBox(
       UiLanguage::Text("有限重复两遍", "Repeat twice (finite)"));
   const bool task_execution_enabled =
       GET_CONFIG_VALUE("EnableTaskExecution", "false") == "true";
+  const bool task_preview_enabled =
+      GET_CONFIG_VALUE("EnableOfflinePlanningPreview", "false") == "true";
   btn_start_task_chain->setEnabled(task_execution_enabled);
+  btn_preview_task_chain->setEnabled(task_preview_enabled);
   loop_task_checkbox->setEnabled(task_execution_enabled);
   if (!task_execution_enabled) {
     btn_start_task_chain->setToolTip(
@@ -852,6 +858,7 @@ void MainWindow::setupUi() {
   QHBoxLayout *horizontalLayout_14 = new QHBoxLayout();
   horizontalLayout_15->addWidget(btn_add_one_goal);
   horizontalLayout_14->addWidget(btn_start_task_chain);
+  horizontalLayout_14->addWidget(btn_preview_task_chain);
   horizontalLayout_14->addWidget(loop_task_checkbox);
   
   QPushButton *btn_load_task_chain =
@@ -883,6 +890,10 @@ void MainWindow::setupUi() {
   connect(nav_goal_table_view_, &NavGoalTableView::signalExecuteTaskChain,
           [this](const TaskExecutionRequest &request) {
             PUBLISH(MSG_ID_EXECUTE_TASK_CHAIN, request);
+          });
+  connect(nav_goal_table_view_, &NavGoalTableView::signalPreviewTaskChain,
+          [this](const TaskExecutionRequest &request) {
+            PUBLISH(MSG_ID_PREVIEW_TASK_CHAIN, request);
           });
   connect(nav_goal_table_view_, &NavGoalTableView::signalCancelTaskChain,
           [this]() { PUBLISH(MSG_ID_CANCEL_TASK_CHAIN, true); });
@@ -931,6 +942,8 @@ void MainWindow::setupUi() {
       btn_add_one_goal, &QPushButton::clicked,
       [this, nav_goal_list_dock_widget]() { nav_goal_table_view_->AddItem(); });
   btn_start_task_chain->setProperty("taskRunning", false);
+  connect(btn_preview_task_chain, &QPushButton::clicked,
+          nav_goal_table_view_, &NavGoalTableView::PreviewTaskChain);
   connect(btn_start_task_chain, &QPushButton::clicked,
           [this, btn_start_task_chain, loop_task_checkbox]() {
             if (!btn_start_task_chain->property("taskRunning").toBool()) {
