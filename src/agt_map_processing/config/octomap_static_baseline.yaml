@@ -1,0 +1,13 @@
+/**:
+  ros__parameters:
+    resolution: 0.05
+    frame_id: odom
+    base_frame_id: base_footprint
+    sensor_model.max_range: 40.0
+    pointcloud_min_z: -2.0
+    pointcloud_max_z: 3.0
+    occupancy_min_z: -1.20
+    occupancy_max_z: 2.00
+    filter_speckles: false
+    filter_ground: false
+    latch: true

@@ -22,7 +22,10 @@
 - `/agt/chassis/connected`
 - `/agt/experiment/events`
 - `/agt/map/mapping_occupancy`: OctoMap 建图过程中的实时二维工作图
+- `/agt/map/octomap_occupancy`: 离线静态障碍补全使用的射线/free-space 基图（内部 topic）
+- `/agt/map/static_obstacle_evidence_status`: 离线重复观测障碍补全统计 JSON，仅用于审计
 - `/agt/map/global_occupancy`: 导航模式下由 Nav2 map server 发布的已保存静态地图
+- `/agt/navigation/preview_footprint`: planner-only 离线预览起点处的 canonical 多边形车体
 - `/agt/map/semantic_markers`: 语义服务器发布的 transient-local 标注可视化
 - `/agt/map/keepout_mask`: 语义服务器发布、与基础地图严格对齐的 transient-local 语义 mask
 - `/agt/map/keepout_filter_info`: Nav2 Costmap Filter Info Server 发布的 transient-local keepout 元数据

@@ -3,6 +3,11 @@ project(agt_map_processing)
 
 find_package(ament_cmake REQUIRED)
 
+install(PROGRAMS
+  scripts/static_obstacle_evidence.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
 install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}
 )
@@ -10,6 +15,9 @@ install(DIRECTORY launch config
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_octomap_projection test/test_octomap_projection.py)
+  ament_add_pytest_test(
+    test_static_obstacle_evidence test/test_static_obstacle_evidence.py
+  )
 endif()
 
 ament_package()

@@ -339,6 +339,10 @@ ros2 launch agt_navigation waypoint_preview.launch.py \
 ```
 
 Task 第一行作为预览起点，至少添加两行，然后点击“预览离线路径”；路径显示在 `/plan`。
+该入口同时启动专用 RViz：`Map` 显示静态 PGM，半透明的
+`/global_costmap/costmap` 显示 Nav2 InflationLayer 产生的膨胀代价，红色
+`/agt/navigation/preview_footprint` 显示平台 profile 中的完整多边形
+`navigation_footprint`。膨胀代价只存在于运行时 costmap，不应写回 PGM。
 offline profile 中“开始多点任务”保持禁用，避免把离线查看误当真实执行。
 
 需要脱离 GUI 回放已保存 JSON 时，仍可使用：

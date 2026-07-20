@@ -80,6 +80,12 @@
 - NDT-OMP must never size per-thread work buffers from an unchecked thread count.
 - A successful field trial and low fitness score do not replace parameter-boundary regression tests or validation with the map PCD used for navigation.
 
+## Static Navigation Map Contract
+- Offline obstacle completion must preserve a ray-traced free/unknown baseline and add only repeatable registered-cloud obstacle evidence; a raw point projection must not silently turn unknown space into free space.
+- Registered-cloud height filtering is relative to the recorded base pose, and must reject non-finite points and canonical-footprint self returns before grid accumulation.
+- Evidence thresholds and any grid padding must be explicit and recorded. Nav2 inflation and the robot footprint remain runtime costmap products and must not be baked into the source PGM.
+- Offline planner visualization may display the static map, inflated global costmap, and canonical platform polygon together, but it remains non-executable and must not start the motion chain.
+
 ## Qt Waypoint Task Contract
 - The maintained Qt fork is a frontend only. Its native Start/Stop controls must call the project Action and display Action feedback/result; pose-distance polling is forbidden as an execution-success test.
 - Qt-compatible task JSON is operator input only. Portable frontends may submit `map`-frame PoseStamped arrays instead. Project-owned execution must validate finite coordinates, point count, repeated append patterns, and every waypoint against the currently published OccupancyGrid before sending motion goals.
