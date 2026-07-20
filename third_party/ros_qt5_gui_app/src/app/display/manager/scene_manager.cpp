@@ -259,6 +259,7 @@ void SceneManager::CompleteNavGoalPlacement(const QPointF &direction_scene) {
   LOG_INFO("Add two-click nav point: " << name << " at world pose("
            << world_pose.x << ", " << world_pose.y << ", "
            << world_pose.theta << ")");
+  emit signalTopologyMapUpdate(topology_map_);
   CancelPendingNavGoalPlacement();
 }
 
@@ -284,6 +285,7 @@ void SceneManager::AddPointAtRobotPosition() {
   
   // 添加到拓扑地图
   topology_map_.AddPoint(point_info);
+  emit signalTopologyMapUpdate(topology_map_);
   
   LOG_INFO("Add nav point at robot position: " << name << " at world pose(" 
            << robot_pose.x << ", " << robot_pose.y << ", " << robot_pose.theta 
@@ -507,6 +509,7 @@ void SceneManager::mouseReleaseEvent(QGraphicsSceneMouseEvent *mouseEvent) {
         if (old_pose.x != new_pose.x || old_pose.y != new_pose.y || old_pose.theta != new_pose.theta) {
           auto command = std::make_unique<UpdatePointCommand>(point_name, old_info, new_info);
           PushCommand(std::move(command));
+          emit signalTopologyMapUpdate(topology_map_);
         }
         point_move_start_positions_.erase(point_name);
       }
@@ -802,6 +805,7 @@ void SceneManager::blindNavGoalWidget(Display::VirtualDisplay *display, bool is_
               nav_goal_widget_->disconnect();
               delete display;
               nav_goal_widget_->hide();
+              emit signalTopologyMapUpdate(topology_map_);
 
             } else if (flag == NavGoalWidget::HandleResult::kChangeName) {
               std::string old_name = point_name;  // 使用保存的点位名称
@@ -836,6 +840,7 @@ void SceneManager::blindNavGoalWidget(Display::VirtualDisplay *display, bool is_
        
               nav_goal_widget_->hide();
               LOG_INFO("Successfully updated point name: " << old_name << " -> " << new_name.toStdString());
+              emit signalTopologyMapUpdate(topology_map_);
             } else if (flag == NavGoalWidget::HandleResult::kCancel) {
               // 取消时，如果点位被修改过，恢复原位置
               std::string point_name = display->GetDisplayName();

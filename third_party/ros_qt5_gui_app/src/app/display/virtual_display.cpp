@@ -219,7 +219,7 @@ void VirtualDisplay::mouseReleaseEvent(QGraphicsSceneMouseEvent *event) {
     return;
   }
   if (pressed_button_ == event->button())
-    pressed_button_ == Qt::NoButton;
+    pressed_button_ = Qt::NoButton;
   if (event->button() == Qt::LeftButton) {
     pressed_pose_ = QPointF();
     is_mouse_press_ = false;

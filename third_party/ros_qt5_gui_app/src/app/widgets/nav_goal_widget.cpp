@@ -1,4 +1,5 @@
 #include "widgets/nav_goal_widget.h"
+#include "ui_language.h"
 
 #include <QDoubleSpinBox>
 #include <QLabel>
@@ -104,7 +105,7 @@ NavGoalWidget::NavGoalWidget(QWidget *parent) : QWidget(parent) {
   
   QHBoxLayout *layout_name = new QHBoxLayout();
   layout_name->setSpacing(6);
-  QLabel *label_name = new QLabel("name:");
+  QLabel *label_name = new QLabel(UiLanguage::Text("名称：", "Name:"));
   label_name->setMinimumSize(40, 20);
   lineEdit_name_ = new QLineEdit();
   lineEdit_name_->setReadOnly(true);
@@ -135,7 +136,7 @@ NavGoalWidget::NavGoalWidget(QWidget *parent) : QWidget(parent) {
   
   QHBoxLayout *layout_z = new QHBoxLayout();
   layout_z->setSpacing(6);
-  QLabel *label_z = new QLabel("theta:");
+  QLabel *label_z = new QLabel(UiLanguage::Text("方向角：", "Heading:"));
   label_z->setMinimumSize(40, 20);
   spinBox_theta_ = new QDoubleSpinBox();
   spinBox_theta_->setRange(-180, 180);
@@ -145,9 +146,9 @@ NavGoalWidget::NavGoalWidget(QWidget *parent) : QWidget(parent) {
   
   QVBoxLayout *layout_button = new QVBoxLayout();
   layout_button->setSpacing(4);
-  button_send_ = new QPushButton("Go To Point");
-  button_remove_ = new QPushButton("Remove Point");
-  button_cancel_ = new QPushButton("Close");
+  button_send_ = new QPushButton(UiLanguage::Text("导航到此点", "Go to point"));
+  button_remove_ = new QPushButton(UiLanguage::Text("删除点位", "Remove point"));
+  button_cancel_ = new QPushButton(UiLanguage::Text("关闭", "Close"));
   
   // 设置按钮对象名以便样式表识别
   button_remove_->setObjectName("deleteButton");

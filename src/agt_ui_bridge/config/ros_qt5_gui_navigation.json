@@ -21,7 +21,9 @@
     "BaseFrameId": "base_footprint",
     "FixedFrameId": "map",
     "EnableTaskExecution": "true",
-    "EnableCostmapDisplay": "false"
+    "EnableCostmapDisplay": "false",
+    "UiLanguage": "zh_CN",
+    "UseNativeWindowFrame": "true"
   },
   "map_config": {"path": ""},
   "robot_shape_config": {

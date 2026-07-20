@@ -1,4 +1,5 @@
 #include "widgets/topology_route_widget.h"
+#include "ui_language.h"
 #include <QComboBox>
 #include <QLineEdit>
 #include <QPushButton>
@@ -164,7 +165,7 @@ TopologyRouteWidget::TopologyRouteWidget(QWidget *parent) : QWidget(parent) {
   // 路径名称（只读）
   QHBoxLayout *layout_name = new QHBoxLayout();
   layout_name->setSpacing(6);
-  QLabel *label_name = new QLabel("name:");
+  QLabel *label_name = new QLabel(UiLanguage::Text("名称：", "Name:"));
   label_name->setMinimumSize(50, 20);
   lineEdit_route_name_ = new QLineEdit();
   lineEdit_route_name_->setReadOnly(true); // 路径名不可修改
@@ -175,7 +176,7 @@ TopologyRouteWidget::TopologyRouteWidget(QWidget *parent) : QWidget(parent) {
   // 控制器类型
   QHBoxLayout *layout_controller = new QHBoxLayout();
   layout_controller->setSpacing(6);
-  QLabel *label_controller = new QLabel("controller:");
+  QLabel *label_controller = new QLabel(UiLanguage::Text("控制器：", "Controller:"));
   label_controller->setMinimumSize(50, 20);
   comboBox_controller_ = new QComboBox();
   layout_controller->addWidget(label_controller);
@@ -185,7 +186,7 @@ TopologyRouteWidget::TopologyRouteWidget(QWidget *parent) : QWidget(parent) {
   // 目标检查器类型
   QHBoxLayout *layout_goal_checker = new QHBoxLayout();
   layout_goal_checker->setSpacing(6);
-  QLabel *label_goal_checker = new QLabel("goal_checker:");
+  QLabel *label_goal_checker = new QLabel(UiLanguage::Text("到点检查器：", "Goal checker:"));
   label_goal_checker->setMinimumSize(50, 20);
   comboBox_goal_checker_ = new QComboBox();
   layout_goal_checker->addWidget(label_goal_checker);
@@ -342,11 +343,11 @@ void TopologyRouteWidget::SetRouteInfo(const RouteInfo &info) {
   comboBox_controller_->blockSignals(false);
   comboBox_goal_checker_->blockSignals(false);
   spinBox_speed_limit_->blockSignals(false);
-} 
+}
 
 bool TopologyRouteWidget::IsAnyControlBeingEdited() const {
   // 检查是否有任何输入控件正在获得焦点
   return comboBox_controller_->hasFocus() || 
          comboBox_goal_checker_->hasFocus() ||
          spinBox_speed_limit_->hasFocus();
-} 
+}

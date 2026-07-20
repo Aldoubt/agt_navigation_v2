@@ -17,6 +17,7 @@ class NavGoalTableView : public QTableView {
   TopologyMap topologyMap_;
   bool is_task_chain_running_{false};
   TaskChain task_chain_;
+  int active_row_{-1};
  public slots:
   void UpdateTopologyMap(const TopologyMap &_topology_map);
   void AddItem();
@@ -33,5 +34,9 @@ class NavGoalTableView : public QTableView {
   void signalTaskFinish();
 
  private:
+  void CreateRow(const QString &point_name = QString());
+  void RefreshPointChoices();
+  int RowForWidget(const QWidget *widget) const;
+  int ActiveRow() const;
   void onItemChanged(QStandardItem *item);
 };

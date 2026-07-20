@@ -94,6 +94,11 @@
   the `map` position and the second fixes heading; canceling or changing tools
   must discard incomplete placement. Large-map Qt profiles keep full costmap
   rendering disabled by default because planning truth remains in Nav2/RViz.
+- Offline Qt map inspection must allow view-level pan/zoom without moving map
+  geometry and must cancel robot-follow mode on manual navigation. Task point
+  clicks target the explicitly selected task row and topology mutations must
+  refresh all task selectors. The default operator language is `zh_CN`;
+  `en_US` is a persisted, restart-applied frontend preference.
 
 ## Navigation Task Orchestration Contract
 - Navigation is an Action capability, not a frontend-owned workflow. Qt, Web, autostart, and future mission managers must consume project Actions and their explicit result/cancel semantics.

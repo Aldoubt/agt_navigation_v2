@@ -34,6 +34,8 @@ def test_mapping_profile_contract():
         "FixedFrameId": "odom",
         "EnableTaskExecution": "false",
         "EnableCostmapDisplay": "false",
+        "UiLanguage": "zh_CN",
+        "UseNativeWindowFrame": "true",
     }
 
 
@@ -51,6 +53,8 @@ def test_navigation_profile_contract():
         "FixedFrameId": "map",
         "EnableTaskExecution": "true",
         "EnableCostmapDisplay": "false",
+        "UiLanguage": "zh_CN",
+        "UseNativeWindowFrame": "true",
     }
 
 

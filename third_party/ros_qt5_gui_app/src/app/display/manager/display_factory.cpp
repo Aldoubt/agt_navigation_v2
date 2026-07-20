@@ -10,11 +10,11 @@ bool FactoryDisplay::Init(QGraphicsView *viewer, SceneManager *scene_ptr) {
     viewer_ptr_ = viewer;
     scene_manager_ptr_ = scene_ptr;
     viewer_ptr_->setScene(scene_manager_ptr_);
-    viewer_ptr_->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+    viewer_ptr_->setViewportUpdateMode(QGraphicsView::MinimalViewportUpdate);
     run_flag_ = true;
     connect(&timer_coordinate_system_, SIGNAL(timeout()), this,
             SLOT(Process()));
-    timer_coordinate_system_.setInterval(10);
+    timer_coordinate_system_.setInterval(50);
     timer_coordinate_system_.start();
     return true;
   }

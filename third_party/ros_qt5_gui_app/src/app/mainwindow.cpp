@@ -38,6 +38,7 @@
 #include "widgets/diagnostic_dock_widget.h"
 #include "msg/diagnostic_snapshot.h"
 #include "display/manager/view_manager.h"
+#include "ui_language.h"
 #include <QTimer>
 using namespace ads;
 MainWindow::MainWindow(QWidget *parent)
@@ -183,7 +184,14 @@ void MainWindow::closeChannel() { channel_manager_.CloseChannel(); }
 MainWindow::~MainWindow() { delete ui; }
 void MainWindow::setupUi() {
   ui->setupUi(this);
-  setWindowFlags((windowFlags() | Qt::FramelessWindowHint) & ~Qt::WindowTitleHint);
+  const bool use_native_window_frame =
+      GET_CONFIG_VALUE("UseNativeWindowFrame", "true") == "true";
+  if (use_native_window_frame) {
+    setWindowFlags(windowFlags() & ~Qt::FramelessWindowHint);
+  } else {
+    setWindowFlags((windowFlags() | Qt::FramelessWindowHint) &
+                   ~Qt::WindowTitleHint);
+  }
   setAttribute(Qt::WA_TranslucentBackground, false);
 
   const QStringList preferredFontFamilies = {
@@ -362,7 +370,7 @@ void MainWindow::setupUi() {
   icon4.addFile(QString::fromUtf8(":/images/reloc2.svg"),
                 QSize(32, 32), QIcon::Normal, QIcon::Off);
   reloc_btn->setIcon(icon4);
-  reloc_btn->setText("重定位");
+  reloc_btn->setText(UiLanguage::Text("重定位", "Relocalize"));
   reloc_btn->setIconSize(QSize(20, 20));
   horizontalLayout_tools->addWidget(reloc_btn);
   
@@ -371,7 +379,7 @@ void MainWindow::setupUi() {
                 QSize(32, 32), QIcon::Normal, QIcon::Off);
   QToolButton *edit_map_btn = new QToolButton();
   edit_map_btn->setIcon(icon5);
-  edit_map_btn->setText("编辑地图");
+  edit_map_btn->setText(UiLanguage::Text("编辑地图", "Edit map"));
   edit_map_btn->setIconSize(QSize(20, 20));
   edit_map_btn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   edit_map_btn->setStyleSheet(modernToolButtonStyle);
@@ -382,7 +390,7 @@ void MainWindow::setupUi() {
                 QSize(32, 32), QIcon::Normal, QIcon::Off);
   QToolButton *open_map_btn = new QToolButton();
   open_map_btn->setIcon(icon6);
-  open_map_btn->setText("打开地图");
+  open_map_btn->setText(UiLanguage::Text("打开地图", "Open map"));
   open_map_btn->setIconSize(QSize(20, 20));
   open_map_btn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   open_map_btn->setStyleSheet(modernToolButtonStyle);
@@ -394,7 +402,7 @@ void MainWindow::setupUi() {
 
   QToolButton *save_map_btn = new QToolButton();
   save_map_btn->setIcon(icon8);
-  save_map_btn->setText("保存地图");
+  save_map_btn->setText(UiLanguage::Text("保存地图", "Save map"));
   save_map_btn->setIconSize(QSize(20, 20));
   save_map_btn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   save_map_btn->setStyleSheet(modernToolButtonStyle);
@@ -405,7 +413,7 @@ void MainWindow::setupUi() {
                 QSize(32, 32), QIcon::Normal, QIcon::Off);
   QToolButton *re_save_map_btn = new QToolButton();
   re_save_map_btn->setIcon(icon7);
-  re_save_map_btn->setText("另存为");
+  re_save_map_btn->setText(UiLanguage::Text("另存为", "Save as"));
   re_save_map_btn->setIconSize(QSize(20, 20));
   re_save_map_btn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   re_save_map_btn->setStyleSheet(modernToolButtonStyle);
@@ -464,6 +472,30 @@ void MainWindow::setupUi() {
   )");
   horizontalLayout_tools->addWidget(label_power_);
 
+  QComboBox *language_combo = new QComboBox(this);
+  language_combo->setToolTip(
+      UiLanguage::Text("界面语言（切换后重启生效）",
+                       "UI language (restart required)"));
+  language_combo->addItem(QStringLiteral("中文"), QStringLiteral("zh_CN"));
+  language_combo->addItem(QStringLiteral("English"), QStringLiteral("en_US"));
+  const QString current_language = QString::fromStdString(
+      GET_CONFIG_VALUE("UiLanguage", "zh_CN"));
+  language_combo->setCurrentIndex(
+      qMax(0, language_combo->findData(current_language)));
+  connect(language_combo, qOverload<int>(&QComboBox::activated),
+          [this, language_combo](int index) {
+            const QString language = language_combo->itemData(index).toString();
+            SET_KEY_VALUE("UiLanguage", language.toStdString());
+            QMessageBox::information(
+                this, language == "zh_CN" ? QStringLiteral("界面语言")
+                                           : QStringLiteral("UI language"),
+                language == "zh_CN"
+                    ? QStringLiteral("语言设置已保存，重启应用后生效。")
+                    : QStringLiteral(
+                          "Language saved. Restart the application to apply."));
+          });
+  horizontalLayout_tools->addWidget(language_combo);
+
   horizontalLayout_tools->addSpacing(12);
   QPushButton *min_btn = new QPushButton(QStringLiteral("-"), this);
   QPushButton *max_btn = new QPushButton(QStringLiteral("\u25A1"), this);
@@ -484,6 +516,9 @@ void MainWindow::setupUi() {
     }
   });
   connect(close_btn, &QPushButton::clicked, this, &QWidget::close);
+  min_btn->setVisible(!use_native_window_frame);
+  max_btn->setVisible(!use_native_window_frame);
+  close_btn->setVisible(!use_native_window_frame);
   horizontalLayout_tools->addWidget(min_btn);
   horizontalLayout_tools->addWidget(max_btn);
   horizontalLayout_tools->addWidget(close_btn);
@@ -676,13 +711,15 @@ void MainWindow::setupUi() {
     }
   )");
   center_widget->setLayout(center_layout);
-  CDockWidget *CentralDockWidget = new CDockWidget("CentralWidget");
+  CDockWidget *CentralDockWidget =
+      new CDockWidget(UiLanguage::Text("地图", "Map"));
   CentralDockWidget->setWidget(center_widget);
   center_docker_area_ = dock_manager_->setCentralWidget(CentralDockWidget);
   center_docker_area_->setAllowedAreas(DockWidgetArea::OuterDockAreas);
 
   //////////////////////////////////////////////////////////速度仪表盘
-  ads::CDockWidget *DashBoardDockWidget = new ads::CDockWidget("DashBoard");
+  ads::CDockWidget *DashBoardDockWidget =
+      new ads::CDockWidget(UiLanguage::Text("仪表盘", "Dashboard"));
   QWidget *speed_dashboard_widget = new QWidget();
   DashBoardDockWidget->setWidget(speed_dashboard_widget);
   speed_dash_board_ = new DashBoard(speed_dashboard_widget);
@@ -697,7 +734,8 @@ void MainWindow::setupUi() {
           [this](const RobotSpeed &speed) {
             PUBLISH(MSG_ID_SET_ROBOT_SPEED, speed);
           });
-  ads::CDockWidget *SpeedCtrlDockWidget = new ads::CDockWidget("SpeedCtrl");
+  ads::CDockWidget *SpeedCtrlDockWidget =
+      new ads::CDockWidget(UiLanguage::Text("手动控制", "Manual control"));
   SpeedCtrlDockWidget->setWidget(speed_ctrl_widget_);
   auto speed_ctrl_area =
       dock_manager_->addDockWidget(ads::DockWidgetArea::BottomDockWidgetArea,
@@ -708,7 +746,8 @@ void MainWindow::setupUi() {
   display_config_widget_ = new DisplayConfigWidget();
   display_config_widget_->SetDisplayManager(display_manager_);
   display_config_widget_->SetChannelList(channel_manager_.DiscoveryChannelTypes());
-  settings_dock_ = new ads::CDockWidget(tr("Setting"));
+  settings_dock_ =
+      new ads::CDockWidget(UiLanguage::Text("设置", "Settings"));
   settings_dock_->setWidget(display_config_widget_);
   settings_dock_->setMinimumSizeHintMode(ads::CDockWidget::MinimumSizeHintFromDockWidget);
   settings_dock_->setMinimumSize(320, 240);
@@ -720,7 +759,8 @@ void MainWindow::setupUi() {
   ui->menuView->addAction(settings_dock_->toggleViewAction());
 
   diagnostic_dock_widget_ = new DiagnosticDockWidget();
-  diagnostic_dock_ = new ads::CDockWidget(tr("Diagnostic"));
+  diagnostic_dock_ =
+      new ads::CDockWidget(UiLanguage::Text("诊断", "Diagnostics"));
   diagnostic_dock_->setWidget(diagnostic_dock_widget_);
   diagnostic_dock_->setMinimumSizeHintMode(ads::CDockWidget::MinimumSizeHintFromDockWidget);
   diagnostic_dock_->setMinimumSize(280, 200);
@@ -735,7 +775,8 @@ void MainWindow::setupUi() {
   QVBoxLayout *horizontalLayout_13 = new QVBoxLayout();
   horizontalLayout_13->addWidget(nav_goal_table_view_);
   task_list_widget->setLayout(horizontalLayout_13);
-  ads::CDockWidget *nav_goal_list_dock_widget = new ads::CDockWidget("Task");
+  ads::CDockWidget *nav_goal_list_dock_widget =
+      new ads::CDockWidget(UiLanguage::Text("任务", "Task"));
   
   // 现代化按钮样式
   QString modernButtonStyle = R"(
@@ -760,23 +801,28 @@ void MainWindow::setupUi() {
     }
   )";
   
-  QPushButton *btn_add_one_goal = new QPushButton("Add Point");
+  QPushButton *btn_add_one_goal =
+      new QPushButton(UiLanguage::Text("添加任务行", "Add task row"));
   btn_add_one_goal->setStyleSheet(modernButtonStyle);
   
   QHBoxLayout *horizontalLayout_15 = new QHBoxLayout();
-  QPushButton *btn_start_task_chain = new QPushButton("Start Task Chain");
+  QPushButton *btn_start_task_chain =
+      new QPushButton(UiLanguage::Text("开始多点任务", "Start waypoint task"));
   btn_start_task_chain->setStyleSheet(modernButtonStyle);
   
-  QCheckBox *loop_task_checkbox = new QCheckBox("Repeat twice (finite)");
+  QCheckBox *loop_task_checkbox = new QCheckBox(
+      UiLanguage::Text("有限重复两遍", "Repeat twice (finite)"));
   const bool task_execution_enabled =
       GET_CONFIG_VALUE("EnableTaskExecution", "false") == "true";
   btn_start_task_chain->setEnabled(task_execution_enabled);
   loop_task_checkbox->setEnabled(task_execution_enabled);
   if (!task_execution_enabled) {
     btn_start_task_chain->setToolTip(
-        "Navigation task execution is disabled by the active GUI profile.");
+        UiLanguage::Text("当前 GUI 模式禁止执行导航任务。",
+                         "Navigation task execution is disabled by the active GUI profile."));
     loop_task_checkbox->setToolTip(
-        "Finite task repetition is available only in navigation profile.");
+        UiLanguage::Text("有限重复仅在导航模式可用。",
+                         "Finite task repetition is available only in navigation profile."));
   }
   loop_task_checkbox->setStyleSheet(R"(
     QCheckBox {
@@ -808,8 +854,10 @@ void MainWindow::setupUi() {
   horizontalLayout_14->addWidget(btn_start_task_chain);
   horizontalLayout_14->addWidget(loop_task_checkbox);
   
-  QPushButton *btn_load_task_chain = new QPushButton("Load Task Chain");
-  QPushButton *btn_save_task_chain = new QPushButton("Save Task Chain");
+  QPushButton *btn_load_task_chain =
+      new QPushButton(UiLanguage::Text("加载任务", "Load task"));
+  QPushButton *btn_save_task_chain =
+      new QPushButton(UiLanguage::Text("保存任务", "Save task"));
   btn_load_task_chain->setStyleSheet(modernButtonStyle);
   btn_save_task_chain->setStyleSheet(modernButtonStyle);
   
@@ -839,8 +887,9 @@ void MainWindow::setupUi() {
   connect(nav_goal_table_view_, &NavGoalTableView::signalCancelTaskChain,
           [this]() { PUBLISH(MSG_ID_CANCEL_TASK_CHAIN, true); });
   connect(btn_load_task_chain, &QPushButton::clicked, [this]() {
-    QString fileName = QFileDialog::getOpenFileName(nullptr, "Open JSON file",
-                                                    "", "JSON files (*.json)",
+    QString fileName = QFileDialog::getOpenFileName(
+        nullptr, UiLanguage::Text("打开任务 JSON", "Open task JSON"),
+                                                    "", "JSON (*.json)",
                                                     nullptr, QFileDialog::DontUseNativeDialog);
 
     // 如果用户选择了文件，则输出文件名
@@ -850,8 +899,9 @@ void MainWindow::setupUi() {
     }
   });
   connect(btn_save_task_chain, &QPushButton::clicked, [this]() {
-    QString fileName = QFileDialog::getSaveFileName(nullptr, "Save JSON file",
-                                                    "", "JSON files (*.json)",
+    QString fileName = QFileDialog::getSaveFileName(
+        nullptr, UiLanguage::Text("保存任务 JSON", "Save task JSON"),
+                                                    "", "JSON (*.json)",
                                                     nullptr, QFileDialog::DontUseNativeDialog);
 
     // 如果用户选择了文件，则输出文件名
@@ -861,12 +911,15 @@ void MainWindow::setupUi() {
         fileName += ".json";
       }
       if (nav_goal_table_view_->SaveTaskChain(fileName.toStdString())) {
-        QMessageBox::information(this, "保存成功",
-                                 "任务链文件已成功保存到:\n" + fileName,
+        QMessageBox::information(this, UiLanguage::Text("保存成功", "Saved"),
+                                 UiLanguage::Text("任务文件已保存到：\n",
+                                                  "Task saved to:\n") + fileName,
                                  QMessageBox::Ok);
       } else {
-        QMessageBox::warning(this, "保存失败",
-                             "任务链包含当前拓扑中不存在的点，未写入文件。",
+        QMessageBox::warning(this, UiLanguage::Text("保存失败", "Save failed"),
+                             UiLanguage::Text(
+                                 "任务包含当前拓扑中不存在的点，未写入文件。",
+                                 "The task contains a point absent from the current topology; no file was written."),
                              QMessageBox::Ok);
       }
     }
@@ -877,20 +930,27 @@ void MainWindow::setupUi() {
   connect(
       btn_add_one_goal, &QPushButton::clicked,
       [this, nav_goal_list_dock_widget]() { nav_goal_table_view_->AddItem(); });
+  btn_start_task_chain->setProperty("taskRunning", false);
   connect(btn_start_task_chain, &QPushButton::clicked,
           [this, btn_start_task_chain, loop_task_checkbox]() {
-            if (btn_start_task_chain->text() == "Start Task Chain") {
-              btn_start_task_chain->setText("Stop Task Chain");
+            if (!btn_start_task_chain->property("taskRunning").toBool()) {
+              btn_start_task_chain->setProperty("taskRunning", true);
+              btn_start_task_chain->setText(
+                  UiLanguage::Text("停止多点任务", "Stop waypoint task"));
               nav_goal_table_view_->StartTaskChain(loop_task_checkbox->isChecked());
             } else {
-              btn_start_task_chain->setText("Start Task Chain");
+              btn_start_task_chain->setProperty("taskRunning", false);
+              btn_start_task_chain->setText(
+                  UiLanguage::Text("开始多点任务", "Start waypoint task"));
               nav_goal_table_view_->StopTaskChain();
             }
           });
   connect(nav_goal_table_view_, &NavGoalTableView::signalTaskFinish,
           [this, btn_start_task_chain]() {
             LOG_INFO("task finish!");
-            btn_start_task_chain->setText("Start Task Chain");
+            btn_start_task_chain->setProperty("taskRunning", false);
+            btn_start_task_chain->setText(
+                UiLanguage::Text("开始多点任务", "Start waypoint task"));
           });
   connect(display_manager_,
           SIGNAL(signalTopologyMapUpdate(const TopologyMap &)),

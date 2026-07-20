@@ -190,7 +190,7 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     provenance = (ROOT / "third_party/README.md").read_text(encoding="utf-8")
     assert "https://github.com/Aldoubt/Ros_Qt5_Gui_App.git" in provenance
     assert "agt-navigation-v2" in provenance
-    assert "74d11e0602f00bbf7021ac96a63f00c947807a70" in provenance
+    assert "fb6d810bf7d7cc4bf749784ca976be5f348e7070" in provenance
     config = json.loads(
         (ROOT / "src/agt_ui_bridge/config/ros_qt5_gui_app.json").read_text(
             encoding="utf-8"
@@ -216,9 +216,19 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     scene_manager = (
         gui / "src/app/display/manager/scene_manager.cpp"
     ).read_text(encoding="utf-8")
+    view_manager = (
+        gui / "src/app/display/manager/view_manager.cpp"
+    ).read_text(encoding="utf-8")
     assert "nav_goal_position_pending_" in scene_manager
     assert "std::atan2(dy, dx)" in scene_manager
     assert "timer->start(100)" in scene_manager
+    assert "RefreshPointChoices()" in task_widget
+    assert "const int row = ActiveRow()" in task_widget
+    assert "emit signalTopologyMapUpdate(topology_map_)" in scene_manager
+    assert "void ViewManager::ZoomAt" in view_manager
+    assert "SetRobotFocus(false)" in view_manager
+    assert 'GET_CONFIG_VALUE("UiLanguage", "zh_CN")' in mainwindow
+    assert 'GET_CONFIG_VALUE("UseNativeWindowFrame", "true")' in mainwindow
     assert 'GET_CONFIG_VALUE("EnableCostmapDisplay", "false")' in rclcomm
     assert "absoluteDifference" not in task_widget
     assert "task_chain_.points.clear()" in task_widget

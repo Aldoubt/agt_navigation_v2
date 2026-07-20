@@ -1,9 +1,12 @@
 #include "display/manager/view_manager.h"
 #include "display/manager/scene_manager.h"
 #include <QDebug>
+#include <QScrollBar>
+#include <QWheelEvent>
 #include <iostream>
 #include "display/manager/display_factory.h"
 #include "display/manager/display_manager.h"
+#include "ui_language.h"
 namespace Display {
 ViewManager::ViewManager(QWidget *parent) : QGraphicsView(parent) {
   setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -116,7 +119,8 @@ ViewManager::ViewManager(QWidget *parent) : QGraphicsView(parent) {
   add_robot_pos_btn_ = new QToolButton();
   add_robot_pos_btn_->setIcon(QIcon(":/images/crosshair.svg"));
   add_robot_pos_btn_->setIconSize(QSize(25, 25));
-  add_robot_pos_btn_->setToolTip("添加机器人当前位置为目标点");
+  add_robot_pos_btn_->setToolTip(UiLanguage::Text(
+      "添加机器人当前位置为目标点", "Add waypoint at robot pose"));
   add_robot_pos_btn_->setCursor(Qt::PointingHandCursor);
   add_robot_pos_btn_->setStyleSheet(
       "QToolButton {"
@@ -133,7 +137,7 @@ ViewManager::ViewManager(QWidget *parent) : QGraphicsView(parent) {
   QToolButton *set_big_btn_ = new QToolButton();
   set_big_btn_->setIcon(QIcon(":/images/big.svg"));
   set_big_btn_->setIconSize(QSize(25, 25));
-  set_big_btn_->setToolTip("放大");
+  set_big_btn_->setToolTip(UiLanguage::Text("放大", "Zoom in"));
   set_big_btn_->setCursor(Qt::PointingHandCursor);
   set_big_btn_->setStyleSheet(
       "QToolButton {"
@@ -144,7 +148,7 @@ ViewManager::ViewManager(QWidget *parent) : QGraphicsView(parent) {
   QToolButton *set_small_btn_ = new QToolButton();
   set_small_btn_->setIcon(QIcon(":/images/scale.svg"));
   set_small_btn_->setIconSize(QSize(25, 25));
-  set_small_btn_->setToolTip("缩小");
+  set_small_btn_->setToolTip(UiLanguage::Text("缩小", "Zoom out"));
   set_small_btn_->setCursor(Qt::PointingHandCursor);
   set_small_btn_->setStyleSheet(
       "QToolButton {"
@@ -154,7 +158,8 @@ ViewManager::ViewManager(QWidget *parent) : QGraphicsView(parent) {
   bottom_layout->addWidget(set_small_btn_);
   focus_robot_btn_ = new QToolButton();
   focus_robot_btn_->setIcon(QIcon(":/images/unfocus.svg"));
-  focus_robot_btn_->setToolTip("聚焦机器人");
+  focus_robot_btn_->setToolTip(
+      UiLanguage::Text("跟随机器人", "Follow robot"));
   focus_robot_btn_->setCursor(Qt::PointingHandCursor);
   focus_robot_btn_->setStyleSheet(
       "QToolButton {"
@@ -191,21 +196,12 @@ ViewManager::ViewManager(QWidget *parent) : QGraphicsView(parent) {
   //connect
 
   connect(focus_robot_btn_, &QToolButton::clicked, [this]() {
-    if (focus_robot_btn_->toolTip() == "聚焦机器人") {
-      FactoryDisplay::Instance()->SetFocusDisplay(DISPLAY_ROBOT);
-      focus_robot_btn_->setToolTip("取消聚焦机器人");
-      focus_robot_btn_->setIcon(QIcon(":/images/focus.svg"));
-    } else {
-      FactoryDisplay::Instance()->SetFocusDisplay("");
-      focus_robot_btn_->setToolTip("聚焦机器人");
-      focus_robot_btn_->setIcon(QIcon(":/images/unfocus.svg"));
-    }
+    SetRobotFocus(!focus_robot_);
   });
   connect(set_big_btn_, &QToolButton::clicked,
-          [this]() { display_manager_ptr_->SetScaleBig(); });
-  connect(set_small_btn_, &QToolButton::clicked, [this]() {
-    display_manager_ptr_->SetScaleSmall();
-  });
+          [this]() { ZoomAt(viewport()->rect().center(), 1.2); });
+  connect(set_small_btn_, &QToolButton::clicked,
+          [this]() { ZoomAt(viewport()->rect().center(), 1.0 / 1.2); });
   
   // 连接工具大小滑动条信号
   connect(tool_size_slider_, &QSlider::valueChanged, [this](int value) {
@@ -272,18 +268,78 @@ void ViewManager::ShowToolSizeSlider(bool show) {
 }
 
 void ViewManager::OnEditMapModeChanged(MapEditMode mode) {
+  current_edit_mode_ = mode;
   bool show = (mode == MapEditMode::kErase || mode == MapEditMode::kDrawWithPen);
   ShowToolSizeSlider(show);
 }
 
+void ViewManager::SetRobotFocus(bool enabled) {
+  focus_robot_ = enabled;
+  FactoryDisplay::Instance()->SetFocusDisplay(enabled ? DISPLAY_ROBOT : "");
+  focus_robot_btn_->setToolTip(
+      enabled ? UiLanguage::Text("取消跟随机器人", "Stop following robot")
+              : UiLanguage::Text("跟随机器人", "Follow robot"));
+  focus_robot_btn_->setIcon(
+      QIcon(enabled ? ":/images/focus.svg" : ":/images/unfocus.svg"));
+}
+
+void ViewManager::ZoomAt(const QPoint &viewport_pos, qreal factor) {
+  const qreal next_scale = view_scale_ * factor;
+  if (next_scale < 0.1 || next_scale > 20.0) return;
+  SetRobotFocus(false);
+  const QPointF scene_before = mapToScene(viewport_pos);
+  scale(factor, factor);
+  view_scale_ = next_scale;
+  const QPointF scene_after = mapToScene(viewport_pos);
+  const QPointF delta = scene_after - scene_before;
+  translate(delta.x(), delta.y());
+}
+
+void ViewManager::mousePressEvent(QMouseEvent *event) {
+  const bool middle_pan = event->button() == Qt::MiddleButton;
+  auto *clicked_display =
+      dynamic_cast<VirtualDisplay *>(itemAt(event->pos()));
+  const bool background_pan =
+      event->button() == Qt::LeftButton &&
+      current_edit_mode_ == MapEditMode::kStopEdit &&
+      (!clicked_display || clicked_display->GetDisplayType() == DISPLAY_MAP);
+  if (middle_pan || background_pan) {
+    SetRobotFocus(false);
+    panning_ = true;
+    last_pan_pos_ = event->pos();
+    viewport()->setCursor(Qt::ClosedHandCursor);
+    event->accept();
+    return;
+  }
+  QGraphicsView::mousePressEvent(event);
+}
+
+void ViewManager::mouseReleaseEvent(QMouseEvent *event) {
+  if (panning_ && (event->button() == Qt::MiddleButton ||
+                   event->button() == Qt::LeftButton)) {
+    panning_ = false;
+    viewport()->unsetCursor();
+    event->accept();
+    return;
+  }
+  QGraphicsView::mouseReleaseEvent(event);
+}
+
 void ViewManager::mouseMoveEvent(QMouseEvent *event) {
-  // 根据需要设置不同的鼠标指针样式
-  // if (someCondition)
-  //   QApplication::setOverrideCursor(Qt::PointingHandCursor); //
-  //   设置为手指指针
-  // else
-  //   QApplication::restoreOverrideCursor(); // 恢复默认鼠标指针
+  if (panning_) {
+    const QPoint delta = event->pos() - last_pan_pos_;
+    last_pan_pos_ = event->pos();
+    horizontalScrollBar()->setValue(horizontalScrollBar()->value() - delta.x());
+    verticalScrollBar()->setValue(verticalScrollBar()->value() - delta.y());
+    event->accept();
+    return;
+  }
   QGraphicsView::mouseMoveEvent(event);
+}
+
+void ViewManager::wheelEvent(QWheelEvent *event) {
+  ZoomAt(event->pos(), event->angleDelta().y() > 0 ? 1.15 : 1.0 / 1.15);
+  event->accept();
 }
 
 void ViewManager::enterEvent(QEvent *event) {

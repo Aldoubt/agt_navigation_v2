@@ -28,7 +28,11 @@
   ],
   "key_value": {
     "BaseFrameId": "base_footprint",
-    "FixedFrameId": "map"
+    "FixedFrameId": "map",
+    "EnableTaskExecution": "true",
+    "EnableCostmapDisplay": "false",
+    "UiLanguage": "zh_CN",
+    "UseNativeWindowFrame": "true"
   },
   "map_config": {
     "path": ""

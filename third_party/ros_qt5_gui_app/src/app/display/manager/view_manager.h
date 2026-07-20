@@ -23,6 +23,14 @@ class ViewManager : public QGraphicsView {
   QLineEdit *label_pos_robot_;
   QSlider *tool_size_slider_;
   QLabel *tool_size_value_label_;
+  MapEditMode current_edit_mode_{MapEditMode::kStopEdit};
+  bool panning_{false};
+  QPoint last_pan_pos_;
+  bool focus_robot_{false};
+  qreal view_scale_{1.0};
+
+  void SetRobotFocus(bool enabled);
+  void ZoomAt(const QPoint &viewport_pos, qreal factor);
 
  public:
   ViewManager(QWidget *parent = nullptr);
@@ -39,7 +47,10 @@ class ViewManager : public QGraphicsView {
   void OnEditMapModeChanged(MapEditMode mode);
 
  protected:
+  void mousePressEvent(QMouseEvent *event) override;
+  void mouseReleaseEvent(QMouseEvent *event) override;
   void mouseMoveEvent(QMouseEvent *event) override;
+  void wheelEvent(QWheelEvent *event) override;
 
   void enterEvent(QEvent *event) override;
 

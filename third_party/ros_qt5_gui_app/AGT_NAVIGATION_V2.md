@@ -23,6 +23,12 @@ contract is:
 - `EnableCostmapDisplay` is fail-closed so multi-million-cell costmaps are not
   repeatedly expanded and rendered unless an operator explicitly enables them;
 - decorative topology animation is limited to 10 FPS;
+- map clicks populate the explicitly selected task row, and topology changes
+  refresh every task selector;
+- offline map inspection uses view-level pan/zoom and manual navigation cancels
+  robot-follow mode; the native window frame remains resizable;
+- `UiLanguage` selects persisted `zh_CN` (default) or `en_US` operator text and
+  applies after restart;
 - manual velocity remains on the configured project input and must pass through
   `agt_safety` before reaching a chassis driver.
 
