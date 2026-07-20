@@ -1,6 +1,6 @@
 # 迁移矩阵
 
-更新时间：2026-07-19。
+更新时间：2026-07-20。
 
 状态按“代码迁移、离线验证、数据回放、实机验收”分级记录。当前离线回归为
 `200 passed`；离线通过不代表定位精度、导航性能或实车安全验收通过。
@@ -13,7 +13,7 @@
 | `agt_sensor_adapters` | 3 | baseline 完成 | Livox 驱动已迁入，MID360 PointCloud2 到 CustomMsg 转换、统一 topic 和短 bag 回放通过 | 实机验证网络、QoS、频率、时间戳、丢包和长时间运行稳定性 |
 | `agt_mapping` | 3 | baseline 完成 | 指定 FAST-LIVO2 分支已 vendor 和编译；adapter、位姿/twist 外参换算、TF 与局部雷达帧点云回放通过 | 标定车辆外参，使用完整 bag 生成新旧轨迹、点云数量和数值精度对比报告 |
 | `agt_map_processing` | 5 | baseline 可用 | OctoMap 动态射线原点、二维 OccupancyGrid 以及 PGM/YAML 保存已通过短回放 | 完整 bag 调整高度阈值并对比旧 `/projected_map`；后续增加 PCD 离线转换和几何地面分割后端 |
-| `agt_localization` | 4 | 代码已落地 | ICP/NDT core、局部点云输入、base/lidar 初值修正和唯一 `map -> odom` 发布逻辑已编译 | 使用同一次建图导出的全局 PCD 验证收敛率、误差、恢复时间、TF 稳定性和错误初值拒绝 |
+| `agt_localization` | 4 | 实车重定位初验通过 | ICP/NDT core、局部点云输入、base/lidar 初值修正和唯一 `map -> odom` 发布逻辑已编译；修复 `ndt_num_threads=0` 导致的 NDT-OMP 越界，Bunker 使用 4 线程重定位成功且 fitness 约 `0.01`–`0.02` | 运行线程参数边界回归，并使用最终导航 PCD 验证收敛率、误差、恢复时间、TF 稳定性和错误初值拒绝 |
 | `agt_localization_fusion` | 6 | 仅骨架 | package 和领域边界已建立 | 定义融合状态与诊断接口，接入 LIO、轮速和 IMU；后续扩展 RTK/UWB 与失效降级 |
 | `agt_perception` | 6/8 | baseline 完成 | 已实现 base frame 高度/量程/车体裁剪的局部障碍点云，并接入 Nav2 costmap 和 Collision Monitor；裁剪边界已由契约测试约束到 BUNKER profile | 使用典型场景点云评估地面/障碍精度、误检漏检和频率，再增加可靠地面分割 |
 | `agt_navigation` | 6/8 | TASK-07 离线完成 | 原 1 m 闭环继续通过；FilterInfo、global `Static -> Keepout -> Inflation`、跨禁行墙规划失败及 toggle 后恢复规划已验证 | 使用真实语义地图与重定位验证边界误差、切换时延、规划成功率和窄通道通过性 |

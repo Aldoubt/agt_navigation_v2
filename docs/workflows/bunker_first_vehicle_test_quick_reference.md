@@ -271,6 +271,8 @@ ros2 topic echo /agt/safety/status --once
 通过条件：
 
 - 定位状态为成功、`converged=true`，fitness 通过当前门限；
+- `ndt_num_threads` 为正整数；Bunker 已验证基线为 `4`，禁止使用会使 NDT-OMP
+  工作数组越界的 `0`；
 - `map -> odom -> base_footprint` 连续且无跳变；
 - 五个 lifecycle 节点均为 `active [3]`；
 - 障碍点云持续更新；
