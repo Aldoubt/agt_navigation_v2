@@ -11,6 +11,10 @@ contract is:
   `/agt/navigation/execute_waypoint_task` (`agt_interfaces/ExecuteWaypointTask`);
 - Nav2 Action feedback/result, not pose-distance polling, determines task state;
 - repeated execution is finite and cancellation is forwarded to the Action;
+- `EnableTaskExecution=false` disables task controls and is enforced again by
+  the ROS2 channel for the mapping profile;
+- a missing `EnableTaskExecution` key is fail-closed; only explicit `true`
+  enables navigation task dispatch;
 - malformed Nav2 map YAML is rejected without terminating the GUI;
 - changing a map clears stale topology and rejects sidecar points outside the
   selected map;

@@ -110,6 +110,22 @@ def test_vendored_fast_livo_publishes_lidar_frame_cloud():
     assert "message.header.stamp = odomAftMapped.header.stamp" in source
 
 
+def test_vikit_is_a_clean_fixed_vendor_with_generic_eigen_abi():
+    vendor = ROOT / "third_party/rpg_vikit_ros2_fisheye"
+    assert (vendor / "vikit_common/package.xml").exists()
+    assert (vendor / "vikit_ros/package.xml").exists()
+    assert not (vendor / "vikit_py").exists()
+    assert not (vendor / "ername").exists()
+    assert not (vendor / ".git").exists()
+    provenance = (ROOT / "third_party/README.md").read_text(encoding="utf-8")
+    assert "fee3d50ae2af472fb27eb62b4526dd4b32ede8ef" in provenance
+    flags = (vendor / "vikit_common/CMakeLists.txt").read_text(encoding="utf-8")
+    assert "-march=x86-64 -mtune=native" in flags
+    assert "-march=native" not in flags
+    dependencies = (ROOT / "nav_dependencies.repos").read_text(encoding="utf-8")
+    assert "rpg_vikit_ros2_fisheye" not in dependencies
+
+
 def test_fast_livo_adapter_is_installed_as_an_executable():
     adapter = ROOT / "src/agt_mapping/scripts/fast_livo2_adapter.py"
     assert adapter.stat().st_mode & 0o111
@@ -174,7 +190,7 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     provenance = (ROOT / "third_party/README.md").read_text(encoding="utf-8")
     assert "https://github.com/Aldoubt/Ros_Qt5_Gui_App.git" in provenance
     assert "agt-navigation-v2" in provenance
-    assert "bee413235b660ce530e07b1d22a07120ffe9e854" in provenance
+    assert "f2a043d3ede8c32f6d01bb77ae0147901fe3abb8" in provenance
     config = json.loads(
         (ROOT / "src/agt_ui_bridge/config/ros_qt5_gui_app.json").read_text(
             encoding="utf-8"
@@ -194,6 +210,9 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     )
     assert '"/agt/navigation/execute_waypoint_task"' in rclcomm
     assert "waypoint_task_client_->async_send_goal" in rclcomm
+    assert 'GET_CONFIG_VALUE("EnableTaskExecution", "false")' in rclcomm
+    mainwindow = (gui / "src/app/mainwindow.cpp").read_text(encoding="utf-8")
+    assert 'GET_CONFIG_VALUE("EnableTaskExecution", "false")' in mainwindow
     assert "absoluteDifference" not in task_widget
     assert "task_chain_.points.clear()" in task_widget
     assert "catch (const YAML::Exception &e)" in map_loader

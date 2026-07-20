@@ -162,7 +162,7 @@ ros2 topic hz /agt/sensors/imu/data
 ros2 launch agt_bringup system.launch.py \
   mode:=mapping \
   map_name:=first_vehicle_test \
-  start_gui:=true \
+  start_mapping_gui:=true \
   start_rviz:=true \
   record_bag:=true
 ```

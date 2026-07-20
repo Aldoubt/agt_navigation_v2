@@ -89,6 +89,14 @@
 - Parent cancellation and loss of recent `agt_safety` motion readiness must cancel the active Nav2 child before the project task finishes.
 - New frontends and future autostart/lifecycle managers must call the project Action rather than reimplement waypoint distance polling.
 - Switching the selected Nav2 map must clear stale topology before loading a matching sidecar; malformed map YAML and out-of-map topology points must fail without crashing or retaining actionable stale data.
+- Mapping mode uses RViz as the default 3D frontend. Its optional Qt profile must default off and reject navigation task execution in both UI and channel; navigation mode owns the task-capable Qt profile.
+
+## Navigation Task Orchestration Contract
+- Navigation is an Action capability, not a frontend-owned workflow. Qt, Web, autostart, and future mission managers must consume project Actions and their explicit result/cancel semantics.
+- A future mission orchestrator may sequence navigation and manipulator Actions, but must not publish actuator velocities, bypass domain safety chains, or infer completion from pose/time alone.
+- Navigation and manipulator children retain separate safety/watchdog ownership. Cross-domain execution requires explicit stationary-base, localization, TF, cancellation, and restart/idempotency policies.
+- Initial workflows must be finite, sequential, versioned, and auditable. Arbitrary scripts, implicit retries, and unbounded loops are forbidden.
+- The reserved architecture and staged rollout are documented in `docs/architecture/navigation_task_orchestration.md`; it does not imply that a mission or manipulator server exists.
 
 ## Future Semantic Perception Contract
 - Manual, persistent semantic geometry remains GeoJSON/`coverage.yaml`; dynamic camera/lidar detections remain separate, timestamped observations and must never be painted into the source PGM.

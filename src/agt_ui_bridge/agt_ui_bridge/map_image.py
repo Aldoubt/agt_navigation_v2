@@ -9,6 +9,8 @@ import numpy as np
 from PIL import Image, ImageOps
 import yaml
 
+from .map_transform import load_grayscale_map_image
+
 
 UNKNOWN_PIXEL = 205
 FREE_PIXEL = 254
@@ -29,7 +31,7 @@ def load_nav2_map_image(yaml_path: str | Path) -> LoadedNav2MapImage:
     image_path = Path(metadata["image"])
     if not image_path.is_absolute():
         image_path = yaml_path.parent / image_path
-    image = Image.open(image_path).convert("L")
+    image = load_grayscale_map_image(image_path)
     if bool(metadata.get("negate", 0)):
         image = ImageOps.invert(image)
     return LoadedNav2MapImage(

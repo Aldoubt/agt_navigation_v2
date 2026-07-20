@@ -7,10 +7,6 @@ repositories:
     type: git
     url: https://github.com/agilexrobotics/ugv_sdk.git
     version: c3dfaf444f9bae10757e546acae055aaf4a13de7
-  rpg_vikit_ros2_fisheye:
-    type: git
-    url: https://github.com/Rhymer-Lcy/rpg_vikit_ros2_fisheye.git
-    version: fee3d50ae2af472fb27eb62b4526dd4b32ede8ef
   opennav_coverage:
     type: git
     url: https://github.com/open-navigation/opennav_coverage.git

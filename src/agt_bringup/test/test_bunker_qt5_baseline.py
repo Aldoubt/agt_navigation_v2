@@ -9,9 +9,9 @@ def read(relative_path):
     return (REPOSITORY_ROOT / relative_path).read_text(encoding="utf-8")
 
 
-def test_mapping_mode_starts_mapping_gui():
+def test_mapping_mode_offers_non_executing_gui_but_keeps_it_off_by_default():
     source = read("src/agt_bringup/launch/mapping_mode.launch.py")
-    assert 'DeclareLaunchArgument("start_gui", default_value="true")' in source
+    assert '"start_gui",\n                default_value="false"' in source
     assert '"ros_qt5_gui.launch.py"' in source
     assert '"profile": "mapping"' in source
     assert '"source_map_topic": "/agt/map/mapping_occupancy"' in source
@@ -30,7 +30,9 @@ def test_navigation_mode_starts_navigation_gui_and_defaults_optional_features_of
 
 def test_system_passes_gui_to_both_modes_and_keeps_optional_features_off():
     source = read("src/agt_bringup/launch/system.launch.py")
-    assert source.count('"start_gui": LaunchConfiguration("start_gui")') == 2
+    assert source.count('"start_gui": LaunchConfiguration("start_gui")') == 1
+    assert '"start_gui": LaunchConfiguration("start_mapping_gui")' in source
+    assert '"start_mapping_gui",\n                default_value="false"' in source
     assert 'DeclareLaunchArgument("start_semantic_map_server", default_value="false")' in source
     assert 'DeclareLaunchArgument("start_coverage_planning", default_value="false")' in source
 

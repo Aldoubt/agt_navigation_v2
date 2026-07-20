@@ -8,6 +8,140 @@ from PIL import Image
 import yaml
 
 
+_NETPBM_WHITESPACE = b" \t\r\n\v\f"
+
+
+def _next_netpbm_token(data, offset):
+    """Return one ASCII Netpbm header/data token and the next byte offset."""
+    size = len(data)
+    while offset < size:
+        byte = data[offset]
+        if byte in _NETPBM_WHITESPACE:
+            offset += 1
+            continue
+        if byte == ord("#"):
+            newline = data.find(b"\n", offset)
+            offset = size if newline < 0 else newline + 1
+            continue
+        break
+    if offset >= size:
+        return None, offset
+    start = offset
+    while offset < size and data[offset] not in _NETPBM_WHITESPACE:
+        if data[offset] == ord("#"):
+            break
+        offset += 1
+    try:
+        return data[start:offset].decode("ascii"), offset
+    except UnicodeDecodeError as exc:
+        raise ValueError("invalid PGM header: non-ASCII token") from exc
+
+
+def _positive_pgm_integer(token, field):
+    try:
+        value = int(token)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"invalid PGM {field}") from exc
+    if value <= 0:
+        raise ValueError(f"invalid PGM {field}: must be positive")
+    return value
+
+
+def _decode_pgm(image_path, data):
+    """Validate and decode P2/P5 into unscaled integer pixels."""
+    offset = 0
+    magic, offset = _next_netpbm_token(data, offset)
+    if magic not in ("P2", "P5"):
+        raise ValueError(f"unsupported PGM encoding in {image_path}: {magic}")
+    width_token, offset = _next_netpbm_token(data, offset)
+    height_token, offset = _next_netpbm_token(data, offset)
+    max_value_token, offset = _next_netpbm_token(data, offset)
+    width = _positive_pgm_integer(width_token, "width")
+    height = _positive_pgm_integer(height_token, "height")
+    max_value = _positive_pgm_integer(max_value_token, "max value")
+    if max_value > 65535:
+        raise ValueError("invalid PGM max value: must be <= 65535")
+
+    pixel_count = width * height
+    if magic == "P2":
+        pixels = []
+        for _ in range(pixel_count):
+            token, offset = _next_netpbm_token(data, offset)
+            if token is None:
+                raise ValueError("invalid P2 PGM: truncated pixel data")
+            try:
+                pixel = int(token)
+            except ValueError as exc:
+                raise ValueError("invalid P2 PGM: non-integer pixel") from exc
+            if pixel < 0 or pixel > max_value:
+                raise ValueError("invalid P2 PGM: pixel outside declared range")
+            pixels.append(pixel)
+        extra, _ = _next_netpbm_token(data, offset)
+        if extra is not None:
+            raise ValueError("invalid P2 PGM: extra pixel data")
+    else:
+        if offset >= len(data) or data[offset] not in _NETPBM_WHITESPACE:
+            raise ValueError("invalid P5 PGM: missing raster separator")
+        if data[offset : offset + 2] == b"\r\n":
+            offset += 2
+        else:
+            offset += 1
+        bytes_per_pixel = 1 if max_value < 256 else 2
+        expected_bytes = pixel_count * bytes_per_pixel
+        if len(data) - offset != expected_bytes:
+            raise ValueError(
+                "invalid P5 PGM: raster length does not match dimensions"
+            )
+        raster = data[offset:]
+        if bytes_per_pixel == 1:
+            pixels = list(raster)
+        else:
+            pixels = [
+                int.from_bytes(raster[index : index + 2], "big")
+                for index in range(0, len(raster), 2)
+            ]
+        if any(pixel > max_value for pixel in pixels):
+            raise ValueError("invalid P5 PGM: pixel outside declared range")
+    return width, height, max_value, pixels
+
+
+def _read_pgm_size(image_path, data):
+    width, height, _max_value, _pixels = _decode_pgm(image_path, data)
+    return width, height
+
+
+def _read_map_image_size(image_path):
+    """Read dimensions with an explicit PGM contract and verified fallback."""
+    data = image_path.read_bytes()
+    if data.startswith((b"P2", b"P5")):
+        return _read_pgm_size(image_path, data)
+    try:
+        with Image.open(image_path) as image:
+            width, height = image.size
+            image.verify()
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"invalid map image: {image_path}") from exc
+    return width, height
+
+
+def load_grayscale_map_image(image_path):
+    """Load a validated map image as an 8-bit Pillow grayscale image."""
+    image_path = Path(image_path)
+    data = image_path.read_bytes()
+    if data.startswith((b"P2", b"P5")):
+        width, height, max_value, pixels = _decode_pgm(image_path, data)
+        scaled = bytes(
+            round(pixel * 255 / max_value) for pixel in pixels
+        )
+        return Image.frombytes("L", (width, height), scaled)
+    try:
+        with Image.open(image_path) as source:
+            source.load()
+            return source.convert("L")
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"invalid map image: {image_path}") from exc
+
+
 @dataclass(frozen=True)
 class MapGeometry:
     resolution: float
@@ -36,8 +170,7 @@ class MapGeometry:
         image_path = Path(metadata["image"])
         if not image_path.is_absolute():
             image_path = yaml_path.parent / image_path
-        with Image.open(image_path) as image:
-            width, height = image.size
+        width, height = _read_map_image_size(image_path)
         origin = metadata.get("origin", [0.0, 0.0, 0.0])
         if len(origin) != 3:
             raise ValueError("Nav2 map origin must contain x, y, and yaw")

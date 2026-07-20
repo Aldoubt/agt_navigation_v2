@@ -10,7 +10,8 @@ ros2 launch agt_bringup system.launch.py mode:=navigation \
   map:=/absolute/path/map.yaml global_map_pcd:=/absolute/path/map.pcd
 ```
 
-`mapping` 启动 BUNKER TF、传感器、FAST-LIVO2 PCD 保存、二维投影、底盘和 RViz；
+`mapping` 启动 BUNKER TF、传感器、FAST-LIVO2 PCD 保存、二维投影、底盘和 RViz；可用
+`start_mapping_gui:=true` 额外启动只监视/编辑、禁止导航任务执行的 mapping Qt profile。
 `navigation` 关闭 PCD 保存，启动 LIO 里程计、重定位、Nav2、安全层、底盘和 Qt5。
 两个模式均可设置 `record_bag:=true`，输出到 `runtime/rosbag/`。
 
@@ -24,7 +25,7 @@ source install/setup.bash
 ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:=/absolute/path/greenhouse_01.yaml \
-  global_map_pcd:=/absolute/path/all_downsampled_points.pcd \
+  global_map_pcd:=/absolute/path/localization_map.pcd \
   semantic_map:=/absolute/path/semantic_map.geojson \
   coverage_params:=/absolute/path/coverage.yaml \
   start_semantic_map_server:=true \
@@ -56,7 +57,7 @@ ros2 action info /agt/coverage/execute
 ```bash
 ros2 launch agt_bringup system.launch.py \
   mode:=navigation map:=/absolute/path/greenhouse_01.yaml \
-  global_map_pcd:=/absolute/path/all_downsampled_points.pcd \
+  global_map_pcd:=/absolute/path/localization_map.pcd \
   semantic_map:=/absolute/path/semantic_map.geojson \
   coverage_params:=/absolute/path/coverage.yaml \
   start_semantic_map_server:=true annotation_mode:=true
@@ -75,8 +76,10 @@ ros2 launch agt_bringup save_mapping_result.launch.py map_name:=greenhouse_01
 ```
 
 确认二维地图保存成功后，再对建图总控使用 `Ctrl+C`；PCD 将保存到
-`runtime/maps/<map_name>/pcd/`，rosbag 也会完成元数据写入。不要先关闭总控再保存二维地图。
+`runtime/maps/<map_name>/pcd/`，rosbag 也会完成元数据写入。导航前必须同时检查
+`localization_map.pcd` 和 `localization_map.processing.yaml`，且处理状态为 `ready`。不要先关闭总控再保存二维地图。
 
 无雷达或 CAN 时可分别使用 `start_sensor:=false`、`start_chassis:=false`。建图无显示器时
-使用 `start_rviz:=false`，导航无显示器时使用 `start_gui:=false`。
+使用 `start_rviz:=false`；mapping Qt 默认关闭，按需使用 `start_mapping_gui:=true`。导航无
+显示器时使用 `start_gui:=false`。
 运行总控后禁止再单独启动 description/chassis launch；真实运动前仍需显式使能安全层。

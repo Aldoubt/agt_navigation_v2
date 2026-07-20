@@ -188,7 +188,7 @@ Keepout Filter 与覆盖模块，不再分别启动：
 ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:=/absolute/path/greenhouse_01.yaml \
-  global_map_pcd:=/absolute/path/all_downsampled_points.pcd \
+  global_map_pcd:=/absolute/path/localization_map.pcd \
   semantic_map:=/absolute/path/semantic_map.geojson \
   coverage_params:=/absolute/path/coverage.yaml \
   start_semantic_map_server:=true \
@@ -216,7 +216,8 @@ agt_navigation_v2/
 └── README.md
 ```
 
-覆盖规划外部依赖由 [`nav_dependencies.repos`](nav_dependencies.repos) 固定到 commit，必须在
+FAST-LIVO 和它所需的 Vikit 已按固定提交 vendor 在 `third_party/`，可由本工作区直接构建，
+不依赖旧工作区 overlay。覆盖规划外部依赖仍由 [`nav_dependencies.repos`](nav_dependencies.repos) 固定到 commit，必须在
 独立工作区导入和构建。TASK-08 的系统依赖、`vcs import`、rosdep、最小构建及版本核验流程见
 [`docs/development/coverage_dependencies.md`](docs/development/coverage_dependencies.md)。
 
@@ -523,7 +524,9 @@ ros2 launch agt_bringup system.launch.py \
 
 建图模式会启动唯一一份 BUNKER TF、MID360、FAST-LIVO2、OctoMap 二维投影、底盘安全链
 和专用 RViz，并强制开启 FAST-LIVO2 PCD 保存。RViz 的 `Fixed Frame` 已设置为 `odom`，
-默认显示 `/agt/mapping/registered_points` 和 `/agt/map/mapping_occupancy`。Qt5 不在建图模式启动。
+默认显示 `/agt/mapping/registered_points` 和 `/agt/map/mapping_occupancy`。Qt5 默认不在建图
+模式启动；需要二维地图与手动操作监视时显式设置 `start_mapping_gui:=true`。mapping profile
+固定禁止导航任务执行，RViz 仍是三维点云主视图。
 `record_bag:=true` 会同时记录传感器、TF、
 里程计、地图、导航、安全和底盘诊断话题到 `runtime/rosbag/mapping_<时间>/`。
 
@@ -539,12 +542,13 @@ FAST-LIVO2 写出完整 PCD，同时让 rosbag 写完元数据：
 ```text
 runtime/maps/greenhouse_01/greenhouse_01.pgm
 runtime/maps/greenhouse_01/greenhouse_01.yaml
-runtime/maps/greenhouse_01/pcd/all_raw_points.pcd
-runtime/maps/greenhouse_01/pcd/all_downsampled_points.pcd
+runtime/maps/greenhouse_01/pcd/localization_map.pcd
+runtime/maps/greenhouse_01/pcd/localization_map.processing.yaml
 ```
 
 必须先保存二维地图再退出总控；如果先按 `Ctrl+C`，OctoMap 发布者会关闭，随后无法可靠
-保存 PGM/YAML。重定位优先使用 `all_downsampled_points.pcd`。不要用 `kill -9` 结束建图，
+保存 PGM/YAML。重定位只使用处理记录为 `state: ready` 的 `localization_map.pcd`；
+旧的 `all_raw_points.pcd` / `all_downsampled_points.pcd` 只是兼容回退产物，不得直接作为 NDT 地图。不要用 `kill -9` 结束建图，
 否则 PCD 和 bag 元数据可能来不及落盘。安全层仍默认禁止运动，现场检查完成后再显式调用
 `/agt/safety/set_motion_enabled`。
 
@@ -563,7 +567,7 @@ ros2 bag play runtime/rosbag/mid360_mapping_custom_full --clock
 ros2 launch agt_bringup save_mapping_result.launch.py map_name:=mid360_bag_test
 ```
 
-保存二维图后，再对终端 1 使用 `Ctrl+C` 生成两份 PCD。需要离线观察效果时不要设置
+保存二维图后，再对终端 1 使用 `Ctrl+C` 生成定位 PCD 及处理记录。需要离线观察效果时不要设置
 `start_rviz:=false`；建图 RViz 配置会自动使用 `odom` 和 `/agt/map/mapping_occupancy`。
 
 ### 导航模式
@@ -573,7 +577,7 @@ MAP_DIR="$(realpath runtime/maps/greenhouse_01)"
 ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:="$MAP_DIR/greenhouse_01.yaml" \
-  global_map_pcd:="$MAP_DIR/pcd/all_downsampled_points.pcd" \
+  global_map_pcd:="$MAP_DIR/pcd/localization_map.pcd" \
   record_bag:=true
 ```
 
@@ -587,7 +591,7 @@ Nav2、Collision Monitor、安全层与 BUNKER 底盘依次启动，Qt5 默认�
 ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:=/absolute/path/greenhouse_01.yaml \
-  global_map_pcd:=/absolute/path/all_downsampled_points.pcd \
+  global_map_pcd:=/absolute/path/localization_map.pcd \
   semantic_map:=/absolute/path/semantic_map.geojson \
   coverage_params:=/absolute/path/coverage.yaml \
   start_semantic_map_server:=true \
@@ -626,15 +630,17 @@ source install/setup.bash
 MAP_ID=greenhouse_01
 MAP_DIR="$(realpath "runtime/maps/$MAP_ID")"
 NAV_MAP="$MAP_DIR/$MAP_ID.yaml"
-GLOBAL_PCD="$MAP_DIR/pcd/all_downsampled_points.pcd"
+GLOBAL_PCD="$MAP_DIR/pcd/localization_map.pcd"
+GLOBAL_PCD_RECORD="$MAP_DIR/pcd/localization_map.processing.yaml"
 SEMANTIC_MAP="$MAP_DIR/semantic/semantic_map.geojson"
 COVERAGE_PARAMS="$MAP_DIR/semantic/coverage.yaml"
 PLATFORM_PROFILE="$(realpath profiles/platforms/bunker.yaml)"
 
-test -f "$NAV_MAP" && test -f "$GLOBAL_PCD" && \
+test -f "$NAV_MAP" && test -f "$GLOBAL_PCD" && test -f "$GLOBAL_PCD_RECORD" && \
   test -f "$SEMANTIC_MAP" && test -f "$COVERAGE_PARAMS" && \
   test -f "$PLATFORM_PROFILE"
 git rev-parse HEAD
+grep -q '^state: ready$' "$GLOBAL_PCD_RECORD"
 ```
 
 先完成本 README 的“CAN 与 BUNKER 通讯测试”。SocketCAN 必须为 `ERROR-ACTIVE`，

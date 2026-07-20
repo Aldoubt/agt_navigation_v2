@@ -1,0 +1,2 @@
+# Preserve fixed vendor snapshots byte-for-byte, including upstream whitespace.
+third_party/rpg_vikit_ros2_fisheye/** -whitespace

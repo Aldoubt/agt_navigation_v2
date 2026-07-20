@@ -53,7 +53,7 @@ MID360 网络、CAN 接口、雷达外参、车辆 footprint、履带方向、�
 ```bash
 ros2 launch agt_bringup system.launch.py \
   mode:=mapping map_name:=greenhouse_01 \
-  start_gui:=true start_rviz:=true
+  start_mapping_gui:=true start_rviz:=true
 ```
 
 Qt5 mapping profile 使用 `odom` 固定坐标系，显示 `/agt/map/mapping_occupancy` 和

@@ -24,7 +24,7 @@ source /opt/ros/humble/setup.bash
 ```
 
 构建过程会按上游 CMake 配置下载 Advanced Docking System、yaml-cpp、nlohmann/json 和
-topology_msgs，产物写入 `build/ros_qt5_gui_app`。源码固定在 fork 提交 `bee4132`，构建产物
+topology_msgs，产物写入 `build/ros_qt5_gui_app`。源码固定在 fork 提交 `f2a043d`，构建产物
 不会提交 Git。
 
 启动脚本只使用本仓库构建产物，找不到时会提示执行
@@ -72,7 +72,10 @@ ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
 中的越界点。保存后的导航地图放在 `runtime/maps/`，下一次启动 map server 时使用对应 YAML。
 
 mapping profile 的 `FixedFrameId=odom` 与 FAST-LIVO2 建图链一致；navigation profile 固定为
-`map`，并要求 NDT/ICP 已发布 `map -> odom`。
+`map`，并要求 NDT/ICP 已发布 `map -> odom`。mapping profile 的
+`EnableTaskExecution=false` 会同时禁用按钮并在 ROS2 channel 再次拒绝多点执行；navigation
+profile 显式设置为 true 才允许调用项目 Action，该键缺失时按 false 拒绝处理。该开关不是安全层替代，
+真实运动仍必须通过 `agt_safety`。
 
 ## 备用工具
 

@@ -24,6 +24,7 @@ def test_mapping_profile_contract():
     assert config["key_value"] == {
         "BaseFrameId": "base_footprint",
         "FixedFrameId": "odom",
+        "EnableTaskExecution": "false",
     }
 
 
@@ -37,6 +38,7 @@ def test_navigation_profile_contract():
     assert config["key_value"] == {
         "BaseFrameId": "base_footprint",
         "FixedFrameId": "map",
+        "EnableTaskExecution": "true",
     }
 
 

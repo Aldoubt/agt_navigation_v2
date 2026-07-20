@@ -38,16 +38,21 @@ source install/setup.bash
 
 ros2 launch agt_bringup system.launch.py \
   mode:=mapping map_name:=greenhouse_20260718_v01 \
-  record_bag:=true start_gui:=true start_rviz:=true
+  record_bag:=true start_mapping_gui:=true start_rviz:=true
 ```
 
 采集路线应覆盖外墙、四角、入口、每条主通道以及回到起点的闭环；避免只沿温室单方向直线行驶。正常流程是先保存二维参考图，再对总 launch 使用 `Ctrl+C`，等待 FAST-LIVO2 写完：
 
 ```text
-runtime/maps/<map_id>/pcd/all_raw_points.pcd
-runtime/maps/<map_id>/pcd/all_downsampled_points.pcd
+runtime/maps/<map_id>/pcd/localization_map.pcd
+runtime/maps/<map_id>/pcd/localization_map.processing.yaml
 runtime/rosbag/mapping_<timestamp>/
 ```
+
+`localization_map.processing.yaml` 必须为 `state: ready`。当前前端在运行期增量累计体素质心，
+不再为退出时的整云降采样长期保留原始点。需要更高密度或后端重优化时，bag 是权威数据源，
+应从 bag 重放并输出新的可追溯 PCD，不要回退使用曾经发生整数索引溢出的旧
+`all_downsampled_points.pcd`。
 
 bag 至少必须包含且消息数非零：
 
@@ -79,10 +84,13 @@ bag 至少必须包含且消息数非零：
 ```bash
 python3 tools/map_tools/init_map_production.py \
   --map-id greenhouse_20260718_v01 \
-  --raw-pcd runtime/maps/greenhouse_20260718_v01/pcd/all_raw_points.pcd \
+  --raw-pcd runtime/maps/greenhouse_20260718_v01/pcd/localization_map.pcd \
   --source-bag runtime/rosbag/mapping_<timestamp> \
   --grid-step 0.05
 ```
+
+`--raw-pcd` 是工具的历史参数名，表示本次地图生产项目的不可覆盖源 PCD；对当前基线它就是
+已通过处理记录验收的 `localization_map.pcd`。
 
 输出目录：
 

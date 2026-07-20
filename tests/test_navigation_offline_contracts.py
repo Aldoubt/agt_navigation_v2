@@ -134,7 +134,10 @@ def test_system_bringup_separates_mapping_and_navigation_modes():
     assert mapping.count('"bunker_description.launch.py"') == 1
     assert navigation.count('"bunker_description.launch.py"') == 1
     assert 'package="rviz2"' in mapping
-    assert '"ros_qt5_gui.launch.py"' not in mapping
+    assert 'DeclareLaunchArgument(\n                "start_gui",\n                default_value="false"' in mapping
+    assert '"ros_qt5_gui.launch.py"' in mapping
+    assert 'IfCondition(LaunchConfiguration("start_gui"))' in mapping
+    assert '"start_gui": LaunchConfiguration("start_mapping_gui")' in system
     assert '"ros_qt5_gui.launch.py"' in navigation
     assert '"map_topic": "/agt/map/mapping_occupancy"' in mapping
     assert "/agt/map/global_occupancy" in (

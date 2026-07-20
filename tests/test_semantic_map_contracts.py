@@ -124,6 +124,7 @@ def test_schema_defines_all_first_version_feature_types():
         "entry_pose",
         "work_direction",
         "row_centerline",
+        "access_lane",
         "headland_zone",
         "keepout_zone",
     }

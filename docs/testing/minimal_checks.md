@@ -41,6 +41,7 @@
 - `runtime/gui/ros_qt5_gui_app/config.json` 使用 V2 map、odom、manual cmd 和 base frame
 - 主入口 `ros_qt5_gui.launch.py` 能启动 GUI；新构建不存在时仅允许显式旧工作区 fallback
 - PGM/YAML 加载保存往返后尺寸、分辨率、原点和占据值不变
+- MapGeometry 显式解析 P2/P5，PNG 由 Pillow 解码；损坏、截断或像素越界文件必须拒绝
 - 编辑结果发布到 `/agt/map/edited`，且不会被原始投影 topic 覆盖
 - `/initialpose` 和 `/goal_pose` 的 frame 均为 `map`
 - 无 GUI 环境可独立运行 `map_io_bridge.py`
@@ -72,7 +73,9 @@
 
 ## 总控模式检查
 - `system.launch.py mode:=mapping` 与 `mode:=navigation` 均只启动一个 robot_state_publisher
-- 建图模式强制 `save_pcd=true`，退出后同时生成原始和降采样 PCD
+- 建图模式强制 `save_pcd=true`，退出后生成 `localization_map.pcd` 和
+  `localization_map.processing.yaml`，只有 `state: ready` 可交给重定位
+- 建图 Qt 默认关闭；显式开启时仍必须拒绝导航任务 Action
 - 导航模式强制 `save_pcd=false`，不得覆盖已有地图
 - 每个子 launch 显式绑定自己的 `params_file`，禁止 FAST-LIVO2/OctoMap/Nav2 参数串包
 - `record_bag:=true` 记录传感器、TF、地图、里程计、控制链和诊断 topic

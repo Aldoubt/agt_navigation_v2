@@ -221,6 +221,13 @@ void rclcomm::PublishTaskStatus(const TaskExecutionStatus &status) {
 void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
   TaskExecutionStatus status;
   status.total_waypoints = request.points.size();
+  if (GET_CONFIG_VALUE("EnableTaskExecution", "false") != "true") {
+    status.state = "REJECTED";
+    status.message = "task execution is disabled by the active GUI profile";
+    status.terminal = true;
+    PublishTaskStatus(status);
+    return;
+  }
   if (request.points.empty()) {
     status.state = "REJECTED";
     status.message = "task chain is empty";

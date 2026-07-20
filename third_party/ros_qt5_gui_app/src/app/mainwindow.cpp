@@ -768,6 +768,16 @@ void MainWindow::setupUi() {
   btn_start_task_chain->setStyleSheet(modernButtonStyle);
   
   QCheckBox *loop_task_checkbox = new QCheckBox("Repeat twice (finite)");
+  const bool task_execution_enabled =
+      GET_CONFIG_VALUE("EnableTaskExecution", "false") == "true";
+  btn_start_task_chain->setEnabled(task_execution_enabled);
+  loop_task_checkbox->setEnabled(task_execution_enabled);
+  if (!task_execution_enabled) {
+    btn_start_task_chain->setToolTip(
+        "Navigation task execution is disabled by the active GUI profile.");
+    loop_task_checkbox->setToolTip(
+        "Finite task repetition is available only in navigation profile.");
+  }
   loop_task_checkbox->setStyleSheet(R"(
     QCheckBox {
       color: #333333;

@@ -50,7 +50,14 @@ def generate_launch_description():
             DeclareLaunchArgument("start_sensor", default_value="true"),
             DeclareLaunchArgument("start_chassis", default_value="true"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
-            DeclareLaunchArgument("start_gui", default_value="true"),
+            DeclareLaunchArgument(
+                "start_gui",
+                default_value="false",
+                description=(
+                    "Optionally start the mapping-profile Qt monitor; navigation "
+                    "task execution remains disabled in that profile"
+                ),
+            ),
             DeclareLaunchArgument("record_bag", default_value="false"),
             OpaqueFunction(function=prepare_runtime),
             include(

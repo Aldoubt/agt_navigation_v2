@@ -17,7 +17,8 @@
   "images": [],
   "key_value": {
     "BaseFrameId": "base_footprint",
-    "FixedFrameId": "odom"
+    "FixedFrameId": "odom",
+    "EnableTaskExecution": "false"
   },
   "map_config": {"path": ""},
   "robot_shape_config": {

@@ -32,6 +32,11 @@ runtime/maps/<map_id>/
 
 仓库中的 `docs/interfaces/examples/semantic_map/` 是可版本化合同样例，不是运行地图。
 
+Nav2 YAML 引用的底图必须可完整读取。`MapGeometry` 显式解析并校验 Netpbm `P2` ASCII 与
+`P5` binary PGM 的尺寸、像素数量和范围；PNG 等其他 Pillow 支持格式必须通过完整
+`verify()`。截断、像素数量不符、非法尺寸或不可识别文件必须 fail-closed，不能仅凭扩展名
+或未验证的图片头继续加载语义任务。
+
 ## GeoJSON 顶层
 
 语义文件必须是 GeoJSON `FeatureCollection`，并包含以下外部成员：

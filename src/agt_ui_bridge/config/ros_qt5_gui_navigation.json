@@ -19,7 +19,8 @@
   "images": [],
   "key_value": {
     "BaseFrameId": "base_footprint",
-    "FixedFrameId": "map"
+    "FixedFrameId": "map",
+    "EnableTaskExecution": "true"
   },
   "map_config": {"path": ""},
   "robot_shape_config": {
