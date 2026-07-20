@@ -9,6 +9,7 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   scripts/map_io_bridge.py
   scripts/map_editor_qt5.py
+  scripts/prepare_qt_runtime.py
   scripts/semantic_editor_qt5.py
   scripts/semantic_map_server.py
   scripts/start_ros_qt5_gui_app.sh
@@ -33,6 +34,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_ros_qt5_gui_profiles test/test_ros_qt5_gui_profiles.py
   )
+  ament_add_pytest_test(test_qt_runtime test/test_qt_runtime.py)
 endif()
 
 ament_package()

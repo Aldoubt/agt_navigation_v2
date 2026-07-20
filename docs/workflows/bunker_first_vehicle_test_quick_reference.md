@@ -224,6 +224,8 @@ grep -E '^(state|input_points|accepted_points|rejected_nonfinite|rejected_coordi
 ```
 
 处理记录必须显示 `state: ready`。PGM/YAML 与导航使用的全局 PCD 必须来自本次同一建图任务；
+总控录制的 bag 名称以 `<map_name>_mapping_<时间戳>` 开头，移动或归档时应把该 bag、
+`runtime/maps/<map_name>/` 整个目录和当次日志作为一个 session 保存，不要只复制 PCD。
 不要使用曾因 PCL 整数网格溢出而与 raw 文件逐字节相同的 `all_downsampled_points.pcd`。
 
 ## 9. 阶段 C：导航只读检查，保持运动禁用
@@ -310,6 +312,36 @@ ros2 topic hz /agt/chassis/cmd_vel
 4. 静态障碍前减速与停止；
 5. 只有前一级通过后才进入下一级。
 
+## 10.1 Qt 手工多点 Demo
+
+当前第三方 Qt 的 **Start Task Chain** 仍按位姿距离等待，不读取 Nav2 Action 结果，
+不要用它执行 Demo，也不要勾选 Loop Task。按以下方式保留 Qt 的选点体验，同时把执行权
+交给项目侧：
+
+1. 在 Qt 中编辑并保存与当前地图同名的 `.topology`；
+2. 添加任务点，按需要排序；
+3. 每次将任务链保存到一个新的 JSON 文件，避免 vendor 重复保存时追加旧点；
+4. 确认重定位、Nav2、底盘和安全状态后显式使能运动；
+5. 在终端执行 Qt 保存的任务文件：
+
+```bash
+TASK_JSON="$(realpath runtime/maps/first_vehicle_test/demo_task_01.json)"
+test -f "$TASK_JSON"
+
+ros2 run agt_navigation execute_waypoint_task.py "$TASK_JSON"
+```
+
+另开终端观察项目状态：
+
+```bash
+ros2 topic echo /agt/navigation/task_status
+```
+
+项目服务会拒绝重复追加、非有限坐标、超出当前 OccupancyGrid 的旧拓扑点和未就绪的
+`agt_safety`，并以 Nav2 `FollowWaypoints` 的成功状态及 `missed_waypoints` 作为完成依据。
+按 `Ctrl+C` 会请求取消当前任务。只有单次任务实车验收通过后，才能尝试显式有限循环，
+例如 `--loop-count 2`；不提供无限循环。
+
 ## 11. 阶段 E：失效安全测试
 
 每项单独执行，执行前确认人员和车辆安全：
@@ -354,6 +386,9 @@ ros2 service call /agt/safety/set_motion_enabled \
 [ ] TF 唯一且连续
 [ ] Nav2 lifecycle 全部 active
 [ ] 0.5–1.0 m 目标成功
+[ ] 项目多点 Action 完成且 missed_waypoints 为空
+[ ] 多点取消后车辆停车
+[ ] 急停导致多点子 Action 取消
 [ ] 障碍停车成功，距离：________
 [ ] CAN 断连停车成功，时间：________
 [ ] 物理急停成功，距离：________

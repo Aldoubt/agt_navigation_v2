@@ -73,6 +73,9 @@
 ## 导航动作与速度链
 - `/navigate_to_pose`: `nav2_msgs/action/NavigateToPose`
 - `/navigate_through_poses`: `nav2_msgs/action/NavigateThroughPoses`
+- `/follow_waypoints`: `nav2_msgs/action/FollowWaypoints`，仅由项目任务桥接调用
+- `/agt/navigation/execute_waypoint_task`: `agt_interfaces/action/ExecuteWaypointTask`
+- `/agt/navigation/task_status`: `std_msgs/String`，项目多点任务 JSON 状态
 - `/goal_pose`: Qt5/RViz2 的 `geometry_msgs/PoseStamped` 兼容入口
 - `/agt/navigation/cmd_vel_raw -> /agt/navigation/cmd_vel -> /agt/safety/cmd_vel -> /agt/chassis/cmd_vel`
 

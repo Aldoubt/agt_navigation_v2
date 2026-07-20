@@ -250,6 +250,7 @@ def generate_launch_description():
                 "ros_qt5_gui.launch.py",
                 {
                     "profile": "navigation",
+                    "map": LaunchConfiguration("map"),
                     "source_map_topic": "/agt/map/global_occupancy",
                     "map_frame_id": "map",
                     "use_sim_time": use_sim_time,

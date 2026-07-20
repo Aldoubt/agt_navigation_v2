@@ -94,8 +94,9 @@ def generate_launch_description():
                     *RECORDED_TOPICS,
                 ],
                 output="screen",
-                sigterm_timeout="10",
-                sigkill_timeout="5",
+                # Large sqlite3 bags may need time to flush metadata after SIGINT.
+                sigterm_timeout="30",
+                sigkill_timeout="10",
             ),
         ]
     )

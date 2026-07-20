@@ -13,7 +13,7 @@ def generate_launch_description():
                 "map_prefix", default_value="runtime/maps/mid360_map"
             ),
             DeclareLaunchArgument("image_format", default_value="pgm"),
-            DeclareLaunchArgument("save_map_timeout", default_value="20.0"),
+            DeclareLaunchArgument("save_map_timeout", default_value="60.0"),
             ExecuteProcess(
                 cmd=[
                     "ros2",
@@ -33,6 +33,8 @@ def generate_launch_description():
                     ["save_map_timeout:=", LaunchConfiguration("save_map_timeout")],
                 ],
                 output="screen",
+                sigterm_timeout="70",
+                sigkill_timeout="10",
             ),
         ]
     )

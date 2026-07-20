@@ -6,7 +6,7 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
 from launch_ros.actions import Node
 
 
@@ -39,7 +39,8 @@ def generate_launch_description():
     runtime_dir = LaunchConfiguration("runtime_dir")
     map_name = LaunchConfiguration("map_name")
     pcd_dir = PathJoinSubstitution([runtime_dir, "maps", map_name, "pcd"])
-    bag_name = f"mapping_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bag_name = PythonExpression(["'", map_name, f"_mapping_{timestamp}'"])
 
     return LaunchDescription(
         [

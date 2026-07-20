@@ -10,9 +10,10 @@ RUNTIME_ROOT="${ROS_QT5_GUI_RUNTIME_DIR:-${WS_ROOT}/runtime/gui/ros_qt5_gui_app}
 BINARY="${BUILD_DIR}/ros_qt5_gui_app"
 PROFILE="navigation"
 RESET_CONFIG=false
+MAP_YAML=""
 
 usage() {
-  echo "Usage: $0 [--profile mapping|navigation] [--reset-config]" >&2
+  echo "Usage: $0 [--profile mapping|navigation] [--map MAP.yaml] [--reset-config]" >&2
 }
 
 while (( $# > 0 )); do
@@ -29,6 +30,14 @@ while (( $# > 0 )); do
     --reset-config)
       RESET_CONFIG=true
       shift
+      ;;
+    --map)
+      if (( $# < 2 )); then
+        echo "--map requires a Nav2 map YAML" >&2
+        exit 64
+      fi
+      MAP_YAML="$2"
+      shift 2
       ;;
     -h|--help)
       usage
@@ -61,6 +70,28 @@ if [[ ! -f "${RUNTIME_DIR}/config.json" || "${RESET_CONFIG}" == true ]]; then
   cp "${CONFIG_TEMPLATE}" "${RUNTIME_DIR}/config.json"
 fi
 
+prepare_args=(
+  --config "${RUNTIME_DIR}/config.json"
+  --template "${CONFIG_TEMPLATE}"
+)
+if [[ -n "${MAP_YAML}" ]]; then
+  prepare_args+=(--map "${MAP_YAML}")
+fi
+ros2 run agt_ui_bridge prepare_qt_runtime.py "${prepare_args[@]}"
+
 cd "${RUNTIME_DIR}"
-export LD_LIBRARY_PATH="${BUILD_DIR}/lib:${LD_LIBRARY_PATH:-}"
+
+# VS Code installed through Snap can leak incompatible GUI and loader paths.
+for variable in SNAP SNAP_ARCH SNAP_COMMON SNAP_DATA SNAP_LIBRARY_PATH SNAP_NAME \
+  SNAP_REAL_HOME SNAP_REVISION GTK_PATH GIO_EXTRA_MODULES QT_PLUGIN_PATH \
+  QML2_IMPORT_PATH; do
+  unset "${variable}"
+done
+clean_ld_library_path=""
+IFS=':' read -ra library_paths <<< "${LD_LIBRARY_PATH:-}"
+for path in "${library_paths[@]}"; do
+  [[ -z "${path}" || "${path}" == /snap/* ]] && continue
+  clean_ld_library_path="${clean_ld_library_path:+${clean_ld_library_path}:}${path}"
+done
+export LD_LIBRARY_PATH="${BUILD_DIR}/lib${clean_ld_library_path:+:${clean_ld_library_path}}"
 exec "${BINARY}"

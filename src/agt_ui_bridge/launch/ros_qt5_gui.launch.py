@@ -13,6 +13,7 @@ def generate_launch_description():
                 "profile", default_value="navigation", choices=["mapping", "navigation"]
             ),
             DeclareLaunchArgument("start_map_io_bridge", default_value="true"),
+            DeclareLaunchArgument("map", default_value=""),
             DeclareLaunchArgument(
                 "source_map_topic", default_value="/agt/map/global_occupancy"
             ),
@@ -42,6 +43,8 @@ def generate_launch_description():
                     "start_ros_qt5_gui_app.sh",
                     "--profile",
                     LaunchConfiguration("profile"),
+                    "--map",
+                    LaunchConfiguration("map"),
                 ],
                 output="screen",
             ),

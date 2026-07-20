@@ -77,6 +77,15 @@
 - NDT-OMP must never size per-thread work buffers from an unchecked thread count.
 - A successful field trial and low fitness score do not replace parameter-boundary regression tests or validation with the map PCD used for navigation.
 
+## Qt Waypoint Task Contract
+- Upstream source under `third_party/ros_qt5_gui_app` remains unchanged. Its native task loop is a compatibility UI, not an execution authority.
+- Qt-compatible task JSON is operator input only. Portable frontends may submit `map`-frame PoseStamped arrays instead. Project-owned execution must validate finite coordinates, point count, repeated append patterns, and every waypoint against the currently published OccupancyGrid before sending motion goals.
+- `/agt/navigation/execute_waypoint_task` is the project-owned `ExecuteWaypointTask` action. It may dispatch only Nav2 `FollowWaypoints`; it must not publish velocity or enable `agt_safety`.
+- A task succeeds only when the Nav2 child Action succeeds with no missed waypoints. Rejection, abort, missed waypoints, stale safety state, map mismatch, cancellation, and unexpected exceptions are terminal failures.
+- Looping must be explicit and finite. Zero-count or unbounded loops are forbidden.
+- Parent cancellation and loss of recent `agt_safety` motion readiness must cancel the active Nav2 child before the project task finishes.
+- New frontends and future autostart/lifecycle managers must call the project Action rather than reimplement waypoint distance polling.
+
 ## PCD Persistence Runtime Contract
 - LIO-only Bunker mapping must build the navigation PCD incrementally with sparse signed 64-bit voxel keys; it must not retain the complete raw accumulated cloud merely to downsample at shutdown.
 - Non-finite points and finite points outside the configured absolute coordinate bound must be rejected before voxel insertion, and the saved processing record must report both rejection counts and observed bounds.

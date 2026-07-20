@@ -39,7 +39,9 @@ mkdir -p "${OUTPUT_DIR}"
 ros2 run nav2_map_server map_saver_cli \
   -t "${MAP_TOPIC}" \
   -f "${OUTPUT_PREFIX}" \
-  --ros-args -p map_subscribe_transient_local:=true
+  --ros-args \
+  -p map_subscribe_transient_local:=true \
+  -p save_map_timeout:=60.0
 
 if [[ ! -f "${OUTPUT_PREFIX}.pgm" || ! -f "${OUTPUT_PREFIX}.yaml" ]]; then
   echo "Map saver returned without both expected output files" >&2

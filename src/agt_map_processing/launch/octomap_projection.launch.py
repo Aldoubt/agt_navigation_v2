@@ -29,6 +29,8 @@ def generate_launch_description():
                 executable="octomap_server_node",
                 name="agt_map_processing_octomap",
                 output="screen",
+                sigterm_timeout="30",
+                sigkill_timeout="10",
                 parameters=[
                     LaunchConfiguration("params_file"),
                     {

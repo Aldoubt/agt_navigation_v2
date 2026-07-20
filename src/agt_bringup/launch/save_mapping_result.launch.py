@@ -49,9 +49,11 @@ def generate_launch_description():
                     "-p",
                     "map_subscribe_transient_local:=true",
                     "-p",
-                    "save_map_timeout:=20.0",
+                    "save_map_timeout:=60.0",
                 ],
                 output="screen",
+                sigterm_timeout="70",
+                sigkill_timeout="10",
             ),
         ]
     )
