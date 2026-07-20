@@ -14,6 +14,11 @@ from static_obstacle_evidence import (  # noqa: E402
     select_unique_cells,
 )
 from apply_swept_footprint_to_map import apply_swept_cells, read_p5, write_p5  # noqa: E402
+from generate_traversability_variants import (  # noqa: E402
+    fit_ground_plane,
+    select_cells,
+    update_cell_statistics,
+)
 
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -133,6 +138,30 @@ def test_swept_cells_clear_pgm_rows_without_overwriting_input(tmp_path):
     path = tmp_path / "swept.pgm"
     write_p5(path, output, 1.0)
     assert np.array_equal(read_p5(path), output)
+
+
+def test_ground_plane_ransac_rejects_obstacle_outliers():
+    x, y = np.meshgrid(np.linspace(-5.0, 5.0, 30), np.linspace(-4.0, 4.0, 25))
+    z = 0.02 * x - 0.01 * y - 0.04
+    ground = np.column_stack((x.reshape(-1), y.reshape(-1), z.reshape(-1)))
+    obstacles = ground[:80].copy()
+    obstacles[:, 2] += 0.6
+    fitted = fit_ground_plane(np.vstack((ground, obstacles)), seed=9)
+    assert fitted is not None
+    coefficients, ratio = fitted
+    assert np.allclose(coefficients, [0.02, -0.01, -0.04], atol=0.01)
+    assert ratio > 0.8
+
+
+def test_temporal_cell_filter_requires_observation_span():
+    statistics = {}
+    cells = np.asarray([[2, 3], [4, 5]], dtype=np.int64)
+    update_cell_statistics(statistics, cells, 10.0)
+    update_cell_statistics(statistics, cells, 10.1)
+    update_cell_statistics(statistics, np.asarray([[2, 3]]), 10.8)
+    assert select_cells(
+        statistics, minimum_observations=3, minimum_span=0.5
+    ) == {(2, 3)}
 
 
 def test_offline_launch_preserves_recorded_raytraced_baseline_by_default():

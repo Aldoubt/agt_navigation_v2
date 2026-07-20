@@ -97,6 +97,32 @@ ros2 run agt_map_processing apply_swept_footprint_to_map.py \
 栅格数和实际改动像素数。最终审计必须确认轨迹中心附近伪障碍下降，同时 footprint 外的
 障碍基本不变。
 
+## 地面、时序动态与高度分层对照
+
+`generate_traversability_variants.py` 只用于离线对照，一次直接读取 bag 并生成：
+
+- `ground_only`：局部约束 RANSAC 地面平面以上的多帧障碍；
+- `ground_temporal`：再要求同一栅格的观测时间跨度至少 `0.5 s`，抑制移动拖影；
+- `ground_temporal_layered_provisional`：只保留 `0.10–0.65 m` 碰撞高度，忽略
+  `0.65–2.0 m` 上方层。
+
+```bash
+ros2 run agt_map_processing generate_traversability_variants.py \
+  --bag "$(realpath runtime/rosbag/<mapping_bag>)" \
+  --baseline-yaml "$(realpath runtime/maps/<baseline>/<baseline>.yaml)" \
+  --output-dir "$(realpath runtime/maps/<comparison_id>)" \
+  --platform-profile "$(realpath profiles/platforms/bunker.yaml)"
+```
+
+默认地面候选范围为车辆周围 `1–20 m`、相对底盘 `-0.5–0.5 m`，RANSAC 距离容差
+`0.08 m`、最大坡度 `20 deg`。障碍层为 `0.10–0.35 m`、`0.35–0.65 m` 和
+`0.65–2.0 m`；每个栅格至少三帧，时序变体还要求跨度 `0.5 s`。所有变体最后应用完整
+canonical footprint 扫掠。
+
+高度分层图默认写入报告 `eligible_for_execution=false`。Bunker 产品车体高 `0.4 m`，但
+MID360、支架和线束组成的整车最高点尚未实测，因此 `0.65 m` 只是对比阈值，不能据此
+放行真实导航。
+
 ## 后续后端
 
 - 几何地面分割与可通行性栅格。

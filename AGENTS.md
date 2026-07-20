@@ -85,6 +85,7 @@
 - Registered-cloud height filtering is relative to a timestamp-matched/interpolated recorded base pose, and must reject non-finite points and canonical polygon-footprint self returns before grid accumulation. Callback-time latest pose is forbidden for offline evidence.
 - Evidence thresholds and any grid padding must be explicit and recorded. Nav2 inflation and the robot footprint remain runtime costmap products and must not be baked into the source PGM.
 - Static-map self-return cleanup may mark only the complete recorded canonical polygon-footprint sweep plus explicit clearance as free. It must consume every bag odometry pose directly, report the count, avoid DDS replay gaps, and never use a circular corridor to erase nearby obstacles.
+- Ground/temporal/height-layer variants are offline comparison products. Ground fitting must report failures and model statistics; temporal rejection must require both distinct observations and elapsed span. A height layer may be treated as traversable only when the complete vehicle-plus-sensor clearance is physically verified; provisional layered maps must report `eligible_for_execution=false`.
 - Offline planner visualization may display the static map, inflated global costmap, and canonical platform polygon together, but it remains non-executable and must not start the motion chain.
 
 ## Qt Waypoint Task Contract
