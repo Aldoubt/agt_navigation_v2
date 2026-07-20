@@ -1,6 +1,6 @@
 # 迁移矩阵
 
-更新时间：2026-07-18。
+更新时间：2026-07-19。
 
 状态按“代码迁移、离线验证、数据回放、实机验收”分级记录。当前离线回归为
 `200 passed`；离线通过不代表定位精度、导航性能或实车安全验收通过。
@@ -8,7 +8,7 @@
 | 模块 | Phase | 当前状态 | 已验证范围 | 下一步 |
 | --- | --- | --- | --- | --- |
 | `agt_interfaces` | 1/8 | TASK-13/14 完成 | `ExecuteCoverageTask.action` 已生成并由 `/agt/coverage/execute` 消费；Python/C++ 类型、序列化和安装态导入通过 | 后续字段变更需兼容性评审，并同步服务端与客户端 |
-| `agt_description` | 2/8 | 离线完成 | 固定 TF、MK-mini/BUNKER profile、Xacro 展开、TF 单父节点和可配置 MID360 外参通过；新增温室阿克曼 canonical profile，记录用户提供几何、1.5 m 转弯半径和 Hybrid-A* repair 合同 | 实测温室车 `base_link` 相对后轴位置与运动限速；标定 `base_link -> lidar_link`，确认各平台几何校验状态 |
+| `agt_description` | 2/8 | 离线完成 | 固定 TF、MK-mini/BUNKER profile、Xacro 展开、TF 单父节点和可配置 MID360 外参通过；BUNKER 已录入 2026-07-19 粗测的雷达中心平移 `[0.2615, 0.0, 0.3000] m` 和向前 `30 deg` pitch；新增温室阿克曼 canonical profile，记录用户提供几何、1.5 m 转弯半径和 Hybrid-A* repair 合同 | 精测 BUNKER `base_link` 高度和 MID360 六自由度外参；实测温室车 `base_link` 相对后轴位置与运动限速，确认各平台几何校验状态 |
 | `agt_bringup` | 1/3/4/5/6/8 | Bunker Qt5 FAST-LIO baseline 已接线 | mapping/navigation 共用总入口；mapping 启动独立 Qt5 profile，navigation 保持语义与覆盖默认关闭；单一 TF 和安全速度链由契约测试约束 | 实机完成建图保存、同源 PCD 重定位、Qt 初始位姿与单点导航闭环 |
 | `agt_sensor_adapters` | 3 | baseline 完成 | Livox 驱动已迁入，MID360 PointCloud2 到 CustomMsg 转换、统一 topic 和短 bag 回放通过 | 实机验证网络、QoS、频率、时间戳、丢包和长时间运行稳定性 |
 | `agt_mapping` | 3 | baseline 完成 | 指定 FAST-LIVO2 分支已 vendor 和编译；adapter、位姿/twist 外参换算、TF 与局部雷达帧点云回放通过 | 标定车辆外参，使用完整 bag 生成新旧轨迹、点云数量和数值精度对比报告 |

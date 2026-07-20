@@ -1,5 +1,9 @@
 # Bunker Qt5 FAST-LIO 基础导航闭环
 
+首次实车联调时优先使用精简的
+[`BUNKER 首次上车测试备忘`](bunker_first_vehicle_test_quick_reference.md)，通过分阶段门禁后再按
+本文理解和排查完整数据链。
+
 本流程只覆盖 MID360、FAST-LIVO2、二维建图、Qt5、PGM/YAML/PCD 保存、NDT/ICP、
 Nav2、安全层和 Bunker 底盘。语义地图、Keepout 和覆盖规划保留但默认关闭，不属于本次
 实机验收。

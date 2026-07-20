@@ -23,7 +23,7 @@ MAP_TOPIC="/agt/map/mapping_occupancy"
 OUTPUT_DIR="${REPOSITORY_ROOT}/runtime/maps/${MAP_NAME}"
 OUTPUT_PREFIX="${OUTPUT_DIR}/${MAP_NAME}"
 
-if ! ros2 topic list | rg -x --fixed-strings "${MAP_TOPIC}" >/dev/null; then
+if ! ros2 topic list | grep -Fqx -- "${MAP_TOPIC}"; then
   echo "Mapping topic is not available: ${MAP_TOPIC}" >&2
   exit 2
 fi
