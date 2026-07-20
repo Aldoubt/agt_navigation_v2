@@ -30,6 +30,8 @@
 #include "ui_mainwindow.h"
 #include <QButtonGroup>
 #include <QMessageBox>
+#include <QMetaObject>
+#include <cmath>
 
 #include "widgets/speed_ctrl.h"
 #include "widgets/display_config_widget.h"
@@ -131,7 +133,6 @@ void MainWindow::registerChannel() {
   });
 
   SUBSCRIBE(MSG_ID_ROBOT_POSE, [this](const RobotPose& robot_pose) {
-      nav_goal_table_view_->UpdateRobotPose(robot_pose);
       Display::ViewManager* view_manager = dynamic_cast<Display::ViewManager*>(display_manager_->GetViewPtr());
       if (view_manager) {
         view_manager->UpdateRobotPos("Robot: (" + QString::number(robot_pose.x, 'f', 2) + ", " + 
@@ -153,6 +154,15 @@ void MainWindow::registerChannel() {
     if (diagnostic_dock_widget_) {
       diagnostic_dock_widget_->SetSnapshot(snap);
     }
+  });
+
+  SUBSCRIBE(MSG_ID_TASK_CHAIN_STATUS, [this](const TaskExecutionStatus &status) {
+    QMetaObject::invokeMethod(
+        nav_goal_table_view_,
+        [this, status]() {
+          nav_goal_table_view_->UpdateTaskExecutionStatus(status);
+        },
+        Qt::QueuedConnection);
   });
 }
 
@@ -757,7 +767,7 @@ void MainWindow::setupUi() {
   QPushButton *btn_start_task_chain = new QPushButton("Start Task Chain");
   btn_start_task_chain->setStyleSheet(modernButtonStyle);
   
-  QCheckBox *loop_task_checkbox = new QCheckBox("Loop Task");
+  QCheckBox *loop_task_checkbox = new QCheckBox("Repeat twice (finite)");
   loop_task_checkbox->setStyleSheet(R"(
     QCheckBox {
       color: #333333;
@@ -812,6 +822,12 @@ void MainWindow::setupUi() {
           [this](const RobotPose &pose) {
             PUBLISH(MSG_ID_SET_NAV_GOAL_POSE, pose);
           });
+  connect(nav_goal_table_view_, &NavGoalTableView::signalExecuteTaskChain,
+          [this](const TaskExecutionRequest &request) {
+            PUBLISH(MSG_ID_EXECUTE_TASK_CHAIN, request);
+          });
+  connect(nav_goal_table_view_, &NavGoalTableView::signalCancelTaskChain,
+          [this]() { PUBLISH(MSG_ID_CANCEL_TASK_CHAIN, true); });
   connect(btn_load_task_chain, &QPushButton::clicked, [this]() {
     QString fileName = QFileDialog::getOpenFileName(nullptr, "Open JSON file",
                                                     "", "JSON files (*.json)",
@@ -834,12 +850,15 @@ void MainWindow::setupUi() {
       if (!fileName.endsWith(".json")) {
         fileName += ".json";
       }
-      nav_goal_table_view_->SaveTaskChain(fileName.toStdString());
-      
-      // 显示保存成功对话框
-      QMessageBox::information(this, "保存成功", 
-                              "任务链文件已成功保存到:\n" + fileName,
-                              QMessageBox::Ok);
+      if (nav_goal_table_view_->SaveTaskChain(fileName.toStdString())) {
+        QMessageBox::information(this, "保存成功",
+                                 "任务链文件已成功保存到:\n" + fileName,
+                                 QMessageBox::Ok);
+      } else {
+        QMessageBox::warning(this, "保存失败",
+                             "任务链包含当前拓扑中不存在的点，未写入文件。",
+                             QMessageBox::Ok);
+      }
     }
   });
 
@@ -915,9 +934,9 @@ void MainWindow::setupUi() {
 
       std::string topology_path = fileName.toStdString();
       // 替换扩展名为.topology
-      size_t last_dot = topology_path.find_last_of(".");
-      if (last_dot != std::string::npos) {
-        topology_path = topology_path.substr(0, last_dot) + ".topology";
+      size_t topology_last_dot = topology_path.find_last_of(".");
+      if (topology_last_dot != std::string::npos) {
+        topology_path = topology_path.substr(0, topology_last_dot) + ".topology";
       } else {
         topology_path += ".topology";
       }
@@ -1173,24 +1192,27 @@ bool MainWindow::LoadMap(const std::string& file_path) {
 
   std::string extension = QFileInfo(QString::fromStdString(file_path)).suffix().toStdString();
   
-  if (extension == "yaml") {
-    map_path_ = file_path;
-    size_t last_dot = map_path_.find_last_of(".");
-    if (last_dot != std::string::npos) {
-      map_path_ = map_path_.substr(0, last_dot);
-    }
-
-    Config::ConfigManager::Instance()->GetRootConfig().map_config.path = map_path_;
-    Config::ConfigManager::Instance()->StoreConfig();
-
+  if (extension == "yaml" || extension == "yml") {
     OccupancyMap map;
     if (map.Load(file_path)) {
+      map_path_ = file_path;
+      size_t last_dot = map_path_.find_last_of(".");
+      if (last_dot != std::string::npos) {
+        map_path_ = map_path_.substr(0, last_dot);
+      }
+      Config::ConfigManager::Instance()->GetRootConfig().map_config.path = map_path_;
+      Config::ConfigManager::Instance()->StoreConfig();
+
       display_manager_->UpdateOCCMap(map);
+      // A topology belongs to exactly one map. Clear the previous one before
+      // considering a same-name sidecar so switching maps cannot retain stale
+      // or out-of-bounds task points.
+      display_manager_->UpdateTopologyMap(TopologyMap{});
       
       std::string topology_path = file_path;
-      size_t last_dot = topology_path.find_last_of(".");
-      if (last_dot != std::string::npos) {
-        topology_path = topology_path.substr(0, last_dot) + ".topology";
+      size_t topology_last_dot = topology_path.find_last_of(".");
+      if (topology_last_dot != std::string::npos) {
+        topology_path = topology_path.substr(0, topology_last_dot) + ".topology";
       } else {
         topology_path += ".topology";
       }
@@ -1198,7 +1220,33 @@ bool MainWindow::LoadMap(const std::string& file_path) {
       if (QFile::exists(QString::fromStdString(topology_path))) {
         TopologyMap topology_map;
         if (Config::ConfigManager::Instance()->ReadTopologyMap(topology_path, topology_map)) {
-          display_manager_->UpdateTopologyMap(topology_map);
+          bool all_points_in_map = true;
+          const double yaw = map.map_config.origin.size() >= 3
+                                 ? map.map_config.origin[2]
+                                 : 0.0;
+          const double cos_yaw = std::cos(yaw);
+          const double sin_yaw = std::sin(yaw);
+          for (const auto &point : topology_map.points) {
+            const double dx = point.x - map.map_config.origin[0];
+            const double dy = point.y - map.map_config.origin[1];
+            const double local_x = cos_yaw * dx + sin_yaw * dy;
+            const double local_y = -sin_yaw * dx + cos_yaw * dy;
+            if (local_x < 0.0 || local_y < 0.0 ||
+                local_x >= map.cols * map.map_config.resolution ||
+                local_y >= map.rows * map.map_config.resolution) {
+              all_points_in_map = false;
+              LOG_ERROR("Topology point outside selected map: " << point.name);
+              break;
+            }
+          }
+          if (all_points_in_map) {
+            display_manager_->UpdateTopologyMap(topology_map);
+          } else {
+            QMessageBox::warning(
+                this, "拓扑地图不匹配",
+                "同名拓扑文件包含地图范围外的点，已保持拓扑为空。\n"
+                "请在当前地图上重新创建任务点。");
+          }
         }
       }
       return true;

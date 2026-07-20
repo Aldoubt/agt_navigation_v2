@@ -12,7 +12,10 @@
 - Migrate one module or one data chain at a time.
 - Do not hardcode usernames, workspace paths, device paths, or map paths.
 - Do not allow multiple nodes to publish the same TF edge.
-- Do not modify upstream source under `third_party/ros_qt5_gui_app`.
+- `third_party/ros_qt5_gui_app` is a fixed vendored snapshot of the
+  `Aldoubt/Ros_Qt5_Gui_App:agt-navigation-v2` integration branch. Project
+  changes are allowed there, must preserve GPL-2.0 attribution, must be pushed
+  to that fork, and must update the pinned provenance in `third_party/README.md`.
 - Do not bypass `agt_safety` or publish GUI/navigation velocity directly to the
   Bunker driver.
 - Semantic-map and coverage-planning launch arguments must default to `false`.
@@ -78,13 +81,21 @@
 - A successful field trial and low fitness score do not replace parameter-boundary regression tests or validation with the map PCD used for navigation.
 
 ## Qt Waypoint Task Contract
-- Upstream source under `third_party/ros_qt5_gui_app` remains unchanged. Its native task loop is a compatibility UI, not an execution authority.
+- The maintained Qt fork is a frontend only. Its native Start/Stop controls must call the project Action and display Action feedback/result; pose-distance polling is forbidden as an execution-success test.
 - Qt-compatible task JSON is operator input only. Portable frontends may submit `map`-frame PoseStamped arrays instead. Project-owned execution must validate finite coordinates, point count, repeated append patterns, and every waypoint against the currently published OccupancyGrid before sending motion goals.
 - `/agt/navigation/execute_waypoint_task` is the project-owned `ExecuteWaypointTask` action. It may dispatch only Nav2 `FollowWaypoints`; it must not publish velocity or enable `agt_safety`.
 - A task succeeds only when the Nav2 child Action succeeds with no missed waypoints. Rejection, abort, missed waypoints, stale safety state, map mismatch, cancellation, and unexpected exceptions are terminal failures.
 - Looping must be explicit and finite. Zero-count or unbounded loops are forbidden.
 - Parent cancellation and loss of recent `agt_safety` motion readiness must cancel the active Nav2 child before the project task finishes.
 - New frontends and future autostart/lifecycle managers must call the project Action rather than reimplement waypoint distance polling.
+- Switching the selected Nav2 map must clear stale topology before loading a matching sidecar; malformed map YAML and out-of-map topology points must fail without crashing or retaining actionable stale data.
+
+## Future Semantic Perception Contract
+- Manual, persistent semantic geometry remains GeoJSON/`coverage.yaml`; dynamic camera/lidar detections remain separate, timestamped observations and must never be painted into the source PGM.
+- Sensor/backend adapters may change, but downstream integration must use normalized project topics and valid TF rather than depend directly on a detector vendor message.
+- Semantic perception may contribute bounded obstacle observations, operator overlays, diagnostics, and future behavior decisions. It must never publish velocity, enable motion, or bypass Nav2, `agt_safety`, or the chassis watchdog.
+- Human detections are advisory until dataset accuracy, latency, stale-data clearing, false-negative behavior, and fail-safe field tests are explicitly accepted.
+- Reserved future interfaces and rollout gates are documented in `docs/architecture/future_semantic_perception_interfaces.md`; a reservation is not an implemented or safety-certified interface.
 
 ## PCD Persistence Runtime Contract
 - LIO-only Bunker mapping must build the navigation PCD incrementally with sparse signed 64-bit voxel keys; it must not retain the complete raw accumulated cloud merely to downsample at shutdown.

@@ -1,9 +1,8 @@
 # Qt waypoint task Action
 
 `/agt/navigation/execute_waypoint_task` is the stable project boundary between an
-operator frontend and Nav2 waypoint execution. The current Qt5 application remains an
-unmodified map, topology and task-chain editor; its JSON output is validated by the
-project server before motion is requested.
+operator frontend and Nav2 waypoint execution. The maintained Qt5 fork is an
+operator/editor and Action client; this project Action remains the execution authority.
 
 ## Action
 
@@ -39,9 +38,10 @@ The server never enables motion and never publishes velocity. It sends only
 `nav2_msgs/action/FollowWaypoints`; cancellation or loss of safety readiness cancels
 the active child goal. A Nav2 abort or any `missed_waypoints` makes the parent task fail.
 
-## Current Qt compatibility boundary
+## Qt integration boundary
 
-The vendor **Start Task Chain** button still uses pose-distance polling and is not this
-Action. For the baseline Demo, create points in Qt, save each task to a new JSON file,
-then execute that file with the project client. A future project-owned Qt/Web frontend
-can call the same Action without changing navigation, safety or chassis code.
+The maintained `agt-navigation-v2` Qt branch submits the currently selected points as
+`map`-frame poses to this Action. Its Start/Stop controls display Action feedback and
+forward cancellation. The JSON client remains available for headless operation and
+replay. Any future Qt/Web/autostart frontend must call this same Action and must not
+duplicate its state machine.

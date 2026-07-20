@@ -33,9 +33,14 @@
 #include "tf2_ros/transform_listener.h"
 #include "virtual_channel_node.h"
 #include "topology_msgs/msg/topology_map.hpp"
+#include "agt_interfaces/action/execute_waypoint_task.hpp"
+#include "config/task_chain.h"
 #include "core/framework/framework.h"
+#include <mutex>
 
 class rclcomm : public VirtualChannelNode {
+  using WaypointTask = agt_interfaces::action::ExecuteWaypointTask;
+  using WaypointTaskGoalHandle = rclcpp_action::ClientGoalHandle<WaypointTask>;
  public:
   rclcomm();
   ~rclcomm() override = default;
@@ -66,6 +71,9 @@ class rclcomm : public VirtualChannelNode {
   basic::RobotPose getTransform(std::string from, std::string to);
   TopologyMap ConvertFromRosMsg(const topology_msgs::msg::TopologyMap::SharedPtr msg);
   topology_msgs::msg::TopologyMap ConvertToRosMsg(const TopologyMap& topology_map);
+  void ExecuteTaskChain(const TaskExecutionRequest &request);
+  void CancelTaskChain();
+  void PublishTaskStatus(const TaskExecutionStatus &status);
 
  private:
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr speed_publisher_;
@@ -93,6 +101,11 @@ class rclcomm : public VirtualChannelNode {
       topology_map_subscriber_;
   rclcpp::Publisher<topology_msgs::msg::TopologyMap>::SharedPtr
       topology_map_update_publisher_;
+  rclcpp_action::Client<WaypointTask>::SharedPtr waypoint_task_client_;
+  WaypointTaskGoalHandle::SharedPtr waypoint_task_goal_handle_;
+  bool waypoint_task_pending_{false};
+  bool waypoint_task_cancel_requested_{false};
+  std::mutex waypoint_task_mutex_;
   std::vector<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr> image_subscriber_list_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> transform_listener_;

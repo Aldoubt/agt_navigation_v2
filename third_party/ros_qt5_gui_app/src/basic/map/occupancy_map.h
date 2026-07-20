@@ -72,28 +72,34 @@ struct MapConfig {
       LOG_ERROR("Map_server could not open " << filename.c_str());
       return false;
     }
-    YAML::Node doc = YAML::Load(fin);
+    YAML::Node doc;
+    try {
+      doc = YAML::Load(fin);
+    } catch (const YAML::Exception &e) {
+      LOG_ERROR("Invalid map YAML " << filename << ": " << e.what());
+      return false;
+    }
     try {
       resolution = doc["resolution"].as<double>();
-    } catch (YAML::InvalidScalar &) {
+    } catch (const YAML::Exception &) {
       LOG_ERROR("The map does not contain a resolution tag or it is invalid.");
       return false;
     }
     try {
       negate = doc["negate"].as<int>();
-    } catch (YAML::InvalidScalar &) {
+    } catch (const YAML::Exception &) {
       LOG_ERROR("The map does not contain a negate tag or it is invalid.");
       return false;
     }
     try {
       occupied_thresh = doc["occupied_thresh"].as<double>();
-    } catch (YAML::InvalidScalar &) {
+    } catch (const YAML::Exception &) {
       LOG_ERROR("The map does not contain an occupied_thresh tag or it is invalid.");
       return false;
     }
     try {
       free_thresh = doc["free_thresh"].as<double>();
-    } catch (YAML::InvalidScalar &) {
+    } catch (const YAML::Exception &) {
       LOG_ERROR("The map does not contain a free_thresh tag or it is invalid.");
       return false;
     }
@@ -118,7 +124,7 @@ struct MapConfig {
      }
     try {
       origin = doc["origin"].as<std::vector<double>>();
-    } catch (YAML::InvalidScalar &) {
+    } catch (const YAML::Exception &) {
       LOG_ERROR("The map does not contain an origin tag or it is invalid.");
       return false;
     }
@@ -137,7 +143,7 @@ struct MapConfig {
         mapfpath = dir / mapfpath;
         image = mapfpath.string();
       }
-    } catch (YAML::InvalidScalar &) {
+    } catch (const YAML::Exception &) {
       LOG_ERROR("The map does not contain an image tag or it is invalid.");
       return false;
     }

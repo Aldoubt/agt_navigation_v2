@@ -3,10 +3,11 @@
 `agt_navigation_v2` 是面向农业机器人导航实验的 ROS 2 模块化平台。
 
 当前已完成仓库与接口骨架、机器人描述、MID360 驱动、FAST-LIVO2 建图适配、OctoMap
-二维投影、ICP/NDT 重定位代码迁移、Qt5 地图界面、完整 Nav2 离线闭环，以及 BUNKER
+二维投影、ICP/NDT 重定位、维护版 Qt5 地图与多点 Action 界面、完整 Nav2 离线闭环，以及 BUNKER
 底盘通讯和履带安全层。
-现有 MID360 bag 已完成字段审计、CustomMsg 转换和短回放链路验证；全局 PCD 重定位联调、
-完整 bag 地图调优、真实地图重定位联调和实机验收仍待执行。农业语义覆盖链已完成
+现有 MID360 bag 已完成字段审计、CustomMsg 转换、完整大包建图和同源 PCD 重定位初验；
+大地图保存已改为过滤异常点并使用稀疏 64 位体素累计，NDT 线程参数边界已修复。批量重定位
+收敛率、精确外参和完整实机安全验收仍待执行。农业语义覆盖链已完成
 TASK-00~15，TASK-16 已落地路径时间估算 baseline，覆盖率、重叠率与可复现实验汇总仍待完成。
 
 ## 项目进度概览
@@ -16,14 +17,14 @@ TASK-00~15，TASK-16 已落地路径时间估算 baseline，覆盖率、重叠�
 | Phase 0：旧系统基线 | 部分完成 | 现有 bag 保留旧链注册点云、里程计、TF 和投影地图 | 固定旧仓库 tag/commit、参数快照和可复现报告 |
 | Phase 1：仓库与接口 | 已完成 | 16 个 `agt_*` package 可被 colcon 识别，命名和目录契约已建立 | 按后续模块需要补充自定义 msg/srv/action |
 | Phase 2：机器人描述 | 已离线完成 | TF 单父节点、MK-mini/BUNKER 尺寸配置和 Xacro 展开通过 | 标定 `base_link -> lidar_link`，实测 BUNKER 基准高度和履带中心距 |
-| Phase 3：传感器与建图 | 已完成 baseline | MID360 PointCloud2 转 CustomMsg、FAST-LIVO2 编译回放、统一里程计/点云接口通过 | 完整 bag 新旧轨迹/点云数值对比和车辆外参验证 |
-| Phase 4：重定位 | 代码已落地 | ICP/NDT core、初值外参修正和唯一 `map -> odom` 发布逻辑已编译 | 从同源建图结果导出全局 PCD，验证收敛率与错误初值拒绝 |
-| Phase 5：地图处理 | baseline 可用 | OctoMap 动态射线原点、二维 OccupancyGrid 和 PGM/YAML 保存通过短回放 | 完整 bag 调整高度阈值，确认最终导航地图 |
+| Phase 3：传感器与建图 | 大包 baseline 可用 | MID360 转换、FAST-LIVO2 完整大包回放、稀疏体素 PCD 保存和统一接口通过 | 新旧轨迹/点云数值报告、车辆外参优化与独立 bag 验证 |
+| Phase 4：重定位 | 大地图初验通过 | NDT 线程边界回归、同源 369,970 点 PCD 离线初验及 BUNKER 低 fitness 实测 | 批量验证不同位置/错误初值的收敛率、误差、恢复时间和 TF 稳定性 |
+| Phase 5：地图处理 | baseline 可用 | OctoMap 动态射线原点、二维 OccupancyGrid 和 PGM/YAML 保存通过回放 | 固定最终高度阈值并形成二维地图质量对比报告 |
 | Phase 6：Nav2 与安全链 | 离线 baseline 完成 | Smac2D、MPPI、BT、costmap、Collision Monitor、Qt action、BUNKER 安全链完成闭环目标测试 | 用真实地图/定位调参；完成障碍、CAN 与制动验收 |
 | Phase 7：实验与评测 | 部分完成 | 总控扩展录包、runtime 产物边界和离线路径时间 JSON 报告可用 | 实现配置/Git 快照、覆盖质量指标和统一报告生成 |
 | Phase 8：Qt5 与覆盖规划 | TASK-00~15 完成，TASK-16 部分 | 语义/Keepout、覆盖 Action、总控条件启动、fail-closed 校验和时间估算通过 | 修复零长度 SWATH，再增加覆盖率、重叠率和可复现报告 |
 
-当前离线回归结果：`200 passed`；BUNKER 无 CAN 运行测试已验证默认禁用、手动优先、
+项目契约与各 package 均提供离线回归；BUNKER 无 CAN 运行测试已验证默认禁用、手动优先、
 履带速度投影、输入超时归零、急停锁存和复位后保持禁用。当前 `mid360_map` 离线覆盖预览
 为 `679` 个姿态、总长 `67.54 m`，确定性运动时间估算为 `171.86 s`，报告写入
 `runtime/results/mid360_coverage_time.json`。
@@ -109,6 +110,12 @@ TASK-13/14 已生成统一 Action 并实现可取消状态机；TASK-15 已把�
 覆盖规划和标注模式接入 `agt_bringup`，默认关闭时不改变原导航节点集合。
 接口见
 [`docs/interfaces/coverage_planning.md`](docs/interfaces/coverage_planning.md)。
+
+视觉与点云语义暂不进入运动闭环。未来的适配层、保留 topic、bag 记录内容和分阶段安全门槛见
+[`docs/architecture/future_semantic_perception_interfaces.md`](docs/architecture/future_semantic_perception_interfaces.md)。
+现有 BUNKER bag 可用于平面 hand-eye 与重力/地面约束的组合外参优化，但不能只靠履带平面
+里程计完整观测六自由度；数据选择和验收方法见
+[`docs/calibration/bunker_lidar_chassis_extrinsic_from_bag.md`](docs/calibration/bunker_lidar_chassis_extrinsic_from_bag.md)。
 
 已编辑完成的语义地图可先用纯离线入口查看 Fields2Cover 路线，不启动定位、控制器、安全链或
 底盘，且固定禁止执行：
@@ -254,9 +261,8 @@ python3 -m pytest -q \
 位姿与速度外参换算、地图保存、Qt5 配置、Nav2 接口，以及 BUNKER 履带限速、急停和
 上游补丁契约、车辆几何单一数据源、语义地图基础库、Qt5 编辑器、覆盖请求适配和 Coverage
 Path Validator、SWATH/CONNECTION 路径语义、无效 CONNECTION 事务修复，以及覆盖任务 Action 的
-序列化、阶段反馈、安全门禁、取消传播和 TASK-15 总控前置契约。当前完整命令结果为
-`200 passed`；C++ 生成头文件另由
-`colcon test` 编译运行。
+序列化、阶段反馈、安全门禁、取消传播和 TASK-15 总控前置契约。C++ 生成头文件另由
+`colcon test` 编译运行；提交或发布时应记录当次测试结果，不在 README 固定易过期的通过数量。
 离线测试通过不代表算法精度或实车安全验收通过。
 
 Nav2 无车闭环测试：
@@ -284,14 +290,14 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 | `agt_sensor_adapters` | 已迁入 Livox 驱动，MID360 配置、统一 topic remap 和 launch 离线检查已完成 | 需要 MID360 实机或 bag，验证点云/IMU topic、frame、QoS、频率、时间戳和丢包 |
 | `agt_mapping` | adapter、统一 topic、位姿/twist 外参换算及 TF 补丁离线测试已完成 | 需要应用补丁后的 FAST-LIVO2、同一 bag 对比轨迹/点云；实机检查漂移和 TF 唯一发布源 |
 | `agt_map_processing` | 已迁移 OctoMap 在线投影与二维 OccupancyGrid 保存入口 | 用当前 bag 调整高度阈值，对比新旧栅格完整性与处理耗时；后续增加 PCD 和地面分割后端 |
-| `agt_localization` | ICP/NDT core、局部点云输入、外参修正和 `map -> odom` 已落地并编译 | 需要与栅格图同源的全局 PCD，测试成功率、误差、恢复时间和错误初值拒绝 |
+| `agt_localization` | NDT 线程边界已修复；同源大地图离线初验与 BUNKER 低 fitness 实测通过 | 批量测试不同初值的成功率、误差、恢复时间、迭代上限和错误初值拒绝 |
 | `agt_localization_fusion` | package 边界已建立 | 需要 LIO、轮速、IMU，后续 RTK/UWB 数据；测试延迟、漂移、跳变和传感器失效降级 |
 | `agt_perception` | base frame 高度/量程/车体裁剪障碍点云 baseline 已编译 | 需要标注或典型场景点云，测试地面/障碍精度、误检漏检和处理频率 |
 | `agt_navigation` | Nav2 核心、运动学闭环和 TASK-07 global KeepoutFilter 阻断/恢复规划已通过 | 用真实地图/定位测试语义边界、规划成功率、跟踪误差和窄通道通过性 |
 | `agt_coverage_planning` | TASK-00~15 完成、TASK-16 部分：可取消 Action、总控条件启动、离线预览和路径时间 JSON 报告可用 | 修复零长度 SWATH；增加覆盖率、重叠率、跨行/鱼尾策略和统一任务报告 |
 | `agt_safety` | BUNKER 履带仲裁、急停锁存、限速、超时和合成消息测试已完成 | 架空履带后做低速实车制动距离、急停和进程/通信中断测试 |
 | `agt_chassis` | 官方 bunker_ros2、状态桥接、TF 隔离和双层命令 watchdog 已落地并编译 | 需要 BUNKER CAN 实机验证协议版本、轮速里程计、状态错误码和断连归零 |
-| `agt_ui_bridge` | TASK-07 完成；语义 mask 已由 Nav2 消费且切换/禁用不写回基础地图 | 用真实地图验证服务器异常、语义切换和操作门禁 |
+| `agt_ui_bridge` | 维护版 Qt 已接项目多点 Action；错误 YAML、切图旧拓扑和 Snap 环境已有保护；语义 mask 已由 Nav2 消费 | 实机验证地图首次显示、多点成功/失败/取消反馈，以及语义切换和操作门禁 |
 | `agt_experiment_manager` | profile 骨架、runtime 目录和总控录包入口已建立 | 实现配置合并、Git/参数快照、产物命名、失败恢复和一键复现实验 |
 | `agt_evaluation` | package 边界与覆盖路径时间估算 baseline 已建立 | 增加覆盖率/重叠率，并用 bag/真值生成定位、导航和资源占用统一报告 |
 
@@ -593,7 +599,8 @@ ros2 launch agt_bringup system.launch.py \
 编辑器而非普通 Qt5，并禁止覆盖路径执行。详细 readiness 与安全检查见
 [`src/agt_bringup/README.md`](src/agt_bringup/README.md)。
 
-Qt5 可发布 `/initialpose` 和 `/goal_pose`，目标会转换为 NavigateToPose action。地图编辑结果
+Qt5 可发布 `/initialpose` 和单点 `/goal_pose`，单点会转换为 NavigateToPose action；多点
+**Start Task Chain** 直接调用 `/agt/navigation/execute_waypoint_task` 并显示 Action 反馈。地图编辑结果
 需保存为新的 PGM/YAML，再用新的 `map:=...` 重启导航；当前不会把正在编辑的地图热替换到
 运行中的全局 costmap。无显示环境可设置 `start_gui:=false`，无 CAN 联调可设置
 `start_chassis:=false`。详细接口见 [`src/agt_bringup/README.md`](src/agt_bringup/README.md)。

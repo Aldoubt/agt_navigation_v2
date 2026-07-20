@@ -123,6 +123,8 @@ bool rclcomm::Start() {
   topology_map_update_publisher_ = node->create_publisher<topology_msgs::msg::TopologyMap>(
       GET_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE), 
       rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
+  waypoint_task_client_ = rclcpp_action::create_client<WaypointTask>(
+      node, "/agt/navigation/execute_waypoint_task");
   for (auto one_image_display : Config::ConfigManager::Instance()->GetRootConfig().images) {
     LOG_INFO("image location:" << one_image_display.location << "topic:" << one_image_display.topic);
     image_subscriber_list_.emplace_back(
@@ -200,9 +202,149 @@ bool rclcomm::Start() {
     topology_msgs::msg::TopologyMap ros_msg = ConvertToRosMsg(topology_map);
     topology_map_update_publisher_->publish(ros_msg);
   });
+  SUBSCRIBE(MSG_ID_EXECUTE_TASK_CHAIN,
+            [this](const TaskExecutionRequest &request) {
+              ExecuteTaskChain(request);
+            });
+  SUBSCRIBE(MSG_ID_CANCEL_TASK_CHAIN, [this](const bool &) {
+    CancelTaskChain();
+  });
   
   init_flag_ = true;
   return true;
+}
+
+void rclcomm::PublishTaskStatus(const TaskExecutionStatus &status) {
+  PUBLISH(MSG_ID_TASK_CHAIN_STATUS, status);
+}
+
+void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
+  TaskExecutionStatus status;
+  status.total_waypoints = request.points.size();
+  if (request.points.empty()) {
+    status.state = "REJECTED";
+    status.message = "task chain is empty";
+    status.terminal = true;
+    PublishTaskStatus(status);
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+    if (waypoint_task_pending_ || waypoint_task_goal_handle_) {
+      status.state = "REJECTED";
+      status.message = "another waypoint task is active";
+      status.terminal = true;
+      PublishTaskStatus(status);
+      return;
+    }
+  }
+  if (!waypoint_task_client_->action_server_is_ready()) {
+    status.state = "FAILED";
+    status.message = "ExecuteWaypointTask action server is unavailable";
+    status.terminal = true;
+    PublishTaskStatus(status);
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+    waypoint_task_pending_ = true;
+    waypoint_task_cancel_requested_ = false;
+  }
+
+  WaypointTask::Goal goal;
+  goal.loop = request.loop_count > 1;
+  goal.loop_count = request.loop_count;
+  for (const auto &point : request.points) {
+    geometry_msgs::msg::PoseStamped pose;
+    pose.header.frame_id = "map";
+    pose.header.stamp = node->now();
+    pose.pose.position.x = point.x;
+    pose.pose.position.y = point.y;
+    tf2::Quaternion quaternion;
+    quaternion.setRPY(0.0, 0.0, point.theta);
+    pose.pose.orientation = tf2::toMsg(quaternion);
+    goal.poses.push_back(pose);
+  }
+
+  auto options = rclcpp_action::Client<WaypointTask>::SendGoalOptions();
+  options.goal_response_callback =
+      [this, total = request.points.size()](WaypointTaskGoalHandle::SharedPtr handle) {
+        TaskExecutionStatus response;
+        response.total_waypoints = total;
+        if (!handle) {
+          {
+            std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+            waypoint_task_pending_ = false;
+            waypoint_task_cancel_requested_ = false;
+          }
+          response.state = "REJECTED";
+          response.message = "ExecuteWaypointTask goal was rejected";
+          response.terminal = true;
+          PublishTaskStatus(response);
+          return;
+        }
+        bool cancel_requested = false;
+        {
+          std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+          waypoint_task_pending_ = false;
+          waypoint_task_goal_handle_ = handle;
+          cancel_requested = waypoint_task_cancel_requested_;
+        }
+        if (cancel_requested) {
+          waypoint_task_client_->async_cancel_goal(handle);
+          response.state = "CANCELING";
+          response.message = "waypoint task cancellation requested";
+        } else {
+          response.state = "ACCEPTED";
+          response.message = "waypoint task accepted";
+        }
+        PublishTaskStatus(response);
+      };
+  options.feedback_callback =
+      [this](WaypointTaskGoalHandle::SharedPtr,
+             const std::shared_ptr<const WaypointTask::Feedback> feedback) {
+        TaskExecutionStatus update;
+        update.state = feedback->state;
+        update.current_waypoint = feedback->current_waypoint;
+        update.total_waypoints = feedback->total_waypoints;
+        PublishTaskStatus(update);
+      };
+  options.result_callback =
+      [this, total = request.points.size()](const WaypointTaskGoalHandle::WrappedResult &result) {
+        {
+          std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+          waypoint_task_goal_handle_.reset();
+          waypoint_task_pending_ = false;
+          waypoint_task_cancel_requested_ = false;
+        }
+        TaskExecutionStatus final_status;
+        final_status.total_waypoints = total;
+        final_status.terminal = true;
+        final_status.success =
+            result.code == rclcpp_action::ResultCode::SUCCEEDED &&
+            result.result && result.result->success;
+        final_status.state = final_status.success ? "SUCCEEDED" : "FAILED";
+        if (result.code == rclcpp_action::ResultCode::CANCELED) {
+          final_status.state = "CANCELED";
+        }
+        final_status.message = result.result ? result.result->message
+                                             : "waypoint task returned no result";
+        PublishTaskStatus(final_status);
+      };
+  waypoint_task_client_->async_send_goal(goal, options);
+}
+
+void rclcomm::CancelTaskChain() {
+  WaypointTaskGoalHandle::SharedPtr handle;
+  {
+    std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+    waypoint_task_cancel_requested_ = waypoint_task_pending_ ||
+                                      static_cast<bool>(waypoint_task_goal_handle_);
+    handle = waypoint_task_goal_handle_;
+  }
+  if (handle) {
+    waypoint_task_client_->async_cancel_goal(handle);
+  }
 }
 
 bool rclcomm::Stop() {

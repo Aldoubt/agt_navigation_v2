@@ -29,6 +29,13 @@ fi
 
 set +u
 source "/opt/ros/${ROS_DISTRO_NAME}/setup.bash"
+if [[ -f "${WS_ROOT}/install/setup.bash" ]]; then
+  source "${WS_ROOT}/install/setup.bash"
+else
+  echo "Workspace overlay is missing: ${WS_ROOT}/install/setup.bash" >&2
+  echo "Build agt_interfaces first: colcon build --packages-select agt_interfaces" >&2
+  exit 4
+fi
 set -u
 
 cmake -S "${SOURCE_DIR}" -B "${BUILD_DIR}" \

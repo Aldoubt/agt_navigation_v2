@@ -3,7 +3,6 @@
 #include <QPainter>
 #include <QStandardItemModel>
 #include <QTableView>
-#include <mutex>
 #include "config/task_chain.h"
 #include "map/topology_map.h"
 using namespace basic;
@@ -16,8 +15,7 @@ class NavGoalTableView : public QTableView {
  private:
   QStandardItemModel *table_model_;
   TopologyMap topologyMap_;
-  RobotPose robot_pose_;
-  std::atomic<bool> is_task_chain_running_;
+  bool is_task_chain_running_{false};
   TaskChain task_chain_;
  public slots:
   void UpdateTopologyMap(const TopologyMap &_topology_map);
@@ -25,11 +23,13 @@ class NavGoalTableView : public QTableView {
   void UpdateSelectPoint(const TopologyMap::PointInfo &);
   void StartTaskChain(bool is_loop);
   void StopTaskChain();
-  void UpdateRobotPose(const RobotPose &pose);
+  void UpdateTaskExecutionStatus(const TaskExecutionStatus &status);
   bool LoadTaskChain(const std::string &name);
   bool SaveTaskChain(const std::string &name);
  signals:
   void signalSendNavGoal(const RobotPose &pose);
+  void signalExecuteTaskChain(const TaskExecutionRequest &request);
+  void signalCancelTaskChain();
   void signalTaskFinish();
 
  private:

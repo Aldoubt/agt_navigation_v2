@@ -1,9 +1,10 @@
 # agt_ui_bridge
 
-主界面采用 [`chengyangkj/Ros_Qt5_Gui_App`](https://github.com/chengyangkj/Ros_Qt5_Gui_App)，
-固定源码位于 `third_party/ros_qt5_gui_app`。上游 GUI 负责地图与代价地图显示、机器人位姿、
-速度控制、重定位、单点/多点导航、路径显示、栅格和拓扑地图编辑；本包只负责 V2 接口配置、
-启动和地图 I/O，不在上游源码中硬编码项目 topic。
+主界面采用项目维护的
+[`Aldoubt/Ros_Qt5_Gui_App:agt-navigation-v2`](https://github.com/Aldoubt/Ros_Qt5_Gui_App/tree/agt-navigation-v2)，
+固定源码快照位于 `third_party/ros_qt5_gui_app`，原项目 GPL-2.0 许可证与署名保持不变。
+GUI 负责地图与代价地图显示、机器人位姿、速度控制、重定位、单点/多点导航、路径显示、
+栅格和拓扑地图编辑；本包负责 V2 配置、启动和地图 I/O。
 
 ## 构建主界面
 
@@ -23,7 +24,7 @@ source /opt/ros/humble/setup.bash
 ```
 
 构建过程会按上游 CMake 配置下载 Advanced Docking System、yaml-cpp、nlohmann/json 和
-topology_msgs，产物写入 `build/ros_qt5_gui_app`。源码固定在上游提交 `b0825e3`，构建产物
+topology_msgs，产物写入 `build/ros_qt5_gui_app`。源码固定在 fork 提交 `bee4132`，构建产物
 不会提交 Git。
 
 启动脚本只使用本仓库构建产物，找不到时会提示执行
@@ -55,7 +56,8 @@ ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
 - navigation 地图：`/agt/map/global_occupancy`
 - 机器人里程计：`/agt/mapping/odometry`
 - 重定位初值：`/initialpose`
-- 导航目标：`/goal_pose`
+- 单点导航目标：`/goal_pose`
+- 多点任务：`/agt/navigation/execute_waypoint_task` Action
 - 手动速度：`/agt/cmd_vel_manual`
 - 全局/局部路径：`/plan`、`/local_plan`
 - 全局/局部代价地图：`/global_costmap/costmap`、`/local_costmap/costmap`
@@ -63,9 +65,11 @@ ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
 - GUI 显示 frame：mapping 为 `odom`，navigation 为 `map`
 - 拓扑地图：`/agt/map/topology`、`/agt/map/topology/update`
 
-目前 `/goal_pose` 仍是统一输出接口，导航模块完成后接入 Nav2 action；手动速度已经接入
-`agt_safety -> agt_chassis`，但必须先显式使能安全层。GUI 可直接打开、编辑并保存 PGM/YAML；保存后的导航地图放在
-`runtime/maps/`，下一次启动 map server 时使用对应 YAML。
+单点 `/goal_pose` 由项目桥接为 Nav2 `NavigateToPose`；Qt 的 **Start Task Chain** 直接调用
+项目 `ExecuteWaypointTask` Action，并以 Nav2 Action 反馈、结果和 missed waypoint 判断成败。
+手动速度已经接入 `agt_safety -> agt_chassis`，但必须先显式使能安全层。GUI 可直接打开、
+编辑并保存 PGM/YAML；错误 YAML 会提示而不退出，切换地图会先清空旧拓扑并拒绝同名 sidecar
+中的越界点。保存后的导航地图放在 `runtime/maps/`，下一次启动 map server 时使用对应 YAML。
 
 mapping profile 的 `FixedFrameId=odom` 与 FAST-LIVO2 建图链一致；navigation profile 固定为
 `map`，并要求 NDT/ICP 已发布 `map -> odom`。

@@ -5,3 +5,20 @@ struct TaskChain {
   std::vector<TopologyMap::PointInfo> points;
 };
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TaskChain, points);
+
+// Project-owned execution boundary carried through the Qt message bus.  The
+// ROS2 channel converts this request to ExecuteWaypointTask; the widget must
+// not decide success from pose-distance polling.
+struct TaskExecutionRequest {
+  std::vector<TopologyMap::PointInfo> points;
+  uint32_t loop_count{1};
+};
+
+struct TaskExecutionStatus {
+  std::string state;
+  uint32_t current_waypoint{0};
+  uint32_t total_waypoints{0};
+  std::string message;
+  bool terminal{false};
+  bool success{false};
+};

@@ -172,7 +172,9 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
         "                    GNU GENERAL PUBLIC LICENSE"
     )
     provenance = (ROOT / "third_party/README.md").read_text(encoding="utf-8")
-    assert "b0825e3cba3e7186cba8a6b83ff230be37c8b1fb" in provenance
+    assert "https://github.com/Aldoubt/Ros_Qt5_Gui_App.git" in provenance
+    assert "agt-navigation-v2" in provenance
+    assert "bee413235b660ce530e07b1d22a07120ffe9e854" in provenance
     config = json.loads(
         (ROOT / "src/agt_ui_bridge/config/ros_qt5_gui_app.json").read_text(
             encoding="utf-8"
@@ -182,7 +184,19 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     assert topics["kOccupancyMap"] == "/agt/map/global_occupancy"
     assert topics["kRobotPose"] == "/agt/mapping/odometry"
     assert topics["kSetRobotSpeed"] == "/agt/cmd_vel_manual"
-    assert config["key_value"]["BaseFrameId"] == "base_link"
+    assert config["key_value"]["BaseFrameId"] == "base_footprint"
+    rclcomm = (gui / "src/channel/ros2/rclcomm.cpp").read_text(encoding="utf-8")
+    task_widget = (gui / "src/app/widgets/nav_goal_table_view.cpp").read_text(
+        encoding="utf-8"
+    )
+    map_loader = (gui / "src/basic/map/occupancy_map.h").read_text(
+        encoding="utf-8"
+    )
+    assert '"/agt/navigation/execute_waypoint_task"' in rclcomm
+    assert "waypoint_task_client_->async_send_goal" in rclcomm
+    assert "absoluteDifference" not in task_widget
+    assert "task_chain_.points.clear()" in task_widget
+    assert "catch (const YAML::Exception &e)" in map_loader
     bridge = (ROOT / "src/agt_ui_bridge/scripts/map_io_bridge.py").read_text(
         encoding="utf-8"
     )

@@ -16,6 +16,7 @@ find_package(tf2_kdl REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(diagnostic_msgs REQUIRED)
+find_package(agt_interfaces REQUIRED)
 find_package(cv_bridge REQUIRED)
 find_package(Boost REQUIRED COMPONENTS thread)
 
@@ -29,7 +30,7 @@ PUBLIC
 ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-ament_target_dependencies(${TARGET_NAME} PUBLIC rclcpp rclcpp_action action_msgs Boost nav_msgs tf2 tf2_geometry_msgs tf2_ros sensor_msgs tf2_kdl cv_bridge diagnostic_msgs)
+ament_target_dependencies(${TARGET_NAME} PUBLIC rclcpp rclcpp_action action_msgs Boost nav_msgs tf2 tf2_geometry_msgs tf2_ros sensor_msgs tf2_kdl cv_bridge diagnostic_msgs agt_interfaces)
 target_link_libraries(${TARGET_NAME} 
 PUBLIC
 basic

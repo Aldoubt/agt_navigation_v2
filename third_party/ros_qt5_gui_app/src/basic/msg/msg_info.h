@@ -8,7 +8,9 @@
               OneValue(kSetNavGoalPose, ) OneValue(kSetRelocPose, )            \
                   OneValue(kSetRobotSpeed, ) OneValue(kBatteryState, ) OneValue(kImage, ) \
                   OneValue(kRobotFootprint, ) OneValue(kOccMap, ) OneValue(kTopologyMap, ) \
-                  OneValue(kDiagnostic, ) OneValue(kTopologyMapUpdate, )
+                  OneValue(kDiagnostic, ) OneValue(kTopologyMapUpdate, ) \
+                  OneValue(kExecuteTaskChain, ) OneValue(kCancelTaskChain, ) \
+                  OneValue(kTaskChainStatus, )
 
 DECLARE_ENUM(MsgId, SOME_ENUM)
 DEFINE_ENUM(MsgId, SOME_ENUM)
@@ -31,6 +33,9 @@ DEFINE_ENUM(MsgId, SOME_ENUM)
 #define MSG_ID_TOPOLOGY_MAP ToString(MsgId::kTopologyMap)
 #define MSG_ID_DIAGNOSTIC ToString(MsgId::kDiagnostic)
 #define MSG_ID_TOPOLOGY_MAP_UPDATE ToString(MsgId::kTopologyMapUpdate)
+#define MSG_ID_EXECUTE_TASK_CHAIN ToString(MsgId::kExecuteTaskChain)
+#define MSG_ID_CANCEL_TASK_CHAIN ToString(MsgId::kCancelTaskChain)
+#define MSG_ID_TASK_CHAIN_STATUS ToString(MsgId::kTaskChainStatus)
 
 #define DISPLAY_ROBOT ToString(MsgId::kRobotPose)
 #define DISPLAY_MAP ToString(MsgId::kOccupancyMap)

@@ -4,7 +4,6 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QPushButton>
-#include <QtConcurrent>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include "algorithm.h"
@@ -82,41 +81,32 @@ void NavGoalTableView::AddItem() {
   setIndexWidget(table_model_->index(row, 3), button_run);
 }
 void NavGoalTableView::StartTaskChain(bool is_loop) {
-  is_task_chain_running_ = true;
-  QtConcurrent::run([this, is_loop]() {
-    do {
-      for (int row = 0; row < table_model_->rowCount(); ++row) {
-        QComboBox *comboBoxName =
-            static_cast<QComboBox *>(indexWidget(model()->index(row, 0)));
-        QLabel *label_status =
-            static_cast<QLabel *>(indexWidget(model()->index(row, 1)));
-        label_status->setText("Running");
-        TopologyMap::PointInfo point =
-            topologyMap_.GetPoint(comboBoxName->currentText().toStdString());
-        if (point.name == "") {
-          label_status->setText("Point Not Found!");
-          continue;
-        }
-        RobotPose target_pose = point.ToRobotPose();
-        emit signalSendNavGoal(target_pose);
-        RobotPose diff = absoluteDifference(target_pose, robot_pose_);
-        while (diff.mod() > 0.2 || fabs(diff.theta) > deg2rad(15)) {
-          LOG_INFO("Task chain is running diff:" << diff << " mode:" << diff.mod() << " deg:" << rad2deg(fabs(diff.theta)));
-          diff = absoluteDifference(target_pose, robot_pose_);
-          if (!is_task_chain_running_) {
-            emit signalTaskFinish();
-            LOG_INFO("Task chain is stopped");
-            return;
-          }
-          QThread::msleep(100);
-        }
-        label_status->setText("Finish");
-      }
-    } while (is_loop);
+  if (is_task_chain_running_) return;
 
-    LOG_INFO("Task chain is finished");
+  TaskExecutionRequest request;
+  request.loop_count = is_loop ? 2U : 1U;
+  for (int row = 0; row < table_model_->rowCount(); ++row) {
+    auto *combo_box =
+        qobject_cast<QComboBox *>(indexWidget(model()->index(row, 0)));
+    auto *label_status =
+        qobject_cast<QLabel *>(indexWidget(model()->index(row, 1)));
+    if (!combo_box || !label_status) continue;
+    const auto point = topologyMap_.GetPoint(combo_box->currentText().toStdString());
+    if (point.name.empty()) {
+      label_status->setText("Point Not Found!");
+      emit signalTaskFinish();
+      return;
+    }
+    label_status->setText("Pending");
+    request.points.push_back(point);
+  }
+  if (request.points.empty()) {
+    LOG_ERROR("Task chain is empty");
     emit signalTaskFinish();
-  });
+    return;
+  }
+  is_task_chain_running_ = true;
+  emit signalExecuteTaskChain(request);
 }
 bool NavGoalTableView::LoadTaskChain(const std::string &name) {
   // 清空模型
@@ -169,17 +159,18 @@ bool NavGoalTableView::LoadTaskChain(const std::string &name) {
   return true;
 }
 bool NavGoalTableView::SaveTaskChain(const std::string &name) {
+  task_chain_.points.clear();
   for (int row = 0; row < table_model_->rowCount(); ++row) {
     QComboBox *comboBoxName =
         static_cast<QComboBox *>(indexWidget(model()->index(row, 0)));
     QLabel *label_status =
         static_cast<QLabel *>(indexWidget(model()->index(row, 1)));
-    label_status->setText("Running");
     TopologyMap::PointInfo point =
         topologyMap_.GetPoint(comboBoxName->currentText().toStdString());
     if (point.name == "") {
       label_status->setText("Point Not Found!");
-      continue;
+      task_chain_.points.clear();
+      return false;
     }
     task_chain_.points.push_back(point);
   }
@@ -190,8 +181,31 @@ bool NavGoalTableView::SaveTaskChain(const std::string &name) {
 void NavGoalTableView::StopTaskChain() {
   if (is_task_chain_running_) {
     is_task_chain_running_ = false;
+    emit signalCancelTaskChain();
   }
 }
-void NavGoalTableView::UpdateRobotPose(const RobotPose &pose) {
-  robot_pose_ = pose;
+
+void NavGoalTableView::UpdateTaskExecutionStatus(
+    const TaskExecutionStatus &status) {
+  const int current = static_cast<int>(status.current_waypoint);
+  for (int row = 0; row < table_model_->rowCount(); ++row) {
+    auto *label = qobject_cast<QLabel *>(indexWidget(model()->index(row, 1)));
+    if (!label) continue;
+    if (status.terminal) {
+      if (status.success) {
+        label->setText("Finish");
+      } else if (row == current) {
+        label->setText("Failed");
+      }
+    } else if (row < current) {
+      label->setText("Finish");
+    } else if (row == current) {
+      label->setText("Running");
+    }
+  }
+  if (status.terminal) {
+    is_task_chain_running_ = false;
+    LOG_INFO("Task chain finished: " << status.message);
+    emit signalTaskFinish();
+  }
 }

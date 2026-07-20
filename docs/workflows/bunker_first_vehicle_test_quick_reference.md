@@ -314,15 +314,16 @@ ros2 topic hz /agt/chassis/cmd_vel
 
 ## 10.1 Qt 手工多点 Demo
 
-当前第三方 Qt 的 **Start Task Chain** 仍按位姿距离等待，不读取 Nav2 Action 结果，
-不要用它执行 Demo，也不要勾选 Loop Task。按以下方式保留 Qt 的选点体验，同时把执行权
-交给项目侧：
+维护版 Qt 的 **Start Task Chain** 已接到
+`/agt/navigation/execute_waypoint_task`，可以直接用于低速 Demo。按钮状态来自 Nav2 Action；
+**Stop Task Chain** 会取消任务，“Repeat twice (finite)”只用于明确的两遍测试，首次实车不要勾选。
 
-1. 在 Qt 中编辑并保存与当前地图同名的 `.topology`；
-2. 添加任务点，按需要排序；
-3. 每次将任务链保存到一个新的 JSON 文件，避免 vendor 重复保存时追加旧点；
-4. 确认重定位、Nav2、底盘和安全状态后显式使能运动；
-5. 在终端执行 Qt 保存的任务文件：
+1. 在 Qt 中打开当前 Nav2 YAML，编辑并保存同名 `.topology`；
+2. 添加任务点，确认顺序和朝向；
+3. 确认重定位、Nav2、底盘和安全状态后显式使能运动；
+4. 点击 **Start Task Chain**，观察 Pending/Running/Finish 或 Failed 状态。
+
+需要脱离 GUI 回放已保存 JSON 时，仍可使用：
 
 ```bash
 TASK_JSON="$(realpath runtime/maps/first_vehicle_test/demo_task_01.json)"
