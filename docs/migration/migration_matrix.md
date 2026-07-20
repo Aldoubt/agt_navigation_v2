@@ -12,7 +12,7 @@
 | `agt_bringup` | 1/3/4/5/6/8 | Bunker Qt5 FAST-LIO baseline 已接线 | mapping/navigation 共用总入口；mapping 默认 RViz、可选 `start_mapping_gui` 且 Qt 禁止任务执行；navigation 将同一 map YAML 注入 Nav2 与任务型 Qt；大数据节点获得延长正常退出窗口 | 实机验证完整建图关机、同源 PCD 重定位和项目多点 Action 闭环；确认 Bunker vendor 退出告警不影响停车 |
 | `agt_sensor_adapters` | 3 | baseline 完成 | Livox 驱动已迁入，MID360 PointCloud2 到 CustomMsg 转换、统一 topic 和短 bag 回放通过 | 实机验证网络、QoS、频率、时间戳、丢包和长时间运行稳定性 |
 | `agt_mapping` | 3 | 大地图 PCD 持久化 Release 回放通过 | FAST-LIVO2 与所需 Vikit 均按固定提交 vendor；统一 x86 Eigen/PCL ABI；稀疏 int64 增量体素过滤异常点，完整大包将 56,263,430 输入点压至 369,970 点，关机落盘 0.134 s、峰值约 1.0 GiB | 在无旧 overlay 的全新工作区构建并回放；完成 Vikit 独立许可证文本审计、最终 PCD/NDT 地图质量和车辆外参精测 |
-| `agt_map_processing` | 5 | 大包混合静态障碍补全已离线回放 | 保留 bag 射线 free/unknown 基图，并用 base-relative 高度、非有限/自体过滤和多帧证据补齐注册点云障碍；8.5 GiB mapping bag 处理 7,077 帧，新旧同范围地图新增 149,045 个 occupied 像素且不把 Nav2 膨胀烘焙进 PGM | 在 Qt/RViz 叠加点云人工核验候选障碍，确认无动态物体拖影后再升为导航地图；后续增加几何地面分割后端 |
+| `agt_map_processing` | 5 | 大包混合静态障碍补全与完整车体扫掠已离线回放 | 点云按时间戳插值 base pose，并以 canonical 多边形加 0.12 m 裁剪；直接消费全部 8,072 个 bag 里程计位姿生成 72,469 个扫掠栅格，轨迹 0–0.4 m 新增 occupied 从 8,127 降为 0，0.8 m 外基本不变；Nav2 膨胀不写入 PGM | 在 Qt/RViz 叠加点云人工核验 v5 候选图，确认无动态物体/冠层投影后再升为导航地图；后续增加几何地面分割后端 |
 | `agt_localization` | 4 | 实车与最终大地图离线重定位初验通过 | ICP/NDT core、局部点云输入、base/lidar 初值修正和唯一 `map -> odom` 发布逻辑已编译；修复 `ndt_num_threads=0` 越界并完成边界回归；Bunker 实车 4 线程 fitness 约 `0.01`–`0.02`，新 369,970 点大地图配合同包首段局部点云从原点初值成功，fitness `0.0401` | 批量验证不同位置/误差初值的收敛率、误差、恢复时间和 TF 稳定性；当前离线样本达到 100 次迭代上限，需继续调参并验证错误初值拒绝 |
 | `agt_localization_fusion` | 6 | 仅骨架 | package 和领域边界已建立 | 定义融合状态与诊断接口，接入 LIO、轮速和 IMU；后续扩展 RTK/UWB 与失效降级 |
 | `agt_perception` | 6/8 | baseline 完成并预留语义边界 | 已实现 base frame 高度/量程/车体裁剪的局部障碍点云并接入 Nav2；文档固定未来相机/点云适配、标准化语义输出、bag 与 fail-safe 边界 | 先做离线语义推理和显示，完成数据集/延迟/stale 评测后再以默认关闭方式接入动态障碍 |

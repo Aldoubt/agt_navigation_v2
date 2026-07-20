@@ -51,10 +51,13 @@ OctoMap 使用当前帧 `lidar_link` 点云和 `odom -> lidar_link` TF，因此�
 - bag 内已有的 `/agt/map/mapping_occupancy` 提供射线清除后的 free/unknown 基图；
 - `/agt/mapping/registered_points` 按每帧机器人 `base_footprint` 高度选择
   `0.05 m .. 2.00 m` 障碍点；
-- 非有限点、车体 footprint 外接圆内的自体点被过滤；同一栅格必须被至少 3 个不同点云帧
-  观测才写为 occupied；
+- 点云等待其时间戳两侧的里程计样本并插值 `x/y/z/yaw`，随后变换到
+  `base_footprint`；非有限点和 canonical 多边形 footprint 向外 `0.12 m` 范围内的自体点
+  被过滤；同一栅格必须被至少 3 个不同点云帧观测才写为 occupied；
 - `obstacle_padding=0.05 m` 是显式的点证据栅格补偿，不代替 Nav2 InflationLayer；保存的
-  PGM 不烘焙机器人 footprint 或 Nav2 膨胀代价。
+  PGM 不把机器人 footprint 写成占据代价，也不烘焙 Nav2 膨胀代价。
+- 最后以 bag 中全部里程计位姿栅格化 canonical 多边形 footprint，并将车辆真实扫掠区域
+  标为空闲；这只清除车体实际通过的空间，不能用圆形半径扩大清理轨迹两侧障碍。
 
 回放使用 bag 自带基图时，将输入基图改名，避免和增强输出 topic 冲突：
 
@@ -63,7 +66,7 @@ ros2 launch agt_map_processing offline_static_obstacle_map.launch.py \
   platform_profile:="$(realpath profiles/platforms/bunker.yaml)" \
   rebuild_raytraced_baseline:=false
 
-ros2 bag play runtime/rosbag/<mapping_bag> --clock --rate 2.0 \
+ros2 bag play runtime/rosbag/<mapping_bag> --clock --rate 1.0 \
   --topics /agt/map/mapping_occupancy \
            /agt/mapping/registered_points \
            /agt/mapping/odometry \
@@ -74,6 +77,25 @@ ros2 bag play runtime/rosbag/<mapping_bag> --clock --rate 2.0 \
 才设置 `rebuild_raytraced_baseline:=true` 并同时回放这些 TF/topic。回放结束后检查
 `/agt/map/static_obstacle_evidence_status`，再从增强后的 `/agt/map/mapping_occupancy` 保存新
 PGM/YAML；不要覆盖已验证地图。
+
+正式候选地图使用 `1.0×` 回放，状态中的 `queue_overflow_drops` 和
+`pose_mismatch_drops` 必须为零。更高倍速只适合快速调试，不能作为最终静态地图证据。
+
+保存点云增强候选图后，直接读取 rosbag2 中全部里程计生成完整扫掠层，避免高倍速 ROS
+回放丢失中间位姿：
+
+```bash
+ros2 run agt_map_processing apply_swept_footprint_to_map.py \
+  --bag "$(realpath runtime/rosbag/<mapping_bag>)" \
+  --input-yaml "$(realpath runtime/maps/<evidence_map>/<evidence_map>.yaml)" \
+  --output-prefix "$(realpath runtime/maps/<swept_map>)/<swept_map>" \
+  --platform-profile "$(realpath profiles/platforms/bunker.yaml)" \
+  --clearance 0.05
+```
+
+工具要求输入为 map_saver 生成的 P5 PGM，拒绝原地覆盖，并输出消费的位姿数、完整扫掠
+栅格数和实际改动像素数。最终审计必须确认轨迹中心附近伪障碍下降，同时 footprint 外的
+障碍基本不变。
 
 ## 后续后端
 

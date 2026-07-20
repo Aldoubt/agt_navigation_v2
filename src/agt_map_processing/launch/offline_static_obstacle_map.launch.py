@@ -1,6 +1,6 @@
 """Replay-only static obstacle map generation from registered mapping outputs."""
 
-import math
+import json
 from pathlib import Path
 
 import yaml
@@ -17,7 +17,6 @@ def _evidence_node(context):
     profile_path = Path(LaunchConfiguration("platform_profile").perform(context))
     profile = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
     footprint = profile["platform"]["geometry"]["navigation_footprint"]
-    self_filter_radius = max(math.hypot(float(x), float(y)) for x, y in footprint)
     return [
         Node(
             package="agt_map_processing",
@@ -32,7 +31,12 @@ def _evidence_node(context):
                     "evidence_resolution": 0.05,
                     "min_observations": 3,
                     "obstacle_padding": 0.05,
-                    "self_filter_radius": self_filter_radius,
+                    "footprint_json": json.dumps(footprint),
+                    "self_filter_padding": 0.12,
+                    "max_pose_time_error": 0.25,
+                    "pose_wait_timeout": 1.0,
+                    "clear_swept_footprint": True,
+                    "sweep_clearance": 0.05,
                 }
             ],
         )
