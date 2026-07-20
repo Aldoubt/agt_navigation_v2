@@ -608,6 +608,8 @@ Qt5 可发布 `/initialpose` 和单点 `/goal_pose`，单点会转换为 Navigat
 需保存为新的 PGM/YAML，再用新的 `map:=...` 重启导航；当前不会把正在编辑的地图热替换到
 运行中的全局 costmap。无显示环境可设置 `start_gui:=false`，无 CAN 联调可设置
 `start_chassis:=false`。详细接口见 [`src/agt_bringup/README.md`](src/agt_bringup/README.md)。
+人工添加导航点时先点击目标位置，再点击朝向点；右键、Esc 或切换工具取消未完成输入。
+大地图 Qt profile 默认不订阅全量 global/local costmap，地图和 `/plan` 仍正常显示；代价地图调试优先使用 RViz。
 
 ## 实机分级验收流程
 

@@ -90,6 +90,10 @@
 - New frontends and future autostart/lifecycle managers must call the project Action rather than reimplement waypoint distance polling.
 - Switching the selected Nav2 map must clear stale topology before loading a matching sidecar; malformed map YAML and out-of-map topology points must fail without crashing or retaining actionable stale data.
 - Mapping mode uses RViz as the default 3D frontend. Its optional Qt profile must default off and reject navigation task execution in both UI and channel; navigation mode owns the task-capable Qt profile.
+- Qt navigation point authoring uses a two-click contract: the first click fixes
+  the `map` position and the second fixes heading; canceling or changing tools
+  must discard incomplete placement. Large-map Qt profiles keep full costmap
+  rendering disabled by default because planning truth remains in Nav2/RViz.
 
 ## Navigation Task Orchestration Contract
 - Navigation is an Action capability, not a frontend-owned workflow. Qt, Web, autostart, and future mission managers must consume project Actions and their explicit result/cancel semantics.

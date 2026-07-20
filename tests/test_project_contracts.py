@@ -190,7 +190,7 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     provenance = (ROOT / "third_party/README.md").read_text(encoding="utf-8")
     assert "https://github.com/Aldoubt/Ros_Qt5_Gui_App.git" in provenance
     assert "agt-navigation-v2" in provenance
-    assert "f2a043d3ede8c32f6d01bb77ae0147901fe3abb8" in provenance
+    assert "74d11e0602f00bbf7021ac96a63f00c947807a70" in provenance
     config = json.loads(
         (ROOT / "src/agt_ui_bridge/config/ros_qt5_gui_app.json").read_text(
             encoding="utf-8"
@@ -213,6 +213,13 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     assert 'GET_CONFIG_VALUE("EnableTaskExecution", "false")' in rclcomm
     mainwindow = (gui / "src/app/mainwindow.cpp").read_text(encoding="utf-8")
     assert 'GET_CONFIG_VALUE("EnableTaskExecution", "false")' in mainwindow
+    scene_manager = (
+        gui / "src/app/display/manager/scene_manager.cpp"
+    ).read_text(encoding="utf-8")
+    assert "nav_goal_position_pending_" in scene_manager
+    assert "std::atan2(dy, dx)" in scene_manager
+    assert "timer->start(100)" in scene_manager
+    assert 'GET_CONFIG_VALUE("EnableCostmapDisplay", "false")' in rclcomm
     assert "absoluteDifference" not in task_widget
     assert "task_chain_.points.clear()" in task_widget
     assert "catch (const YAML::Exception &e)" in map_loader

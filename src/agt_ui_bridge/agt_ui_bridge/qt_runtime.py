@@ -4,8 +4,9 @@ import json
 import math
 from pathlib import Path
 
-from PIL import Image
 import yaml
+
+from .map_transform import load_grayscale_map_image
 
 
 class QtRuntimeError(ValueError):
@@ -58,9 +59,8 @@ def validate_nav2_map(path):
     if not image_path.is_file():
         raise QtRuntimeError(f"map image does not exist: {image_path}")
     try:
-        with Image.open(image_path) as image:
-            width, height = image.size
-            image.verify()
+        image = load_grayscale_map_image(image_path)
+        width, height = image.size
     except (OSError, ValueError) as exc:
         raise QtRuntimeError(f"map image is unreadable: {exc}") from exc
     if width <= 0 or height <= 0:
@@ -110,10 +110,24 @@ def validate_topology_for_map(map_yaml, geometry):
 def prepare_runtime_config(config_path, template_path, requested_map=None):
     config_path = Path(config_path)
     template_path = Path(template_path)
+    template = json.loads(template_path.read_text(encoding="utf-8"))
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError):
-        config = json.loads(template_path.read_text(encoding="utf-8"))
+        config = template
+
+    # Capability and frame keys are versioned profile contract. Add newly
+    # introduced keys without overwriting operator-persisted values.
+    runtime_keys = config.setdefault("key_value", {})
+    for key, value in template.get("key_value", {}).items():
+        runtime_keys.setdefault(key, value)
+    if runtime_keys.get("EnableCostmapDisplay", "false") != "true":
+        for display in config.get("display_config", []):
+            if display.get("display_name") in {
+                "kGlobalCostMap",
+                "kLocalCostMap",
+            }:
+                display["visible"] = False
 
     map_value = requested_map or config.get("map_config", {}).get("path", "")
     warnings = []

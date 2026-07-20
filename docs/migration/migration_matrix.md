@@ -20,7 +20,7 @@
 | `agt_coverage_planning` | 8 | TASK-00~15 完成，TASK-16 部分；新增 planner-only 修复实验 | 外部锁定依赖已构建；Coverage Server configure 前消费 canonical 几何；临时 GML 统一为至少三点，并由已验证请求几何补正锁定 PathComponents 漏失端点；离线预览可自动调用 Hybrid-A* 修复无效 CONNECTION，并单独规划入口 approach，均复用底图、keepout、完整 footprint 和转弯半径验证 | 真实大棚已确认 planner/keepout ACTIVE；继续定位 Row Coverage 偶发无结果，并根据 repair report 调整地头/禁行语义，任何 invalid SWATH 仍禁止修复和执行 |
 | `agt_safety` | 6 | baseline 完成 | BUNKER 履带仲裁、手动优先、限速、输入超时、急停锁存和复位保持禁用的合成消息回归通过 | 架空履带验证方向和急停，再完成低速制动距离、进程退出和通信中断验收 |
 | `agt_chassis` | 6 | baseline 完成 | 官方 `bunker_ros2`、状态桥接、TF 隔离和双层命令 watchdog 已接入并离线构建 | CAN 实机验证协议版本、轮速里程计、错误码、方向、断连归零和长时间通讯稳定性 |
-| `agt_ui_bridge` | 6/8 | 双 profile 能力隔离；维护版 Qt 接入 | navigation profile 调用项目多点 Action，mapping profile UI/channel 双重拒绝任务；MapGeometry 显式支持并校验 P2/P5，PNG 完整 verify；错误 YAML/图像不崩溃，切图清旧拓扑 | 实机验证 mapping 监视和 navigation Action 显示；后续前端只消费 mission/navigation Actions，不内置流程状态机 |
+| `agt_ui_bridge` | 6/8 | 双 profile 能力隔离；维护版 Qt 接入 | navigation profile 调用项目多点 Action，mapping profile UI/channel 双重拒绝任务；导航点改为“位置+朝向”两次点击；大地图 profile 默认禁用全量 costmap 渲染并将拓扑动画限为 10 Hz；MapGeometry 显式校验 P2/P5/PNG | 实机验证大地图交互帧率、两点 yaw 与 navigation Action 显示；后续前端只消费 mission/navigation Actions，不内置流程状态机 |
 | `agt_experiment_manager` | 7 | 仅骨架 | package、profile 和 runtime 目录边界已建立 | 实现配置合并、Git/参数快照、产物命名、失败恢复和一键复现实验 |
 | `agt_evaluation` | 7 | 仅骨架 | package 和指标职责边界已建立 | 实现轨迹、重定位、导航、地图质量和资源占用指标，并生成可复现报告 |
 

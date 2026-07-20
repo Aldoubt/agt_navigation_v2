@@ -3,6 +3,7 @@
 #include <QCursor>
 #include <QGraphicsScene>
 #include <QGraphicsSceneMouseEvent>
+#include <QGraphicsLineItem>
 #include <QGraphicsView>
 #include <memory>
 #include <vector>
@@ -65,6 +66,11 @@ class SceneManager : public QGraphicsScene {
   QPointF first_point_pos_;
   bool is_drawing_line_{false};
   QPointF line_start_pose_;
+
+  // Two-click goal placement: first position, then heading.
+  bool nav_goal_position_pending_{false};
+  QPointF nav_goal_position_scene_;
+  QGraphicsLineItem* nav_goal_direction_preview_{nullptr};
   
   // 点位移动跟踪（用于撤销）
   std::map<std::string, TopologyMap::PointInfo> point_move_start_positions_;
@@ -120,6 +126,8 @@ class SceneManager : public QGraphicsScene {
   void setEraseCursor();
   void setPenCursor();
   void drawPoint(const QPointF &);
+  void CancelPendingNavGoalPlacement();
+  void CompleteNavGoalPlacement(const QPointF &direction_scene);
   void SetPointMoveEnable(bool is_enable);
   void cleanupTopologyDisplays(const std::vector<std::string> &point_names);
   PointShape* createTopologyPointDisplay(const TopologyMap::PointInfo &point_info);

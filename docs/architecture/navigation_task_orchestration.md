@@ -33,6 +33,9 @@ mission orchestrator 尚未实现。当前 Qt 直接调用
 
 建图需要 Qt 监视时显式传入 `start_mapping_gui:=true`。mapping profile 同时在 UI 和 ROS2
 channel 检查 `EnableTaskExecution=false`；这用于能力隔离，但不替代 `agt_safety`。
+导航点的人工输入是一个带位置和 yaw 的完整 pose：Qt 先点位置、再点朝向，未完成的
+两点交互不得进入任务文件或 Action。代价地图仍由 Nav2 拥有；Qt 大地图 profile 默认不全量渲染，
+规划调试通过 RViz 或显式开启。
 
 ## 当前导航能力
 

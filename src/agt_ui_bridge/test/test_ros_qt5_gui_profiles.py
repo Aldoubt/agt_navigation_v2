@@ -14,6 +14,12 @@ def topics(config):
     return {item["display_name"]: item["topic"] for item in config["display_config"]}
 
 
+def visibility(config):
+    return {
+        item["display_name"]: item["visible"] for item in config["display_config"]
+    }
+
+
 def test_mapping_profile_contract():
     config = load_profile("mapping")
     assert topics(config)["kOccupancyMap"] == "/agt/map/mapping_occupancy"
@@ -21,10 +27,13 @@ def test_mapping_profile_contract():
     assert topics(config)["kSetRobotSpeed"] == "/agt/cmd_vel_manual"
     assert topics(config)["kGlobalPath"] == "/plan"
     assert topics(config)["kLocalPath"] == "/local_plan"
+    assert visibility(config)["kLocalCostMap"] is False
+    assert visibility(config)["kGlobalCostMap"] is False
     assert config["key_value"] == {
         "BaseFrameId": "base_footprint",
         "FixedFrameId": "odom",
         "EnableTaskExecution": "false",
+        "EnableCostmapDisplay": "false",
     }
 
 
@@ -35,10 +44,13 @@ def test_navigation_profile_contract():
     assert profile_topics["GoalPose"] == "/goal_pose"
     assert profile_topics["kSetRelocPose"] == "/initialpose"
     assert profile_topics["kSetRobotSpeed"] == "/agt/cmd_vel_manual"
+    assert visibility(config)["kLocalCostMap"] is False
+    assert visibility(config)["kGlobalCostMap"] is False
     assert config["key_value"] == {
         "BaseFrameId": "base_footprint",
         "FixedFrameId": "map",
         "EnableTaskExecution": "true",
+        "EnableCostmapDisplay": "false",
     }
 
 

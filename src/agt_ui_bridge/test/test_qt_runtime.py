@@ -86,6 +86,53 @@ def test_explicit_map_is_persisted_without_extension_for_vendor(tmp_path):
     )
 
 
+def test_missing_profile_contract_keys_are_merged_without_overwriting_user_values(
+    tmp_path,
+):
+    config = tmp_path / "config.json"
+    template = tmp_path / "template.json"
+    config.write_text(
+        json.dumps(
+            {
+                "map_config": {"path": ""},
+                "key_value": {"FixedFrameId": "custom_map"},
+                "display_config": [
+                    {"display_name": "kGlobalCostMap", "visible": True},
+                    {"display_name": "kOccupancyMap", "visible": True},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    template.write_text(
+        json.dumps(
+            {
+                "map_config": {"path": ""},
+                "key_value": {
+                    "FixedFrameId": "map",
+                    "EnableTaskExecution": "true",
+                    "EnableCostmapDisplay": "false",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    prepare_runtime_config(config, template)
+
+    keys = json.loads(config.read_text(encoding="utf-8"))["key_value"]
+    assert keys == {
+        "FixedFrameId": "custom_map",
+        "EnableTaskExecution": "true",
+        "EnableCostmapDisplay": "false",
+    }
+    displays = json.loads(config.read_text(encoding="utf-8"))["display_config"]
+    assert displays == [
+        {"display_name": "kGlobalCostMap", "visible": False},
+        {"display_name": "kOccupancyMap", "visible": True},
+    ]
+
+
 def test_stale_topology_is_reported(tmp_path):
     map_yaml = _map(tmp_path)
     _, geometry = validate_nav2_map(map_yaml)

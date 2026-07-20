@@ -6,6 +6,7 @@
 #include <QTimer>
 #include <iostream>
 #include <algorithm>
+#include <cmath>
 #include <map>
 #include "config/config_manager.h"
 #include "display/display_occ_map.h"
@@ -42,10 +43,11 @@ void SceneManager::Init(QGraphicsView *view_ptr, DisplayManager *manager) {
   line_image.load("://images/line_btn_32.svg");
   line_cursor_ = QCursor(line_image, 0, line_image.height());
   
-  // 启用场景自动更新，这样TopologyLine的advance方法会被自动调用
+  // Topology animation is decorative. Keep it low-rate so map interaction
+  // remains responsive on large maps.
   QTimer *timer = new QTimer(this);
   connect(timer, &QTimer::timeout, this, &SceneManager::advance);
-  timer->start(16); // 约60FPS更新
+  timer->start(100); // 10 FPS
 }
 
 void SceneManager::OpenTopologyMap(const std::string &file_path) {
@@ -126,6 +128,7 @@ void SceneManager::SetToolRange(double range) {
 }
 
 void SceneManager::SetEditMapMode(MapEditMode mode) {
+  CancelPendingNavGoalPlacement();
   current_mode_ = mode;
   
   // 清理拓扑连接状态
@@ -144,8 +147,12 @@ void SceneManager::SetEditMapMode(MapEditMode mode) {
   switch (mode) {
     case kStopEdit: {
       SetPointMoveEnable(false);
-      FactoryDisplay::Instance()->GetDisplay(DISPLAY_LOCAL_COST_MAP)->setVisible(true);
-      FactoryDisplay::Instance()->GetDisplay(DISPLAY_GLOBAL_COST_MAP)->setVisible(true);
+      const bool enable_costmap_display =
+          GET_CONFIG_VALUE("EnableCostmapDisplay", "false") == "true";
+      FactoryDisplay::Instance()->GetDisplay(DISPLAY_LOCAL_COST_MAP)
+          ->setVisible(enable_costmap_display);
+      FactoryDisplay::Instance()->GetDisplay(DISPLAY_GLOBAL_COST_MAP)
+          ->setVisible(enable_costmap_display);
       FactoryDisplay::Instance()->GetDisplay(DISPLAY_MAP)->SetMoveEnable(true);
       FactoryDisplay::Instance()->GetDisplay(DISPLAY_ROBOT)->setVisible(true);
       FactoryDisplay::Instance()->GetDisplay(DISPLAY_ROBOT_FOOTPRINT)->setVisible(true);
@@ -155,6 +162,8 @@ void SceneManager::SetEditMapMode(MapEditMode mode) {
     } break;
     case kAddPoint: {
       view_ptr_->setCursor(nav_goal_cursor_);
+      view_ptr_->setToolTip(
+          "两次点击添加目标：第一次确定位置，第二次确定朝向；右键或 Esc 取消");
     } break;
     case kMoveCursor: {
       view_ptr_->setCursor(Qt::OpenHandCursor);
@@ -210,6 +219,47 @@ void SceneManager::SetPointMoveEnable(bool is_enable) {
 }
 
 void SceneManager::AddOneNavPoint() {
+}
+
+void SceneManager::CancelPendingNavGoalPlacement() {
+  nav_goal_position_pending_ = false;
+  if (nav_goal_direction_preview_) {
+    removeItem(nav_goal_direction_preview_);
+    delete nav_goal_direction_preview_;
+    nav_goal_direction_preview_ = nullptr;
+  }
+}
+
+void SceneManager::CompleteNavGoalPlacement(const QPointF &direction_scene) {
+  const RobotPose position_world = display_manager_->scenePoseToWord(
+      RobotPose(nav_goal_position_scene_.x(), nav_goal_position_scene_.y(), 0.0));
+  const RobotPose direction_world = display_manager_->scenePoseToWord(
+      RobotPose(direction_scene.x(), direction_scene.y(), 0.0));
+  const double dx = direction_world.x - position_world.x;
+  const double dy = direction_world.y - position_world.y;
+  if (std::hypot(dx, dy) < 0.05) {
+    LOG_WARN("Navigation goal heading point must be at least 0.05 m from its position");
+    return;
+  }
+
+  const RobotPose world_pose(position_world.x, position_world.y,
+                             std::atan2(dy, dx));
+  const RobotPose map_pose = display_manager_->wordPose2Map(world_pose);
+  const std::string name = generatePointName("NAV_POINT");
+  const TopologyMap::PointInfo point_info(world_pose, name);
+  PushCommand(std::make_unique<AddPointCommand>(name, point_info));
+
+  auto goal_point = new PointShape(PointShape::ePointType::kNavGoal,
+                                   DISPLAY_GOAL, name, 8, DISPLAY_MAP);
+  goal_point->SetRotateEnable(true)->SetMoveEnable(true)->setVisible(true);
+  goal_point->UpdateData(map_pose);
+  topology_map_.AddPoint(point_info);
+  curr_handle_display_ = goal_point;
+
+  LOG_INFO("Add two-click nav point: " << name << " at world pose("
+           << world_pose.x << ", " << world_pose.y << ", "
+           << world_pose.theta << ")");
+  CancelPendingNavGoalPlacement();
 }
 
 void SceneManager::AddPointAtRobotPosition() {
@@ -287,31 +337,27 @@ void SceneManager::mousePressEvent(QGraphicsSceneMouseEvent *mouseEvent) {
       draw_line_operation_saved_image_ = map_ptr->GetMapImage();
     } break;
     case MapEditMode::kAddPoint: {
-      std::string name = generatePointName("NAV_POINT");
-      
-      // 统一的坐标转换：场景坐标 -> 世界坐标 -> 地图坐标
-      auto scene_pose = basic::RobotPose(position.x(), position.y(), 0);
-      auto world_pose = display_manager_->scenePoseToWord(scene_pose);
-      auto map_pose = display_manager_->wordPose2Map(world_pose);
-      
-      TopologyMap::PointInfo point_info(world_pose, name);
-      auto command = std::make_unique<AddPointCommand>(name, point_info);
-      PushCommand(std::move(command));
-      
-      auto goal_point = new PointShape(PointShape::ePointType::kNavGoal,
-                                      DISPLAY_GOAL, name, 8, DISPLAY_MAP);
-      goal_point->SetRotateEnable(true)->SetMoveEnable(true)->setVisible(true);
-      goal_point->UpdateData(map_pose);
-      topology_map_.AddPoint(point_info);
-
-      
-      LOG_INFO("Add nav point: " << name << " at scene pose(" 
-               << scene_pose.x << ", " << scene_pose.y << ", " << scene_pose.theta 
-               << ") -> world pose(" << world_pose.x << ", " << world_pose.y << ", " << world_pose.theta
-               << ") -> map pose(" << map_pose.x << ", " << map_pose.y << ", " << map_pose.theta << ")");
-      LOG_INFO("Total points: " << topology_map_.points.size());
-      curr_handle_display_ = goal_point;
-    } break;
+      if (mouseEvent->button() == Qt::RightButton) {
+        CancelPendingNavGoalPlacement();
+        mouseEvent->accept();
+        return;
+      }
+      if (mouseEvent->button() != Qt::LeftButton) {
+        break;
+      }
+      if (!nav_goal_position_pending_) {
+        nav_goal_position_scene_ = position;
+        nav_goal_position_pending_ = true;
+        const QPen preview_pen(QColor(25, 118, 210), 2.0, Qt::DashLine);
+        nav_goal_direction_preview_ =
+            addLine(QLineF(position, position), preview_pen);
+        nav_goal_direction_preview_->setZValue(100.0);
+      } else {
+        CompleteNavGoalPlacement(position);
+      }
+      mouseEvent->accept();
+      return;
+    }
     case MapEditMode::kErase: {
       auto map_ptr = static_cast<DisplayOccMap *>(FactoryDisplay::Instance()->GetDisplay(DISPLAY_MAP));
       QPointF pose_map = map_ptr->mapFromScene(position);
@@ -528,6 +574,10 @@ void SceneManager::mouseMoveEvent(QGraphicsSceneMouseEvent *mouseEvent) {
       }
     } break;
     case MapEditMode::kAddPoint: {
+      if (nav_goal_position_pending_ && nav_goal_direction_preview_) {
+        nav_goal_direction_preview_->setLine(
+            QLineF(nav_goal_position_scene_, position));
+      }
     } break;
     case MapEditMode::kErase: {
       if (left_pressed_ && is_erase_operation_active_ && current_map_ptr_) {
@@ -588,7 +638,11 @@ void SceneManager::wheelEvent(QGraphicsSceneWheelEvent *event) {
 }
 
 void SceneManager::keyPressEvent(QKeyEvent *event) {
-  if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
+  if (event->key() == Qt::Key_Escape && nav_goal_position_pending_) {
+    CancelPendingNavGoalPlacement();
+    event->accept();
+    return;
+  } else if (event->key() == Qt::Key_Delete || event->key() == Qt::Key_Backspace) {
     if (current_mode_ == kLinkTopology && selected_topology_line_ != nullptr) {
       deleteSelectedTopologyLine();
     } else if (selected_topology_line_ != nullptr) {
@@ -1282,6 +1336,7 @@ void SceneManager::updateAllTopologyLinesStatus() {
 }
 
 SceneManager::~SceneManager() {
+  CancelPendingNavGoalPlacement();
   // 清理拓扑连线
   for (auto line : topology_lines_) {
     removeItem(line);

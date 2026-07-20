@@ -551,7 +551,7 @@ void MainWindow::setupUi() {
   QToolButton *add_point_btn = new QToolButton();
   add_point_btn->setCheckable(true);
   add_point_btn->setStyleSheet(modernEditButtonStyle);
-  add_point_btn->setToolTip("添加工位点");
+  add_point_btn->setToolTip("添加工位点：先点位置，再点朝向");
   add_point_btn->setCursor(Qt::PointingHandCursor);
   add_point_btn->setIconSize(QSize(24, 24));
 

@@ -3,7 +3,7 @@
 主界面采用项目维护的
 [`Aldoubt/Ros_Qt5_Gui_App:agt-navigation-v2`](https://github.com/Aldoubt/Ros_Qt5_Gui_App/tree/agt-navigation-v2)，
 固定源码快照位于 `third_party/ros_qt5_gui_app`，原项目 GPL-2.0 许可证与署名保持不变。
-GUI 负责地图与代价地图显示、机器人位姿、速度控制、重定位、单点/多点导航、路径显示、
+GUI 负责地图显示、机器人位姿、速度控制、重定位、单点/多点导航、路径显示、
 栅格和拓扑地图编辑；本包负责 V2 配置、启动和地图 I/O。
 
 ## 构建主界面
@@ -24,7 +24,7 @@ source /opt/ros/humble/setup.bash
 ```
 
 构建过程会按上游 CMake 配置下载 Advanced Docking System、yaml-cpp、nlohmann/json 和
-topology_msgs，产物写入 `build/ros_qt5_gui_app`。源码固定在 fork 提交 `f2a043d`，构建产物
+topology_msgs，产物写入 `build/ros_qt5_gui_app`。源码固定在 fork 提交 `74d11e0`，构建产物
 不会提交 Git。
 
 启动脚本只使用本仓库构建产物，找不到时会提示执行
@@ -43,7 +43,8 @@ ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=navigation
 首次启动会把对应模板复制到 profile 独立目录：
 `runtime/gui/ros_qt5_gui_app/mapping/config.json` 或
 `runtime/gui/ros_qt5_gui_app/navigation/config.json`。GUI 修改只保存在各自 runtime，互不覆盖，
-也不会污染 vendor 源码。需要恢复仓库默认配置时执行：
+也不会污染 vendor 源码。启动预检会从新版 profile 补齐缺失的能力键，但不覆盖已保存的用户值。
+需要恢复仓库默认配置时执行：
 
 ```bash
 ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
@@ -60,13 +61,16 @@ ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
 - 多点任务：`/agt/navigation/execute_waypoint_task` Action
 - 手动速度：`/agt/cmd_vel_manual`
 - 全局/局部路径：`/plan`、`/local_plan`
-- 全局/局部代价地图：`/global_costmap/costmap`、`/local_costmap/costmap`
+- 全局/局部代价地图：`/global_costmap/costmap`、`/local_costmap/costmap`；大地图
+  profile 默认 `EnableCostmapDisplay=false`，需要调试时显式改为 true，常规查看使用 RViz
 - 机器人 frame：`base_footprint`
 - GUI 显示 frame：mapping 为 `odom`，navigation 为 `map`
 - 拓扑地图：`/agt/map/topology`、`/agt/map/topology/update`
 
 单点 `/goal_pose` 由项目桥接为 Nav2 `NavigateToPose`；Qt 的 **Start Task Chain** 直接调用
 项目 `ExecuteWaypointTask` Action，并以 Nav2 Action 反馈、结果和 missed waypoint 判断成败。
+添加导航点采用两次点击：第一次固定位置，第二次从位置指向朝向点并计算 yaw；
+右键、Esc 或切换工具会丢弃未完成的点。拓扑线装饰刷新固定为 10 Hz，避免抢占大地图交互。
 手动速度已经接入 `agt_safety -> agt_chassis`，但必须先显式使能安全层。GUI 可直接打开、
 编辑并保存 PGM/YAML；错误 YAML 会提示而不退出，切换地图会先清空旧拓扑并拒绝同名 sidecar
 中的越界点。保存后的导航地图放在 `runtime/maps/`，下一次启动 map server 时使用对应 YAML。

@@ -18,6 +18,11 @@ contract is:
 - malformed Nav2 map YAML is rejected without terminating the GUI;
 - changing a map clears stale topology and rejects sidecar points outside the
   selected map;
+- navigation points use two clicks: position first and heading second, with
+  right-click/Escape/tool changes canceling incomplete placement;
+- `EnableCostmapDisplay` is fail-closed so multi-million-cell costmaps are not
+  repeatedly expanded and rendered unless an operator explicitly enables them;
+- decorative topology animation is limited to 10 FPS;
 - manual velocity remains on the configured project input and must pass through
   `agt_safety` before reaching a chassis driver.
 

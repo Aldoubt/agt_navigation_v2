@@ -45,6 +45,10 @@ DisplayManager::DisplayManager() {
   new DisplayPath(DISPLAY_GLOBAL_PATH, 6, DISPLAY_MAP);
   new DisplayPath(DISPLAY_LOCAL_PATH, 6, DISPLAY_MAP);
   new RobotShape(DISPLAY_ROBOT_FOOTPRINT, 8, DISPLAY_MAP);
+  const bool enable_costmap_display =
+      GET_CONFIG_VALUE("EnableCostmapDisplay", "false") == "true";
+  GetDisplay(DISPLAY_GLOBAL_COST_MAP)->setVisible(enable_costmap_display);
+  GetDisplay(DISPLAY_LOCAL_COST_MAP)->setVisible(enable_costmap_display);
   // defalut display config
 
   SetDisplayConfig(DISPLAY_GLOBAL_PATH + "/Color", Color(0, 0, 255));

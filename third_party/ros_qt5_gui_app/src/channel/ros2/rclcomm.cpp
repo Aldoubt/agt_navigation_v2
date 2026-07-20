@@ -69,20 +69,24 @@ bool rclcomm::Start() {
       GET_TOPIC_NAME(DISPLAY_MAP),
       rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
       std::bind(&rclcomm::map_callback, this, std::placeholders::_1), sub1_obt);
-  local_cost_map_subscriber_ =
-      node->create_subscription<nav_msgs::msg::OccupancyGrid>(
-          GET_TOPIC_NAME(DISPLAY_LOCAL_COST_MAP),
-          rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-          std::bind(&rclcomm::localCostMapCallback, this,
-                    std::placeholders::_1),
-          sub1_obt);
-  global_cost_map_subscriber_ =
-      node->create_subscription<nav_msgs::msg::OccupancyGrid>(
-          GET_TOPIC_NAME(DISPLAY_GLOBAL_COST_MAP),
-          rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
-          std::bind(&rclcomm::globalCostMapCallback, this,
-                    std::placeholders::_1),
-          sub1_obt);
+  const bool enable_costmap_display =
+      GET_CONFIG_VALUE("EnableCostmapDisplay", "false") == "true";
+  if (enable_costmap_display) {
+    local_cost_map_subscriber_ =
+        node->create_subscription<nav_msgs::msg::OccupancyGrid>(
+            GET_TOPIC_NAME(DISPLAY_LOCAL_COST_MAP),
+            rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
+            std::bind(&rclcomm::localCostMapCallback, this,
+                      std::placeholders::_1),
+            sub1_obt);
+    global_cost_map_subscriber_ =
+        node->create_subscription<nav_msgs::msg::OccupancyGrid>(
+            GET_TOPIC_NAME(DISPLAY_GLOBAL_COST_MAP),
+            rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
+            std::bind(&rclcomm::globalCostMapCallback, this,
+                      std::placeholders::_1),
+            sub1_obt);
+  }
 
   laser_scan_subscriber_ =
       node->create_subscription<sensor_msgs::msg::LaserScan>(

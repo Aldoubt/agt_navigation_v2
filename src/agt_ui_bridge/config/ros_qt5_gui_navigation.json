@@ -7,8 +7,8 @@
     {"display_name": "GoalPose", "topic": "/goal_pose", "visible": true},
     {"display_name": "kSetRelocPose", "topic": "/initialpose", "visible": true},
     {"display_name": "kOccupancyMap", "topic": "/agt/map/global_occupancy", "visible": true},
-    {"display_name": "kLocalCostMap", "topic": "/local_costmap/costmap", "visible": true},
-    {"display_name": "kGlobalCostMap", "topic": "/global_costmap/costmap", "visible": true},
+    {"display_name": "kLocalCostMap", "topic": "/local_costmap/costmap", "visible": false},
+    {"display_name": "kGlobalCostMap", "topic": "/global_costmap/costmap", "visible": false},
     {"display_name": "kGlobalPath", "topic": "/plan", "visible": true},
     {"display_name": "kLocalPath", "topic": "/local_plan", "visible": true},
     {"display_name": "kRobotPose", "topic": "/agt/mapping/odometry", "visible": true},
@@ -20,7 +20,8 @@
   "key_value": {
     "BaseFrameId": "base_footprint",
     "FixedFrameId": "map",
-    "EnableTaskExecution": "true"
+    "EnableTaskExecution": "true",
+    "EnableCostmapDisplay": "false"
   },
   "map_config": {"path": ""},
   "robot_shape_config": {
