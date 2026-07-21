@@ -14,7 +14,7 @@ ros2 launch agt_bringup system.launch.py mode:=navigation \
 ```
 
 自动和手动重定位的完整操作、候选 YAML、`/initialpose` 命令和技术差异见
-[`docs/workflows/relocalization_usage.md`](../docs/workflows/relocalization_usage.md)。自动启动默认关闭；
+[`docs/workflows/relocalization_usage.md`](../../docs/workflows/relocalization_usage.md)。自动启动默认关闭；
 开启 `auto_relocalize_on_start:=true` 只会发送一次有界 Action，不代表无先验全地图搜索。
 
 `mapping` 启动 BUNKER TF、传感器、FAST-LIVO2 PCD 保存、二维投影、底盘和 RViz；可用
