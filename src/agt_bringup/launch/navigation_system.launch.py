@@ -11,6 +11,8 @@ from launch.actions import (
 from launch.conditions import IfCondition, UnlessCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
+from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 
 
 def include(package, launch_file, arguments=None, condition=None):
@@ -55,13 +57,19 @@ def validate_coverage_arguments(context):
     return []
 
 
-def _required_file(context, name):
+def validate_navigation_arguments(context):
+    for name in ("map", "global_map_pcd", "global_map_processing_record"):
+        _required_file(context, name, "navigation")
+    return validate_coverage_arguments(context)
+
+
+def _required_file(context, name, purpose="semantic coverage"):
     value = LaunchConfiguration(name).perform(context)
     if not value:
-        raise RuntimeError(f"semantic coverage requires {name}:=/absolute/path")
+        raise RuntimeError(f"{purpose} requires {name}:=/absolute/path")
     path = Path(value).expanduser()
     if not path.is_file():
-        raise RuntimeError(f"semantic coverage {name} file does not exist: {value}")
+        raise RuntimeError(f"{purpose} {name} file does not exist: {value}")
     return path
 
 
@@ -124,6 +132,11 @@ def generate_launch_description():
                 description="PCD map used by ICP/NDT relocalization",
             ),
             DeclareLaunchArgument(
+                "global_map_processing_record",
+                default_value="",
+                description="Ready processing record paired with global_map_pcd",
+            ),
+            DeclareLaunchArgument(
                 "runtime_dir",
                 default_value=str(
                     Path(get_package_share_directory("agt_bringup")).parents[3]
@@ -131,6 +144,24 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("backend", default_value="ndt"),
+            DeclareLaunchArgument("map_id", default_value=""),
+            DeclareLaunchArgument("configured_candidates_yaml", default_value=""),
+            DeclareLaunchArgument("last_valid_pose_path", default_value=""),
+            DeclareLaunchArgument(
+                "manual_initialpose_enabled",
+                default_value="true",
+                description="Keep the original RViz/Qt /initialpose comparison path enabled",
+            ),
+            DeclareLaunchArgument(
+                "auto_relocalize_on_start",
+                default_value="false",
+                description="Send one bounded automatic relocalization Action after startup",
+            ),
+            DeclareLaunchArgument("auto_relocalize_delay_s", default_value="3.0"),
+            DeclareLaunchArgument("auto_relocalize_server_wait_s", default_value="15.0"),
+            DeclareLaunchArgument("auto_relocalize_timeout_s", default_value="30.0"),
+            DeclareLaunchArgument("auto_relocalize_max_candidates", default_value="0"),
+            DeclareLaunchArgument("auto_relocalize_publish_debug", default_value="false"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("start_sensor", default_value="true"),
             DeclareLaunchArgument("start_chassis", default_value="true"),
@@ -142,7 +173,7 @@ def generate_launch_description():
             DeclareLaunchArgument("coverage_params", default_value=""),
             DeclareLaunchArgument("annotation_mode", default_value="false"),
             DeclareLaunchArgument("platform_profile", default_value=""),
-            OpaqueFunction(function=validate_coverage_arguments),
+            OpaqueFunction(function=validate_navigation_arguments),
             include(
                 "agt_description",
                 "bunker_description.launch.py",
@@ -193,9 +224,48 @@ def generate_launch_description():
                         / "relocalization.yaml"
                     ),
                     "global_map_pcd": LaunchConfiguration("global_map_pcd"),
+                    "global_map_processing_record": LaunchConfiguration(
+                        "global_map_processing_record"
+                    ),
+                    "map_id": LaunchConfiguration("map_id"),
+                    "configured_candidates_yaml": LaunchConfiguration(
+                        "configured_candidates_yaml"
+                    ),
+                    "last_valid_pose_path": LaunchConfiguration("last_valid_pose_path"),
                     "backend": LaunchConfiguration("backend"),
+                    "manual_initialpose_enabled": LaunchConfiguration(
+                        "manual_initialpose_enabled"
+                    ),
                     "use_sim_time": use_sim_time,
                 },
+            ),
+            Node(
+                package="agt_bringup",
+                executable="automatic_relocalization.py",
+                name="agt_automatic_relocalization",
+                output="screen",
+                parameters=[
+                    {
+                        "action_name": "/agt/localization/relocalize",
+                        "startup_delay_s": ParameterValue(
+                            LaunchConfiguration("auto_relocalize_delay_s"), value_type=float
+                        ),
+                        "server_wait_timeout_s": ParameterValue(
+                            LaunchConfiguration("auto_relocalize_server_wait_s"), value_type=float
+                        ),
+                        "action_timeout_s": ParameterValue(
+                            LaunchConfiguration("auto_relocalize_timeout_s"), value_type=float
+                        ),
+                        "max_candidates": ParameterValue(
+                            LaunchConfiguration("auto_relocalize_max_candidates"), value_type=int
+                        ),
+                        "publish_debug": ParameterValue(
+                            LaunchConfiguration("auto_relocalize_publish_debug"), value_type=bool
+                        ),
+                        "use_sim_time": LaunchConfiguration("use_sim_time"),
+                    }
+                ],
+                condition=IfCondition(LaunchConfiguration("auto_relocalize_on_start")),
             ),
             include(
                 "agt_navigation",
@@ -209,6 +279,8 @@ def generate_launch_description():
                     "map": LaunchConfiguration("map"),
                     "use_sim_time": use_sim_time,
                     "use_keepout_filter": semantic_enabled,
+                    "autostart": "false",
+                    "enable_localization_gate": "true",
                 },
             ),
             include(

@@ -1,625 +1,1162 @@
 ---
-title: agt_navigation_v2 项目总体方案与仓库迁移汇报稿
+title: agt_navigation_v2 项目总体方案与下一阶段语义覆盖汇报稿
 project: agt_navigation_v2
-version: V1.0
+version: V2.0
 date: 2026-07
 language: zh-CN
-purpose: 项目立项、阶段汇报、团队对齐与 Codex 辅助迁移的统一依据
-source_format: DOCX
-converted_format: Markdown
+purpose: 当前能力复盘、语义地图与离线覆盖路径阶段汇报、团队开发对齐
+source_format: Markdown
 ---
 
 # agt_navigation_v2
 
-## 模块化农业机器人导航实验平台
+## 基于 MID360、FAST-LIVO2、Nav2 与 Qt5 的模块化农业机器人导航平台
 
-**文档类型：** 项目总体方案与仓库迁移汇报稿  
-**当前基准：** MID360 + FAST-LIVO2-ROS2 + Nav2  
-**面向扩展：** 16线雷达 / 高精度IMU / RTK / UWB / 语义点云 / Fields2Cover
+**文档类型：** 项目总体方案与下一阶段开发汇报稿
 
-> **Codex 读取说明**  
-> 本文件是项目方案的主上下文文档。代码迁移时应同时读取仓库根目录 `AGENTS.md`、`docs/interfaces/` 和 `docs/migration/migration_matrix.md`；不得仅根据本汇报稿一次性重写整个仓库。
+**当前基准：** MID360 + FAST-LIVO2 纯 LIO + Nav2 + BUNKER 履带底盘
+
+**当前闭环：** 建图、二维地图生产、Qt5 地图编辑、waypoint 规划与任务下发、安全仲裁、CAN 底盘输出
+
+**下一阶段重点：** 语义地图数据链、Fields2Cover 离线覆盖路径、路径语义重建、完整碰撞验证、路径修复与可执行性审计
+
+**未来扩展：** 语义感知、RTK/UWB 融合、实时可通行性、机械臂任务编排和多底盘执行
 
 项目负责人：yangxuan  
-版本：V1.0  
+版本：V2.0
 日期：2026年7月
 
+> 本文以当前仓库实际代码、配置、测试和文档为准。代码中已经存在的离线预览或验证能力，不等同于经过实车验收的执行能力；覆盖路径在通过全部语义、碰撞、运动学和安全检查前，不得进入底盘控制链。
+
 # 文档说明
-| **项目** | **内容**                                                             |
-|----------|----------------------------------------------------------------------|
-| 文档名称 | agt_navigation_v2 项目总体方案与仓库迁移汇报稿                       |
-| 文档目的 | 用于项目立项、阶段汇报、团队对齐以及 Codex 辅助迁移工作的统一依据    |
-| 适用范围 | 仓库架构、系统接口、模块职责、配置治理、实验管理、迁移路线与未来扩展 |
-| 当前状态 | 总体方案阶段；旧仓库保留为可运行基线，新仓库按模块逐步迁移           |
-| 核心约束 | 不一次性重写；不破坏旧基线；每次迁移必须可验证、可回滚、可复现       |
 
-## 建议汇报逻辑
-1.  先说明旧仓库“能够运行但难以维护和开展对比实验”的现状。
+| 项目 | 内容 |
+| --- | --- |
+| 文档名称 | `agt_navigation_v2` 项目总体方案与下一阶段语义覆盖汇报稿 |
+| 文档目的 | 汇报当前系统能力，统一下一阶段语义地图和离线路径开发目标 |
+| 适用范围 | 仓库架构、建图地图链、Qt5 交互、Nav2 导航、覆盖规划、验证与验收 |
+| 当前状态 | 基础导航工程闭环已建立；语义地图和覆盖规划已完成较多离线模块，但覆盖路径仍存在上游语义缺陷，尚不可执行 |
+| 当前车辆 | AgileX BUNKER 履带底盘，CAN 通讯；导航控制模型为差速/履带近似模型 |
+| 当前传感器 | Livox MID360，点云和 IMU 通过 Livox SDK 接入，基准频率 10 Hz |
+| 当前建图前端 | FAST-LIVO2 ROS 2 纯 LIO 模式，输出连续里程计、注册点云和可持久化定位 PCD |
+| 当前导航前端 | Qt5 维护版 GUI、Nav2、项目 waypoint Action、安全层和 BUNKER 驱动 |
+| 非目标 | 本阶段不把语义感知、实时动态地图和机械臂执行伪装成已完成能力 |
 
-2.  再说明新仓库不是重新造轮子，而是把已有成果整理为可替换、可复现的实验平台。
+## 汇报主线
 
-3.  随后用统一 TF、统一接口、模块边界和实验配置解释系统如何降低耦合。
+1. 项目已经从单纯的算法工作区发展为一条可运行的基础导航集成链。
 
-4.  最后给出迁移路线、扩展方向和阶段性成果，说明方案具备可落地性。
+2. 当前可以稳定讨论的是“地图生产和 waypoint 导航闭环”，不是覆盖作业已经可执行。
 
-> **一句话定位**  
-> `agt_navigation_v2` 不是单一导航算法仓库，而是一套以 FAST-LIVO2-ROS2 为当前建图前端、以统一接口承载多传感器、多底盘、多地图处理和多规划算法实验的 ROS 2 模块化导航平台。
+3. 下一阶段不再从空白设计语义功能，而是把现有 GeoJSON、coverage.yaml、Qt5 编辑、Fields2Cover、路径语义、碰撞检测和离线预览串成一条可审计的数据链。
 
-# 汇报摘要
-当前 `ros2_3d-nav` ，文档位置在/home/yangxuan/ros2_ws，github版本在https://github.com/Aldoubt/ros2_3d-nav.git，已经形成 MID360 驱动、FAST-LIVO2 建图、点云地图导出、二维地图生成、ICP 重定位、Nav2、底盘桥接、安全急停、Qt5 上位机和实验记录等功能链。然而，第三方代码、自研模块、运行数据、启动逻辑和参数配置混杂，部分功能通过启动时动态修改 YAML 实现，同一地图或话题在不同入口中还存在不同默认值。系统虽具备样机能力，但继续叠加功能会显著增加排障、迁移和实验复现成本。
+4. 覆盖规划必须先在离线地图上形成可解释、可复现、可验证的候选路径，再考虑与 Nav2 和底盘执行连接。
 
-因此，新建 `agt_navigation_v2`，将旧仓库冻结为可运行基线，并按“接口先行、模块迁移、逐项验证”的方式重构。新平台以 MID360 和 FAST-LIVO2-ROS2 为第一阶段基准，但通过传感器适配层、建图后端接口、固定 TF 树和统一状态接口，避免上层模块直接依赖 FAST-LIVO2 的原生 topic、frame 和文件路径。
+5. 所有运动输出仍必须经过 Nav2、`agt_safety`、底盘 watchdog 和 CAN 驱动，Qt5 和覆盖算法不能直接发布速度。
 
-V2 的目标不是一次性接入所有算法，而是建立稳定的系统骨架：固定 TF 与底盘描述，形成三维点云到二维导航地图的可替换处理链，统一全局重定位和多源融合边界，建立静态全局地图与过滤后局部障碍点云相结合的 Nav2 架构，并通过实验管理器保存最终生效参数、Git 版本、bag 和评测结果。
+> **一句话定位**
+> `agt_navigation_v2` 是一套以 MID360 + FAST-LIVO2 为当前建图和定位基准、以 Nav2 为基础导航执行框架、以 Qt5 为操作前端、以 GeoJSON/coverage.yaml 为农业语义任务数据源的 ROS 2 模块化机器人导航平台。当前基础 waypoint 导航链已经闭环，下一阶段的核心是把语义地图和离线覆盖路径做成可复现、可审计、可验证的独立规划产品。
 
-| **维度** | **旧仓库主要状态**                | **V2 目标**                                    |
-|----------|-----------------------------------|------------------------------------------------|
-| 系统定位 | 功能样机与联调工作区              | 可扩展、可复现的导航实验平台                   |
-| 算法关系 | FAST-LIVO2 原生接口被多处直接使用 | FAST-LIVO2 作为可替换 Mapping/Odometry Backend |
-| TF       | 雷达坐标系与机器人基准耦合        | 固定 map→odom→base_footprint→base_link→sensor  |
-| 地图处理 | OctoMap 固定高度投影为主          | 多后端统一输出，可开展对比实验                 |
-| 配置     | 多个 YAML 和 launch 隐式覆盖      | 平台/传感器/环境/实验四层配置与最终参数快照    |
-| 扩展     | 新增功能容易继续堆叠              | RTK、UWB、语义点云、Fields2Cover 按模块接入    |
+# 1. 项目背景与当前判断
 
-> **核心决策**  
-> 新建 `agt_navigation_v2`；旧仓库打 Tag 并保留维护分支；第三方算法单独 Fork 到个人 GitHub 命名空间，由 `nav_dependencies.repos` 固定版本拉取；V2 主仓库主要保存自研系统代码、配置、接口和文档。
+## 1.1 系统已经具备的基础
 
-# 1. 项目背景与重构动因
-## 1.1 已有系统基础
-- MID360 驱动与点云、IMU 数据接入。
+- MID360 驱动、点云和 IMU 接入统一到项目 topic。
+- FAST-LIVO2 纯 LIO 建图适配，隔离原生 topic，并输出项目命名的里程计和注册点云。
+- 增量稀疏体素 PCD 持久化，支持保存定位地图和处理记录。
+- OctoMap 高度范围投影以及 PGM/YAML 地图保存入口。
+- 离线静态障碍证据、时间一致性、地面拟合、高度层和车体扫掠地图处理工具。
+- NDT/ICP 重定位节点，唯一发布 `map -> odom`。
+- Nav2 静态全局 costmap、局部 VoxelLayer、MPPI 控制器、Collision Monitor 和 lifecycle 管理。
+- Qt5 地图显示、地图编辑、目标点两次点击、任务点表格和项目 waypoint Action 调用。
+- `agt_safety` 速度仲裁、超时归零、急停锁存、速度/加速度限制和手动优先。
+- BUNKER CAN 驱动、状态桥接、连接诊断和双层速度 watchdog。
+- GeoJSON/`coverage.yaml` 语义地图模型、Shapely/GEOS 几何校验、语义地图服务器和 keepout mask。
+- Fields2Cover/OpenNav Coverage 适配、PathComponents 语义重建、全 footprint 路径验证、连接段修复和离线路线预览。
 
-- FAST-LIVO2-ROS2 在线里程计与三维点云建图。
+## 1.2 当前闭环的准确表述
 
-- 全局 PCD 导出、OctoMap 二维投影地图保存。
+当前仓库已经形成以下闭环：
 
-- ICP 重定位与 `map → odom` 建立。
+```text
+MID360 点云/IMU
+    -> Livox SDK 与项目传感器适配
+    -> FAST-LIVO2 纯 LIO
+    -> odom、注册点云、定位 PCD
+    -> OctoMap/离线地图处理
+    -> PGM + YAML OccupancyGrid
+    -> Qt5 地图查看与编辑
+    -> Nav2 静态地图与全局路径
+    -> 局部障碍 costmap 与控制器
+    -> Collision Monitor
+    -> agt_safety
+    -> BUNKER CAN 速度和状态链
+```
 
-- Nav2 全局规划、局部控制和底盘速度桥接。
+这是一条**基础导航工程闭环**，主要对应单点目标和有限 waypoint 任务。它证明了数据接口、地图、规划、速度安全和底盘通讯能够被组合起来，但还不代表以下指标已经达标：
 
-- 点云转 LaserScan 的前向障碍急停和速度安全仲裁。
+- 大量不同初值下的定位成功率和恢复时间；
+- 长时间运行时的 CPU、内存、磁盘和消息延迟；
+- 障碍漏检、误检和动态拖影的实车统计；
+- 急停距离、CAN 断连归零和低速制动距离；
+- 农业覆盖路径的面积覆盖率、重复率和最终可执行性。
 
-- Qt5 地图交互、导航总控和实验记录工具。
+## 1.3 需要纠正的技术路线表述
 
-## 1.2 当前主要矛盾
-| **问题类别** | **具体表现**                                                                     | **直接影响**                         |
-|--------------|----------------------------------------------------------------------------------|--------------------------------------|
-| 职责混杂     | 第三方算法、驱动、自研节点、GUI、地图和日志放在同一工作区                        | 模块难以单独测试和迁移               |
-| 接口耦合     | 上层模块直接使用 `/cloud_registered`、`/aft_mapped_to_init`、`livox_frame` | 更换雷达、LIO 或底盘需要连锁修改     |
-| TF 不清晰    | 雷达 frame 被用作 Nav2 机器人基准                                                | 倾斜安装、Z 漂移和底盘迁移问题被放大 |
-| 配置分散     | 多个 YAML、launch 参数、GUI 参数共同决定最终状态                                 | 排障时难以确认实际生效配置           |
-| 地图能力不足 | 固定高度 OctoMap 投影不能区分地面、植被、噪声与硬障碍                            | 通道变窄、重影、误障碍               |
-| 实验不可复现 | 地图、PCD、参数、Git 版本和 bag 缺少强绑定                                       | 对比实验可信度不足                   |
+| 原有表述 | 当前仓库实际情况 | 建议汇报表述 |
+| --- | --- | --- |
+| Nav2 使用 RPP 局部规划 | 当前 `nav2_bunker.yaml` 使用 `nav2_mppi_controller::MPPIController`，运动模型为 `DiffDrive` | Nav2 使用 SmacPlanner2D 生成全局路径，MPPI 进行局部轨迹控制 |
+| 局部避障算法未知 | 已有点云过滤、VoxelLayer、InflationLayer、Collision Monitor 和 MPPI 多层链 | 局部避障由几何障碍点云、Nav2 局部代价地图、Collision Monitor 和 MPPI 共同完成 |
+| 地面分割实时生成导航图 | 实时入口主要是 OctoMap 高度范围投影；地面拟合、时间证据和扫掠清除主要在离线工具链 | 基础地图采用高度范围投影，离线增强链加入地面、时序、高度和车体自返回处理 |
+| 已经完成拖影消除 | 已有静态证据过滤、车体扫掠清除和局部 costmap clearing，但没有独立在线动态目标跟踪 | 已建立拖影抑制机制，尚未完成完整在线动态地图去鬼影算法 |
+| BUNKER 状态已经进入融合定位 | CAN 状态已桥接和诊断；`agt_localization_fusion` 仍是骨架 | BUNKER 通讯和状态监控已接通，轮速/LIO/IMU 融合尚未实现 |
+| Fields2Cover 路径已经可执行 | 已完成适配、可视化、语义重建、碰撞验证和连接修复实验；存在 `zero_length_swath`，执行资格为 false | 覆盖路径离线生成与验证链已建立，但当前输出仍是不可执行候选 |
+| Qt5 直接完成任务规划 | Qt5 负责交互和 Action 请求，项目 waypoint server 负责校验并调用 Nav2 `FollowWaypoints` | Qt5 是前端，导航任务由项目 Action 和 Nav2 负责，速度不得由 GUI 直接下发 |
 
-## 1.3 为什么采用新仓库而不是原地大改
-旧仓库目前仍具有重要价值：它是一条真实运行过的系统基线，也是迁移过程中判断“新版本是否退化”的参照。若在旧仓库原地移动目录、重命名包并修改 TF，很容易同时破坏可运行链和新架构。V2 采用新仓库，可以把迁移任务控制在明确边界内，并随时与旧系统进行 bag 回放、话题输出和导航结果对比。
+# 2. 总体目标与阶段边界
 
-> **迁移策略**  
-> 旧仓库负责“保留可运行能力和紧急修复”，V2 负责“建立正式架构和开展后续研究”。迁移完成前，两者并行存在，不要求一次切换。
+## 2.1 总体目标
 
-# 2. 项目定位、目标与系统假设
-## 2.1 项目定位
-`agt_navigation_v2` 是一套面向农业移动机器人、温室与室外非结构化环境的 ROS 2 模块化导航实验平台。平台当前以 Livox MID360 和 FAST-LIVO2-ROS2 为基准，但不把某一具体雷达、SLAM、定位方法或底盘作为永久假设。
+建立一套面向温室和农业移动机器人的模块化导航平台，使系统能够：
 
-## 2.2 总体目标
-- 形成可以在不同底盘、不同传感器和不同算法后端之间迁移的统一系统骨架。
+1. 使用 MID360 + FAST-LIVO2 完成三维建图和定位地图生产。
+2. 从三维点云生成可解释的二维导航地图，并保留原始地图和处理记录。
+3. 使用 Qt5 完成地图浏览、地图修改、目标点选择和 waypoint 任务编辑。
+4. 使用 Nav2 完成全局规划、局部控制、局部障碍处理和路径执行。
+5. 通过 `agt_safety` 和 BUNKER CAN 链提供独立于 GUI 的安全速度下发。
+6. 使用 GeoJSON 与 `coverage.yaml` 表达田块、障碍、作业行、入口、方向和覆盖参数。
+7. 在不修改基础 PGM 的前提下，离线生成、审计和验证 Fields2Cover 覆盖候选路径。
+8. 为未来语义感知、实时可通行性和机械臂任务编排提供明确接口，但不提前把它们接入运动闭环。
 
-- 把三维建图、二维地图处理、全局定位、多源融合、路径规划、控制与安全分层解耦。
+## 2.2 下一阶段的核心目标
 
-- 为地图生成、定位、规划器、控制器和语义点云方法建立可重复的对比实验能力。
+下一阶段不是继续扩大算法范围，而是完成“语义地图到可验证离线路径”的闭环：
 
-- 接入 Qt5 地图编辑工具和 Fields2Cover，支持农业覆盖作业边界、障碍物和路径编辑。
+```text
+基础 PGM/YAML
+    + GeoJSON 语义几何
+    + coverage.yaml 任务参数
+    + 平台 profile
+    + 障碍/keepout mask
+    -> 语义校验
+    -> OpenNav/Fields2Cover 路径生成
+    -> PathComponents 语义重建
+    -> 全 footprint 碰撞与曲率验证
+    -> 仅修复 CONNECTION
+    -> 再次验证
+    -> 离线报告、可视化和执行资格判定
+```
 
-- 为 16 线激光雷达、高精度 IMU、RTK、UWB 和点云语义聚类预留明确模块边界。
+下一阶段的“完成”定义是：
 
-- 利用 Codex 辅助代码迁移、文档维护、测试生成和回归检查，同时避免批量不可控重写。
+- 给定一份版本化基础地图和一份合法语义任务，能够稳定生成离线路径候选；
+- 每个路径区间都有明确的 `SWATH` 或 `CONNECTION` 语义；
+- 路径与地图、语义任务、平台 profile 具有关联指纹；
+- 全车体 polygon、未知区域、越界、最小转弯半径和 keepout 均得到检查；
+- 任何不满足条件的路径输出为空或明确标记为不可执行；
+- 生成结果可在 Qt5/RViz 中查看，可输出 JSON/YAML/Markdown 报告；
+- 不启动控制器、不使能安全层、不发布速度、不调用底盘。
 
-## 2.3 当前与未来硬件假设
-| **阶段** | **传感器/硬件**                            | **系统要求**                                         |
-|----------|--------------------------------------------|------------------------------------------------------|
-| 当前基准 | Livox MID360；当前 IMU；当前轮式底盘       | 完整跑通建图、地图处理、重定位、Nav2、安全和实验记录 |
-| 硬件升级 | 16线机械式雷达；高精度 IMU；稳定轮速里程计 | 通过 adapter 和 profile 替换，不修改上层算法接口     |
-| 全局约束 | RTK；UWB                                   | 统一坐标、杆臂、协方差、质量状态，并进入融合层       |
-| 研究扩展 | 相机；语义点云；多模态感知                 | 作为可选 perception backend，不成为基础导航强依赖    |
+## 2.3 明确不纳入下一阶段的目标
 
-## 2.4 设计原则
-| **原则**   | **含义**                                                        |
-|------------|-----------------------------------------------------------------|
-| 接口先行   | 先定义 TF、topic、状态和地图格式，再迁移算法。                  |
-| 单一责任   | 每个模块只承担一种核心职责，不在 GUI、launch 或适配器中堆算法。 |
-| 后端可替换 | FAST-LIVO2、ICP、NDT、地图投影和控制器都通过统一接口替换。      |
-| 配置可追溯 | 运行时必须保存最终生效参数，禁止依赖隐式覆盖。                  |
-| 实验可复现 | 每次实验绑定地图、PCD、bag、Git commit、参数和指标。            |
-| 安全独立   | 安全仲裁和急停不依赖 Nav2 是否正常运行。                        |
-| 逐步迁移   | 每次只迁移一个模块，具备验证方法和回滚路径。                    |
+- 不在本阶段实现完整在线语义感知。
+- 不把实时静态可通行性候选配置直接改造成运行节点。
+- 不把临时生成的 GML 写回用户语义 GeoJSON。
+- 不允许覆盖路径绕过 Nav2、`agt_safety` 或底盘 watchdog。
+- 不因几何路径看起来连贯而放宽 `PathComponents` 语义缺陷。
+- 不在尚未解决 BUNKER 与 Ackermann profile 差异前共用一套执行参数。
+- 不把离线时间估算、路径排序或可视化报告解释为实车作业性能。
 
-# 3. 总体架构设计
-系统采用分层架构：底层硬件通过适配层输出统一数据；建图、定位、融合和感知独立运行；地图处理与任务规划使用标准地图和路径接口；安全、底盘、UI 和实验管理位于系统边界。第三方算法不直接决定整套系统的数据命名和目录结构。
-
-![agt_navigation_v2 总体分层架构](assets/architecture.png)
+# 3. 系统总体架构
 
 ```mermaid
 flowchart TB
-  subgraph H[硬件与驱动层]
-    H1[MID360 / 16线雷达]
-    H2[IMU / 高精度IMU]
-    H3[轮速 / RTK / UWB]
-    H4[不同形式底盘]
+  subgraph S[传感器与驱动]
+    S1[MID360 LiDAR]
+    S2[MID360 IMU]
+    S3[Livox SDK]
+    S4[BUNKER CAN]
   end
 
-  subgraph A[统一适配与描述层]
-    A1[agt_description]
-    A2[agt_sensor_adapters]
-    A3[统一 TF / Topic / 状态]
+  subgraph A[适配与描述]
+    A1[agt_sensor_adapters]
+    A2[agt_description]
+    A3[platform profiles]
+    A4[统一 TF / topic / QoS]
   end
 
-  subgraph M[建图、定位与感知层]
-    M1[agt_mapping
-FAST-LIVO2 backend]
-    M2[agt_localization
-ICP / NDT]
-    M3[agt_localization_fusion
-RTK / UWB / IMU]
-    M4[agt_perception
-地面 / 障碍 / 语义]
+  subgraph M[建图与地图生产]
+    M1[FAST-LIVO2 纯 LIO]
+    M2[registered cloud / odometry]
+    M3[PCD persistence]
+    M4[OctoMap baseline]
+    M5[offline ground / temporal / height processing]
+    M6[PGM + YAML]
   end
 
-  subgraph P[地图与任务规划层]
-    P1[agt_map_processing
-3D → 2D / 可通行性]
-    P2[agt_navigation
-Nav2]
-    P3[agt_coverage_planning
-Fields2Cover]
+  subgraph U[地图与语义编辑]
+    U1[Qt5 map editor]
+    U2[semantic editor]
+    U3[GeoJSON]
+    U4[coverage.yaml]
+    U5[semantic map server]
+    U6[keepout mask]
   end
 
-  subgraph E[执行、安全与交互层]
-    E1[agt_safety]
-    E2[agt_chassis]
-    E3[agt_ui_bridge
-Qt5地图编辑]
-    E4[agt_experiment_manager
-实验与复现]
+  subgraph P[路径规划与验证]
+    P1[OpenNav Coverage / Fields2Cover]
+    P2[PathComponents]
+    P3[SWATH / CONNECTION semantics]
+    P4[footprint collision validator]
+    P5[Nav2 connection repair]
+    P6[offline report / RViz / Qt preview]
   end
 
-  subgraph T[评测与工具层]
-    T1[agt_evaluation]
-    T2[tools/time_sync]
-    T3[tools/calibration]
-    T4[bag / map / diagnostics tools]
+  subgraph N[基础导航执行]
+    N1[Nav2 map / SmacPlanner2D]
+    N2[VoxelLayer + MPPI]
+    N3[Collision Monitor]
+    N4[ExecuteWaypointTask]
+    N5[agt_safety]
+    N6[BUNKER CAN]
   end
 
-  H --> A --> M --> P --> E --> T
+  S --> A --> M
+  M6 --> U1
+  M6 --> N1
+  U1 --> U2 --> U3 --> U4 --> U5 --> U6
+  U3 --> P1
+  U4 --> P1
+  A3 --> P1
+  U6 --> P4
+  P1 --> P2 --> P3 --> P4 --> P5 --> P6
+  N1 --> N2 --> N3 --> N5 --> N6
+  U1 --> N4 --> N1
 ```
 
-*图 1 agt_navigation_v2 总体分层架构*
+## 3.1 运行时基础导航链
 
-## 3.1 关键数据主链
-| **主链**   | **数据流**                                                             | **作用**                         |
-|------------|------------------------------------------------------------------------|----------------------------------|
-| 建图链     | 传感器 → adapter → FAST-LIVO2 backend → 统一里程计/注册点云/全局点云   | 建立连续局部坐标与三维地图       |
-| 地图链     | 全局 PCD → map_processing backend → OccupancyGrid / TraversabilityGrid | 生成 Nav2 静态地图和可通行性代价 |
-| 定位链     | 全局 PCD + 当前扫描 + 初值 → ICP/NDT → map→odom                        | 建立全局一致定位                 |
-| 融合链     | LIO + 轮速 + IMU + RTK/UWB → EKF/UKF/因子图                            | 提升连续性和全局约束             |
-| 导航链     | 静态全局地图 + 过滤后局部障碍 → Nav2 → 安全仲裁 → 底盘                 | 规划、控制、避障和执行           |
-| 覆盖作业链 | 编辑边界/障碍/地头 → Fields2Cover → Path → Nav2/控制器                 | 农业作业路径生成与执行           |
+基础 waypoint 导航链的实际职责如下：
 
-## 3.2 基准架构与研究扩展的关系
-第一阶段只要求 MID360 + FAST-LIVO2 + ICP + Nav2 的最小闭环稳定运行。RTK、UWB、语义点云和 Fields2Cover 在架构上预留接口与 package，但不在基础链尚未稳定时同时导入复杂依赖。这样可以避免“扩展功能越多，基础问题越难定位”。
+| 层 | 当前组件 | 输入 | 输出 | 当前状态 |
+| --- | --- | --- | --- | --- |
+| 传感器 | `livox_ros_driver2` + `agt_sensor_adapters` | MID360 点云/IMU | `/agt/sensors/lidar/custom`、`/agt/sensors/imu/data` | 已接入，需继续做网络、QoS、长时间验证 |
+| 建图 | FAST-LIVO2 + `agt_mapping` | CustomMsg、IMU | `/agt/mapping/odometry`、`/agt/mapping/registered_points_lidar` | 纯 LIO baseline 已接入 |
+| 连续 TF | FAST-LIVO2 adapter | LIO odometry、机器人外参 | `odom -> base_footprint` | 已集中适配，需实车外参和 TF 稳定性验证 |
+| 定位 | `agt_localization` NDT/ICP | 全局 PCD、局部注册点云、`/initialpose` | `map -> odom`、定位状态 | 初验通过，批量收敛统计未完成 |
+| 地图 | Nav2 map server | PGM/YAML | `/agt/map/global_occupancy` | 已接入 |
+| 全局规划 | Nav2 SmacPlanner2D | 全局 OccupancyGrid、目标 | 全局路径 | 已接入 |
+| 局部障碍 | `local_obstacle_filter` + VoxelLayer | 注册点云、时间戳 TF | `/agt/perception/obstacle_cloud`、局部 costmap | 已接入，算法参数需实测 |
+| 局部控制 | MPPI controller | 全局路径、局部 costmap、里程计 | `/agt/navigation/cmd_vel_raw` | 当前实际控制器，不是 RPP |
+| 速度保护 | Collision Monitor + `agt_safety` | 控制速度、障碍、人工速度 | `/agt/navigation/cmd_vel`、`/agt/safety/cmd_vel` | 已接入，实车急停和制动未验收 |
+| 底盘 | command guard + BUNKER driver | 安全速度 | CAN 速度、状态、里程计 | 已接入，需 CAN 实车和长时间验证 |
+| 任务 | Qt5 + `ExecuteWaypointTask` | map frame waypoint 数组或 Qt 任务文件 | Nav2 `FollowWaypoints` | 已接入，需实车成功/取消/失败测试 |
 
-# 4. 固定 TF 树与底盘迁移规范
-V2 必须先固定 TF 语义。任何算法可以更换，但 TF 中每条变换的责任不能随意变化。Nav2 使用水平的 `base_footprint`，雷达实际安装角度通过 `base_link → lidar_link/livox_frame` 表达。
-
-![固定 TF 树与发布责任](assets/tf_tree.png)
+## 3.2 TF 责任
 
 ```mermaid
-graph TD
-  MAP[map] -->|全局定位或重定位模块唯一发布| ODOM[odom]
-  ODOM -->|当前里程计或融合模块唯一发布| BF[base_footprint]
-  BF -->|保持水平，供二维 Nav2 使用| BL[base_link]
-  BL -->|URDF/Xacro 静态外参| LIDAR[lidar_link]
-  BL -->|URDF/Xacro 静态外参| IMU[imu_link]
-  BL -->|URDF/Xacro 静态外参| CAMERA[camera_link]
-  BL -->|URDF/Xacro 静态外参| GNSS[gnss_link]
-  BL -->|URDF/Xacro 静态外参| UWB[uwb_link]
+graph LR
+  MAP[map] -->|agt_localization 唯一发布| ODOM[odom]
+  ODOM -->|FAST-LIVO2 adapter 或未来 fusion 唯一发布| BF[base_footprint]
+  BF -->|robot_state_publisher| BL[base_link]
+  BL -->|robot description| LIDAR[lidar_link]
+  BL -->|robot description| IMU[imu_link]
 ```
 
-*图 2 固定 TF 树与发布责任*
+| TF | 当前责任 | 约束 |
+| --- | --- | --- |
+| `map -> odom` | `agt_localization` | 不允许第二个定位节点同时发布 |
+| `odom -> base_footprint` | FAST-LIVO2 adapter | 未来融合层接入时必须明确切换责任 |
+| `base_footprint -> base_link` | 机器人描述 | 保持二维导航基准语义 |
+| `base_link -> lidar_link` | URDF/Xacro 与平台外参 | 不在 Livox 网络 JSON 中重复维护 |
+| `base_link -> imu_link` | URDF/Xacro | FAST-LIVO2 内部 LiDAR/IMU 外参与车体外参分开管理 |
 
-## 4.1 发布责任约束
-| **TF**                     | **唯一发布者**                     | **约束**                          |
-|----------------------------|------------------------------------|-----------------------------------|
-| map → odom                 | 全局重定位或全局融合模块           | 同一时刻只允许一个发布源          |
-| odom → base_footprint      | 当前连续里程计或融合模块           | 不允许 FAST-LIVO2 与 EKF 同时发布 |
-| base_footprint → base_link | 机器人描述或姿态适配模块           | 二维导航基准保持水平              |
-| base_link → sensor         | URDF/Xacro + robot_state_publisher | 标定结果集中管理，不散落在 launch |
+# 4. 当前仓库能力盘点
 
-## 4.2 底盘迁移方式
-不同底盘通过 `agt_description`、`profiles/platforms` 和 `agt_chassis` 组合适配。上层导航只依赖 `base_footprint`、真实 footprint、速度接口和底盘能力描述，不直接依赖某种 CAN 协议或底盘消息。
+## 4.1 基础导航模块状态
 
-| **平台 Profile 内容** | **示例**                                                 |
-|-----------------------|----------------------------------------------------------|
-| 几何参数              | 长、宽、轴距、轮距、离地间隙、传感器安装位置             |
-| 运动学能力            | 差速、Ackermann、履带；最小转弯半径；是否允许原地转向    |
-| 碰撞模型              | 真实 footprint、扫掠面积、安全余量                       |
-| 控制接口              | 输入 `/cmd_vel_safe`，输出 MK-mini/BUNKER/仿真底盘协议 |
-| 安全限制              | 最大速度、最大角速度、制动距离、通信超时                 |
+| 模块 | 当前实际状态 | 已有证据 | 主要缺口 |
+| --- | --- | --- | --- |
+| `agt_sensor_adapters` | baseline 已接入 | MID360 CustomMsg 转换、topic/QoS 测试 | 硬件同步、丢包、频率和长时间稳定性报告 |
+| `agt_mapping` | 大包 PCD 持久化已实现 | 稀疏 int64 voxel、异常点过滤、处理记录 | 新旧轨迹对比、独立 bag、实机外参和内存长期测试 |
+| `agt_map_processing` | 基础投影和离线增强工具已实现 | OctoMap、静态障碍证据、扫掠清除、三种可通行性图 | 实时节点尚不存在，最终地图阈值仍需独立数据验证 |
+| `agt_localization` | NDT/ICP 节点已实现 | 线程参数边界、同源 PCD 初验 | 多初值批量统计、错误初值拒绝、恢复时间和 TF 稳定性 |
+| `agt_localization_fusion` | 仅 package 骨架 | 目录和职责文档 | LIO、轮速、IMU、RTK/UWB 融合全部未实现 |
+| `agt_perception` | 几何局部障碍过滤已实现 | base frame 高度/距离/车体裁切 | 地面分割、动态目标语义、漏检/误检和实时性能评估 |
+| `agt_navigation` | waypoint Action 与 Nav2 offline preview 已实现 | FollowWaypoints、取消、安全状态和地图校验测试 | 真实地图多点执行、RPP 迁移没有实施，当前为 MPPI |
+| `agt_safety` | BUNKER baseline 已实现 | 手动优先、超时、急停锁存、限速和合成回归 | 硬件急停、制动距离、CAN 断连和进程退出验收 |
+| `agt_chassis` | BUNKER CAN 链已实现 | 官方驱动、状态桥接、command guard | 协议版本、方向、里程计和长时间通讯验证 |
+| `agt_ui_bridge` | Qt5 三种 profile 与语义编辑器已实现 | navigation/mapping/offline 隔离、GeoJSON、undo/redo、语言设置 | 大地图交互性能、真实任务操作和用户验收 |
+| `agt_coverage_planning` | 离线规划与验证链已实现 | F2C/OpenNav、PathComponents、Validator、Repair、preview | `zero_length_swath`、真实场景质量和执行资格 |
+| `agt_experiment_manager` | 仅骨架 | package、runtime 边界 | 配置合并、版本快照、实验恢复和一键复现 |
+| `agt_evaluation` | 仅骨架 | package、职责文档 | 轨迹、定位、导航、地图质量和资源指标工具 |
 
-# 5. 仓库组织与模块职责
-## 5.1 推荐顶层目录
+## 4.2 当前验证等级
+
 ```text
-agt_navigation_v2/
-├── docs/                    架构、接口、实验与迁移文档
-├── profiles/                平台、传感器、环境和实验配置
-├── src/                     自研 ROS 2 package
-├── tools/                   离线时间同步、标定、bag、地图和诊断工具
-├── tests/                   单元、集成、launch 与回归测试
-├── runtime/                 地图、bag、日志和实验结果（默认不入 Git）
-├── nav_dependencies.repos   第三方 fork 与固定版本
-├── AGENTS.md                Codex/开发者工作约束
-└── README.md                项目入口与最小运行说明
+L0  静态契约：文件、topic、frame、参数、schema 和 launch 检查
+L1  单元/合成：几何、JSON/YAML、Action 序列化、路径和安全函数
+L2  离线回放：bag、PCD、OccupancyGrid、Coverage Server 和 Nav2 planner
+L3  无 CAN 系统：完整节点树、安全状态和速度链，不连接底盘
+L4  架空/台架：CAN、轮速、方向、急停和 watchdog
+L5  低速实车：地图、定位、局部避障、waypoint 和人工接管
+L6  长时/产品：资源边界、故障注入、重复实验、数据与许可证审计
 ```
 
-## 5.2 核心 package 划分
-| **模块**                | **核心职责**                                | **明确不负责**      |
-|-------------------------|---------------------------------------------|---------------------|
-| agt_interfaces          | 统一 msg/srv/action、状态和能力描述         | 不实现算法          |
-| agt_description         | URDF/Xacro、TF、footprint、传感器与底盘描述 | 不启动建图和导航    |
-| agt_bringup             | 组合启动、生命周期与健康检查                | 不承载算法实现      |
-| agt_sensor_adapters     | 不同传感器原生数据转统一接口                | 不修改上层算法      |
-| agt_mapping             | FAST-LIVO2 等建图/里程计后端适配            | 不负责全局 map→odom |
-| agt_map_processing      | PCD 到二维地图、可通行性地图、多后端对比    | 不负责实时导航控制  |
-| agt_localization        | ICP/NDT/Scan Context 等全局重定位           | 不融合全部传感器    |
-| agt_localization_fusion | LIO、轮速、IMU、RTK、UWB 融合               | 不生成导航路径      |
-| agt_perception          | 地面、障碍、聚类、语义点云和可通行性        | 不直接控制底盘      |
-| agt_navigation          | Nav2、Costmap、BT、Planner、Controller      | 不管理驱动和标定    |
-| agt_coverage_planning   | Fields2Cover 场景适配、覆盖路径和评价       | 不替代局部避障      |
-| agt_safety              | 速度仲裁、急停、超时、定位健康保护          | 独立于 Nav2         |
-| agt_chassis             | 统一速度到底盘协议的转换                    | 不实现全局规划      |
-| agt_ui_bridge           | Qt5 与 ROS 2 标准接口桥接                   | GUI 不成为算法中心  |
-| agt_experiment_manager  | 配置合并、启动、参数快照、录包和版本记录    | 不堆算法逻辑        |
-| agt_evaluation          | 定位、规划、控制、资源和实验指标            | 不修改被测算法      |
+当前语义和覆盖功能主要达到 L0-L2；基础 waypoint 导航达到部分 L2-L4，具体实车功能仍需 L5；尚未达到 L6。
 
-## 5.3 是否需要提前预留 UWB、RTK 和语义点云目录
-需要预留“领域边界”，但不建议创建大量没有接口和验收标准的空目录。当前应建立 `agt_localization_fusion`、`agt_perception`、统一接口和对应文档骨架；具体算法、第三方依赖和参数文件在进入相应阶段后再增加。
+# 5. MID360 与 FAST-LIVO2 建图基线
 
-> **预留原则**  
-> 现在预留 package、接口、TF 和数据契约；暂不引入未验证算法、模型文件和复杂依赖。这样既避免未来无处安放，也避免空架构过度设计。
+## 5.1 数据链
 
-# 6. 工具链、时间同步与标定管理
-## 6.1 `tools/` 的定位
-`tools/` 用于离线、诊断和数据准备工具；长期运行的 ROS 2 节点仍应放在 `src/` 对应 package 中。这样可以区分“开发辅助脚本”和“系统运行组件”。
+```text
+MID360
+  -> Livox SDK
+  -> /agt/sensors/lidar/custom       CustomMsg，保留逐点时间信息
+  -> /agt/sensors/imu/data           IMU
+  -> FAST-LIVO2 pure LIO
+  -> /agt/mapping/odometry
+  -> /agt/mapping/registered_points_lidar
+  -> incremental localization PCD
+```
 
-| **目录**            | **建议工具**                                                       | **输出**                     |
-|---------------------|--------------------------------------------------------------------|------------------------------|
-| tools/time_sync     | 时间戳检查、频率抖动、时间偏移估计、bag 时间戳重写                 | 偏移报告、修正 bag、异常清单 |
-| tools/calibration   | 雷达-IMU、雷达-相机、相机内参、雷达到车体、GNSS 杆臂、UWB 锚点标定 | 统一 calibration YAML        |
-| tools/bag_tools     | 裁剪、合并、转换、脱敏、话题重命名和回放                           | 标准测试数据集               |
-| tools/map_tools     | PCD 清洗、地图转换、地图版本检查和可视化                           | PCD/PGM/YAML/元数据          |
-| tools/diagnostics   | TF、topic rate、QoS、延迟、资源占用和节点健康检查                  | 诊断报告                     |
-| tools/dataset_tools | 数据集索引、标注转换、训练/测试集划分                              | 可复现实验数据               |
+当前方案以 MID360 本体完成时间同步、SDK 以约 10 Hz 更新点云为系统前提。仓库负责 topic、消息转换、时间戳传递和 bag 回放检查，但硬件时间同步的精度、网络抖动和实车长时稳定性仍应通过独立测试报告固化，不能只由 launch 配置推断。
 
-## 6.2 标定结果统一管理
-所有外参和杆臂都应输出统一格式，包含父子 frame、平移、旋转、标定方法、数据集、日期和质量指标。标定工具不直接修改 URDF，而由审查后的结果进入 `profiles` 或 `agt_description`。
+## 5.2 纯 LIO 的作用边界
 
-# 7. 三维点云、二维地图与语义感知路线
-## 7.1 基准地图处理方法
-V2 首先保留旧系统的 OctoMap 投影作为 baseline，用同一份 bag 和 PCD 复现旧结果。随后增加几何地图处理后端，通过重力方向校正、地面分割、非地面点提取、密度过滤和二维栅格统计生成导航地图。只有建立基线后，才能判断新方法是否真正改善通过性和地图质量。
+FAST-LIVO2 在当前阶段只启用 LiDAR-IMU 里程计和建图路径。视觉参数仍需要上游初始化，因此仓库保留 camera placeholder，但这不代表相机参与当前建图。
 
-| **后端**                 | **用途**                     | **优点**             | **局限**                            |
-|--------------------------|------------------------------|----------------------|-------------------------------------|
-| octomap_projection       | 复现旧仓库方法               | 迁移快、可作为对照   | 固定高度投影，易受 Z 漂移和植被影响 |
-| height_slice_projection  | 快速高度切片实验             | 简单、参数直观       | 不能适应坡地和局部地面              |
-| pmf_ground_projection    | 几何地面分割后生成障碍地图   | 可解释、工程成本较低 | 参数与地形相关                      |
-| elevation/traversability | 坡度、粗糙度和高度差评估     | 适合非平整农业场景   | 计算与数据质量要求更高              |
-| semantic_projection      | 区分植被、硬障碍和可通行区域 | 研究价值高、信息丰富 | 依赖模型、数据和算力                |
+FAST-LIVO2 负责：
 
-## 7.2 实时障碍处理原则
-- 原始 `/cloud_registered` 不直接同时写入全局和局部 Costmap。
+- 连续局部位姿估计；
+- 注册点云输出；
+- 建图过程中的局部地图维护；
+- 增量稀疏 PCD 持久化。
 
-- 全局 Costmap 默认使用版本化静态地图。
+FAST-LIVO2 不负责：
 
-- 局部 Costmap 使用经过坐标转换、车体滤除、地面分割、体素降采样和时序稳定性过滤的障碍点云。
+- 发布 `map -> odom`；
+- 生成最终 Nav2 PGM/YAML；
+- 语义地图编辑；
+- 覆盖路径规划；
+- 底盘安全和速度下发。
 
-- 独立安全急停继续保留，但其作用是停止和限速，不替代局部避障。
+## 5.3 地图持久化与异常点
 
-- 语义点云作为可选 backend 输出 hard obstacle、soft obstacle、vegetation、ground 和 unknown。
+定位 PCD 通过稀疏有符号 64 位 voxel key 增量维护，不在关机时保留完整原始累积点云再一次性降采样。输入点在插入前检查：
 
-## 7.3 语义点云研究的接入位置
-语义研究放在 `agt_perception`，其输出经 `agt_map_processing` 或 Costmap plugin 转换为代价，不直接把深度学习模型耦合到 Nav2 主启动文件。这样可用纯几何、聚类、深度学习或相机-雷达融合方法进行公平切换。
+- 非有限坐标；
+- 超出绝对坐标上限的点；
+- voxel key 溢出风险；
+- PCL/Eigen 对齐 ABI。
 
-# 8. 定位、RTK/UWB 与多源融合设计
-## 8.1 全局重定位与连续融合分离
-| **模块**                | **主要输入**                     | **主要输出**            | **典型方法**                    |
-|-------------------------|----------------------------------|-------------------------|---------------------------------|
-| agt_localization        | 全局点云、当前扫描、初始位姿     | map→odom、重定位质量    | ICP、NDT、Scan Context + 精配准 |
-| agt_localization_fusion | LIO、轮速、IMU、RTK、UWB及协方差 | 连续融合里程计/全局状态 | EKF、UKF、因子图                |
+只有 `localization_map.processing.yaml` 标记 `state: ready` 的 PCD 才是可用定位地图。原始点云、旧版 downsample 文件和没有处理记录的 PCD 不能直接作为导航定位输入。
 
-两者分离的原因是：重定位解决“机器人在全局地图中的位置”，融合解决“多个连续和绝对观测如何共同约束状态”。如果把 RTK、UWB、ICP 和 TF 发布全部堆进同一个节点，后续很难比较算法，也容易出现重复 TF 发布。
+# 6. 三维点云到二维导航地图
 
-## 8.2 RTK 接入要求
-- 明确 WGS84、ENU 和 map 的转换关系及 ENU 原点。
+## 6.1 当前地图生产的两级链路
 
-- 保存 GNSS 天线到 base_link 的杆臂外参。
+当前仓库存在两种不同用途的地图处理链，不应混写：
 
-- 区分 FIX、FLOAT、单点解等质量状态，并使用协方差。
+### A. 在线/基线投影链
 
-- 双天线航向和单天线速度航向采用不同接口与可信度。
+基础建图入口通过 OctoMap 对注册点云进行射线和高度范围投影，输出 OccupancyGrid，再使用 Nav2 `map_saver_cli` 保存 PGM/YAML。它的优点是结构简单、容易随建图过程查看，适合作为 baseline 和快速地图生产入口。
 
-- RTK 地图对齐结果应版本化，不通过手工常数散落在代码中。
+当前基线的关键特征：
 
-## 8.3 UWB 接入要求
-- 兼容“锚点-标签距离”和“UWB 系统直接输出位置”两种模式。
+- 以 `odom` 作为建图连续坐标；
+- 使用明确的点云和 occupancy 高度范围；
+- 保留 unknown/free/occupied 三值语义；
+- 不把 Nav2 inflation 或 footprint 烘焙进源 PGM；
+- 输出地图后再交给 Qt5、Nav2 和语义地图流程。
 
-- 消息中包含 anchor/tag ID、时间戳、距离或位置、质量和协方差。
+### B. 离线增强链
 
-- 锚点地图与标定结果绑定版本。
+离线处理工具消费注册点云、时间匹配位姿和基础 OccupancyGrid，生成用于质量比较的增强地图：
 
-- 融合层对 NLOS、异常跳变和锚点几何退化进行鲁棒处理。
+- 时间戳匹配或插值的 base pose；
+- 非有限点和车体自返回过滤；
+- 相对高度阈值；
+- RANSAC 地面拟合和残差统计；
+- 多帧观测次数和最小时间跨度；
+- 完整 canonical polygon 车体扫掠清除；
+- 地面、时间一致性和 provisional 高度层变体；
+- PGM/YAML 与 processing record。
 
-# 9. Qt5 地图编辑与 Fields2Cover 适配
-## 9.1 Qt5 工具的角色
-Qt5 开源地图编辑工具应作为交互前端，通过 `agt_ui_bridge` 使用标准 topic/service/action 与系统交互。GUI 可以编辑地图、边界、障碍、地头和作业点，但不能直接掌握 FAST-LIVO2、Nav2、底盘驱动和实验目录的内部实现。
+这条链适合地图生产、对比、审计和候选固化。它不应在每一帧实时回调中同步执行完整轨迹扫掠和全图写盘。
 
-## 9.2 覆盖作业场景模型
-| **场景要素**        | **含义**                                         |
-|---------------------|--------------------------------------------------|
-| field_boundary      | 作业区域边界或温室有效区域                       |
-| obstacles           | 不可进入区域、立柱、设备和禁行区                 |
-| headland            | 转弯和掉头区域                                   |
-| entry/exit          | 作业入口与出口                                   |
-| working_width       | 机具或采集设备有效作业幅宽                       |
-| vehicle_constraints | 最小转弯半径、是否允许倒车、footprint 和速度限制 |
-| preferred_direction | 行向、作物行方向或用户指定主方向                 |
+## 6.2 地图质量与拖影抑制
 
-## 9.3 Fields2Cover 的边界
-Fields2Cover 负责覆盖路径几何生成和路线组织，但不替代实时定位、局部障碍检测、控制器和安全层。其结果应转换为标准 `nav_msgs/Path` 或带有作业段/转弯段标签的扩展路径，再由 Nav2 和适合 Ackermann/履带底盘的控制器执行。
+当前“拖影隔绝”不是单一算法，而是多个边界共同作用：
 
-# 10. 配置治理与实验复现机制
-## 10.1 四层配置结构
-| **层级**          | **典型内容**                               | **变更频率** |
-|-------------------|--------------------------------------------|--------------|
-| 模块默认参数      | 算法内部安全默认值                         | 低           |
-| 传感器 Profile    | topic、frame、频率、噪声、外参引用         | 换传感器时   |
-| 平台 Profile      | 底盘几何、运动学、footprint、控制接口      | 换底盘时     |
-| 环境/实验 Profile | 地图后端、定位后端、规划器、控制器、记录项 | 每次实验     |
+| 机制 | 作用 | 当前性质 |
+| --- | --- | --- |
+| FAST-LIVO2 注册 | 把点云变换到连续地图坐标 | 依赖 LIO 稳定性 |
+| 时间匹配 pose | 避免使用回调时刻的错误最新位姿 | 离线静态证据 |
+| 多帧观测阈值 | 抑制一次性动态点 | 离线静态证据 |
+| 地面/高度过滤 | 去除地面和不参与车辆碰撞的高层点 | 离线候选或局部过滤 |
+| 车体 self-return 清除 | 去除雷达看到的自身结构 | 依赖完整 footprint 扫掠 |
+| 射线 free/unknown 基线 | 防止原始投影把未知误写成自由 | 地图生产约束 |
+| local costmap clearing | 处理局部动态障碍消失 | Nav2 运行时 |
+| Collision Monitor | 对进入保护区的障碍做停/减速 | 运行时安全层 |
 
-## 10.2 单一实验入口
-用户日常不直接修改十几个 YAML，而是选择一个实验清单。`agt_experiment_manager` 负责合并配置、校验冲突、生成最终生效配置并启动系统。
+已经建立了拖影抑制和局部动态障碍处理的工程机制
+
+## 6.3 下一阶段地图输入要求
+
+下一阶段语义地图不直接修改源 PGM。每个语义任务必须绑定：
+
+- 地图 YAML 路径；
+- 地图图像路径；
+- 地图图像 SHA256；
+- `resolution`、width、height 和 origin；
+- `frame_id: map`；
+- 平台 profile 快照；
+- 创建工具版本和时间；
+- 语义 GeoJSON 与 coverage.yaml 的版本。
+
+基础地图一旦被语义任务引用，语义编辑器只能写 GeoJSON 和 coverage.yaml；任何底图改变都必须重新计算 hash，并使旧语义任务进入不匹配状态。
+
+# 7. 语义地图模型与 Qt5 编辑功能
+
+## 7.1 数据分层
+
+语义地图分成三层：
+
+```text
+Nav2 base map
+  PGM + YAML
+  只读，提供 OccupancyGrid 和坐标基准
+
+Semantic document
+  semantic_map.geojson
+  手工创建的 field、keepout、crop rows、entry 等对象
+
+Coverage task
+  coverage.yaml
+  作业宽度、方向、地头、路径策略、入口和平台约束
+```
+
+三者之间通过地图 hash、frame、schema version 和 profile snapshot 关联，不能把语义区直接写入源 PGM。
+
+## 7.2 当前语义对象
+
+当前 schema 支持的主要语义对象包括：
+
+| 对象 | 几何 | 规划作用 |
+| --- | --- | --- |
+| field boundary | Polygon/MultiPolygon | 限制作业区域和默认外部禁行区 |
+| exclusion/keepout | Polygon | 不允许车辆和作业路径进入 |
+| crop row | LineString | 提供作业行中心线或行方向语义 |
+| access lane | LineString | 独立的开放、可行驶通道 |
+| entry pose | Point + heading | 预览入口和作业起点 |
+| work direction | LineString/方向属性 | 约束行向和作业朝向 |
+| headland | Polygon | 提供转弯和掉头空间 |
+| disabled feature | 任意合法几何 | 可保存和显示，但不进入规划输入 |
+
+`speed_zone` 等未来对象可以在文档中保留，但当前不参与执行路径生成。所有对象仍必须经过 schema、坐标、拓扑、包含关系和 footprint 可行性检查。
+
+## 7.3 Qt5 角色与交互边界
+
+Qt5 分为三个 profile：
+
+| profile | 作用 | 运动权限 |
+| --- | --- | --- |
+| mapping | 建图观察和地图查看 | 禁止导航任务执行 |
+| navigation | 真实导航操作和 waypoint 任务 | 只能调用项目 Action，不能发速度 |
+| offline | 地图/语义编辑和路径预览 | 禁止控制器、安全使能、定位和底盘 |
+
+当前编辑器已支持：
+
+- PGM/YAML 读取和非零 origin/yaw；
+- 地图平移、缩放和机器人跟随解除；
+- 语义对象绘制、顶点编辑、图层和未保存提示；
+- 多边形自交检查和可修复草稿保留；
+- GeoJSON/coverage.yaml 原子写入；
+- undo/redo；
+- 语义地图加载、校验和状态显示；
+- waypoint 两次点击，第二次点击确定 heading；
+- Task 行选择、拓扑刷新和项目 Action 预览/执行入口。
+
+Qt5 不负责：
+
+- 计算真实路径可执行性；
+- 直接修改 Nav2 costmap；
+- 直接调用 BUNKER CAN；
+- 用机器人距离轮询判断任务成功；
+- 把路径预览结果转成速度。
+
+## 7.4 语义地图服务
+
+语义地图服务器负责事务式加载：
+
+1. 读取 GeoJSON 与相邻 coverage.yaml。
+2. 校验 schema、地图 hash、frame、平台 profile 和几何拓扑。
+3. 生成 markers、keepout mask 和语义状态。
+4. 只有所有必要产品有效时才替换当前有效状态。
+5. 加载失败时保留上一份有效产品，不清空为半成品。
+
+Nav2 global costmap 只通过 `/agt/map/keepout_mask` 和 type-0 FilterInfo 接收禁行过滤，保持 `StaticLayer -> KeepoutFilter -> InflationLayer` 的顺序。keepout mask 不是新的基础地图，也不能写回 PGM。
+
+# 8. 下一阶段核心：离线覆盖路径生成
+
+## 8.1 为什么先做离线
+
+覆盖路径不同于普通 waypoint：它同时涉及区域语义、作业行、机具宽度、转弯半径、车辆 footprint、禁行区和作业顺序。先在离线环境完成有输入版本、有输出指纹和有失败报告的链路，可以把算法问题与定位、控制、CAN 和现场安全问题分离。
+
+离线模式的价值：
+
+- 可重复使用同一份 PGM、GeoJSON、coverage.yaml 和 profile；
+- 可比较多种行序、方向、转弯模板和平台参数；
+- 可在没有底盘和定位的情况下暴露几何错误；
+- 可对每个失败阶段给出原因，而不是只显示一条红线；
+- 可确保不因为预览而误启动运动链。
+
+## 8.2 覆盖路径输入
+
+一次规划请求必须包含完整快照：
 
 ```yaml
-experiment:
-  name: greenhouse_mid360_geometry_v01
-
-platform:
-  profile: mk_mini
-
-sensors:
-  lidar: mid360
-  imu: mid360_internal
-
-mapping:
-  backend: fast_livo2
-
-map_processing:
-  backend: pmf_ground_projection
-
-localization:
-  backend: icp
-
-perception:
-  backend: geometric
-
-navigation:
-  planner: smac_hybrid
-  controller: mppi
-
-coverage:
-  enabled: false
-
-safety:
-  enabled: true
-
-recording:
-  profile: debug
+request:
+  map_yaml: <canonical map yaml>
+  semantic_map: <semantic_map.geojson>
+  coverage: <coverage.yaml beside semantic_map>
+  platform_profile: <canonical platform yaml>
+  field_id: <selected field>
+  planning_mode: <direct_swaths|crop_centerlines>
+  start_pose: <optional explicit map pose>
+  route_variant: <variant name>
+  execution_enabled: false
 ```
 
-## 10.3 实验目录标准
-- `experiment.yaml`：用户选择的实验配置。
+规划前必须检查：
 
-- `effective_config.yaml`：所有层级合并后的真实生效配置。
+- 文件存在且可读；
+- GeoJSON 和 coverage.yaml 的 identity 一致；
+- 基础地图 hash 一致；
+- `frame_id` 为 `map`；
+- field、障碍和入口几何合法；
+- platform profile 是当前允许的版本；
+- `navigation_footprint`、最小转弯半径和运动学能力来自 profile；
+- 请求没有引用旧的 validation、repair 或 keepout 产品。
 
-- `git_versions.yaml`：主仓库和第三方 fork 的 commit。
+## 8.3 OpenNav/Fields2Cover 适配
 
-- `calibration/`：本次使用的标定快照。
+`agt_coverage_planning` 负责把项目语义模型适配到固定版本的 Open Navigation Coverage 和 Fields2Cover。核心原则是：
 
-- `maps/`：地图版本和元数据。
+- 外部 coverage 依赖使用 `nav_dependencies.repos` 固定 commit；
+- `humble-v2` 与 Fields2Cover `v2.0.0` 版本线不混用；
+- 语义源文件保持不变；
+- Row Coverage Server 所需临时 GML 由进程私有目录生成；
+- 临时 GML 至少使用三个点，绕开锁定版本的行宽缺陷；
+- 只有来自当前已验证 annotated-row 请求的端点补正才允许恢复 SWATH 端点；
+- 不从 heading 猜测 SWATH 几何，不把适配结果反写 GeoJSON。
 
-- `rosbag/`：关键话题数据。
+当前支持两种 row interpretation：
 
-- `metrics.csv`、`events.csv` 和 `report.md`：指标、事件与结论。
+| 模式 | 处理逻辑 |
+| --- | --- |
+| `direct_swaths` 或缺省兼容模式 | 保持版本 1 的直接 swath 行为 |
+| `crop_centerlines` | 根据相邻 crop row centerline 事务式派生 aisle，不修改源语义文件 |
 
-# 11. 第三方算法 Fork 与依赖管理
-## 11.1 Fork 后仓库保存位置
-在 GitHub 上 Fork 第三方算法后，会在自己的账号命名空间下形成独立仓库，例如 `Aldoubt/FAST-LIVO2-ROS2`。该仓库由本人维护，通常配置 `origin` 指向个人 fork，`upstream` 指向原作者仓库。个人修改、分支和版本都保存在 fork 中，同时可以按需要同步上游更新。
+## 8.4 路径语义重建
 
-## 11.2 V2 主仓库的依赖方式
-V2 不直接复制完整第三方源码，而使用 `nav_dependencies.repos` 记录 fork 地址和固定 commit，通过 `vcs import src` 拉取。这样可以明确区分自研代码和第三方代码，支持升级、回滚和许可证审查。
+Coverage Server 的扁平 Path 不能只通过 heading 推断作业区间。当前方案将锁定版 `PathComponents.swaths` 和 `PathComponents.turns` 作为权威来源。
 
-| **对象**               | **建议存放位置**             | **版本策略**                       |
-|------------------------|------------------------------|------------------------------------|
-| FAST-LIVO2-ROS2 修改版 | 个人 GitHub Fork             | 固定 commit 或发布 tag             |
-| NDT/ICP 第三方库       | 个人 Fork 或官方仓库         | 固定 commit，记录上游来源          |
-| Qt5 地图编辑工具       | 独立 Fork                    | 通过 bridge 接入，尽量减少侵入修改 |
-| Fields2Cover           | 官方依赖或个人 Fork          | 优先 adapter，不直接改核心库       |
-| V2 自研模块            | `agt_navigation_v2` 主仓库 | 按功能分支和 PR 管理               |
+路径语义的基本合同：
 
-> **重要结论**  
-> 第三方 Fork 确实保存在自己的 GitHub 账号下，但 V2 主仓库只记录它的地址和版本。只有确实需要修改第三方代码时才维护 Fork；能通过 adapter 或 plugin 解决的问题，优先不改第三方核心。
+- 只支持 `SWATH` 和 `CONNECTION` 两类；
+- 每个原始路径区间必须有且只有一个 component type 和 component ID；
+- `swath_NNNN` ID 由端点几何稳定生成，与路线顺序和行驶方向无关；
+- `order_index` 独立表达本次执行顺序；
+- 重建路径长度必须在绝对/相对容差内匹配原始 Path；
+- 语义文档必须携带原始 Path 精确 fingerprint；
+- raw path、reconstructed path 和 semantics 不匹配时必须事务失败。
 
-# 12. Codex 辅助迁移与开发治理
-## 12.1 Codex 最适合承担的工作
-- 扫描旧仓库并生成模块清单、依赖关系和迁移矩阵。
+当前真实问题是：部分真实大棚请求返回了零长度 SWATH。几何路线可以有输出，但语义重建无法形成可信的作业段，因此 coverage rate、overlap rate 和 `eligible_for_execution` 必须保持 null/false。这不是可以通过 UI 隐藏的显示问题，而是上游 PathComponents 质量问题。
 
-- 建立 package 骨架、统一 README、参数 schema 和 launch 测试。
+## 8.5 完整 footprint 碰撞与运动学验证
 
-- 按明确接口迁移单个节点，并补充单元测试、bag 回放脚本和诊断输出。
+Validator 对每个路径 pose 使用 canonical `navigation_footprint` polygon，而不是只检查中心点或四个角点。验证内容包括：
 
-- 检查硬编码路径、重复 TF、topic 命名不一致和未使用参数。
+- 地图坐标 frame 和 costmap metadata；
+- unknown-space 策略，默认 unknown 视为碰撞；
+- costmap 外部默认视为碰撞；
+- 平移插值；
+- 航向角插值和旋转扫描；
+- 障碍 cost threshold；
+- 最小 clearance；
+- 最大曲率；
+- in-place rotation；
+- 最小转弯半径；
+- Nav2 published footprint 与 canonical profile 的形状一致性；
+- keepout mask 的直接检查。
 
-- 生成配置差异、回归报告、变更日志和 PR 说明。
+验证输出必须包含：
 
-- 在人工确认范围内完成重复性重构，不替代实机验证。
+```text
+valid
+sample_count
+collision_pose_count
+unknown_collision_pose_count
+out_of_bounds_pose_count
+maximum_cost
+minimum_clearance
+maximum_curvature
+required_min_turning_radius
+invalid_component_ids
+invalid_swath_ids
+path_fingerprint
+```
 
-## 12.2 `AGENTS.md` 必须规定的约束
-- 每次只迁移一个模块或一条明确的数据链。
+只要输入不完整、路径过期、语义指纹不匹配或验证失败，就发布空的 validated path，防止旧的有效结果继续具有行动性。
 
-- 禁止一次性重写整个工作区。
+## 8.6 连接段修复
 
-- 禁止硬编码用户名、工作区、地图和设备路径。
+路径修复只允许替换无效 `CONNECTION`，禁止修改任何 `SWATH` 坐标和 ID。
 
-- 禁止多个节点发布同一 TF。
+连接段修复流程：
 
-- 不得擅自修改旧仓库已验证参数和数据。
+```text
+读取 raw path、semantics、validation report、costmap、keepout mask、profile
+    -> 检查 fingerprint 和 semantic status
+    -> 找出被 TASK-10 标记无效且由 TASK-11 标记为 CONNECTION 的 component
+    -> 调用 Nav2 ComputePathToPose
+    -> 检查候选端点容差
+    -> 恢复原始 connection 端点
+    -> 用同一套 full-footprint validator 验证候选
+    -> 拼接完整路径
+    -> 再次验证最终路径
+    -> 成功发布 repaired path，否则清空结果
+```
 
-- 每次改动必须有验收命令、测试数据和回滚方式。
+Ackermann profile 只能选择具备正最小转弯半径的 Hybrid-A* 或 State Lattice 类修复 planner；差速/履带平台才允许根据 profile 选择原地旋转能力。临时 profile 与 BUNKER 参数不得互相回退。
 
-- 修改架构或接口后必须同步文档、迁移矩阵和变更日志。
+## 8.7 入口 approach 与执行路径的区别
 
-## 12.3 Codex 任务模板
-每个任务至少应包含：背景、允许修改的目录、禁止修改的内容、输入输出接口、验收命令、测试数据、预期文件清单和失败时回滚方式。任务应使用“建立 `agt_description` 并通过 TF 测试”这样的可验收表述，而不是“把整个仓库优化一下”。
+从 `entry_pose` 到第一条作业行的 approach 是独立的预览路径，必须单独规划和验证。它不能被悄悄插入权威 SWATH/CONNECTION 语义，也不能因为 approach 成功就自动获得执行资格。
 
-# 13. 分阶段迁移路线
-![分阶段迁移路线](assets/migration_roadmap.png)
+离线预览可以发布：
+
+- `path_preview`：算法可视化路径；
+- `path_reconstructed`：语义重建路径；
+- `path_repaired`：连接段修复候选；
+- collision markers、diagnostics、JSON report。
+
+只有未来的执行 Action 在所有门槛通过后，才允许发布非空 `path_validated` 并调用 Nav2 `FollowPath`。当前下一阶段仍以离线报告为主。
+
+# 9. Qt5 与离线路径可视化
+
+## 9.1 离线工作流
+
+```mermaid
+sequenceDiagram
+  participant O as 操作员
+  participant Q as Qt5 offline profile
+  participant E as 语义编辑器
+  participant S as Semantic Map Server
+  participant C as Coverage Server
+  participant V as Validator/Repair
+  participant R as Report/RViz
+
+  O->>Q: 加载 PGM/YAML
+  Q->>E: 创建或编辑 GeoJSON/coverage.yaml
+  E->>S: validate/load semantic task
+  S-->>E: LOADED / errors / markers / mask
+  O->>Q: 选择 field、方向、行序和平台
+  Q->>C: 发送离线规划请求
+  C-->>Q: raw path + PathComponents
+  Q->>V: 语义重建与 footprint 验证
+  V->>V: 仅修复 invalid CONNECTION
+  V-->>R: preview/reconstructed/repaired/report
+  R-->>O: 显示候选、碰撞、keepout、失败原因
+```
+
+## 9.2 Qt5 显示层必须区分的结果
+
+| 显示结果 | 含义 | 是否可执行 |
+| --- | --- | --- |
+| Coverage `path_preview` | Server 有几何输出 | 否 |
+| reconstructed path | 通过 PathComponents 语义重建 | 否，仍需验证 |
+| repaired path | 仅连接段经 planner 修复 | 否，仍需最终验证 |
+| validated path | 全部当前验证通过 | 仍需执行 Action 和安全就绪 |
+| simulation report | 时间/距离等 metrics-only 估算 | 否 |
+| auditor report | 预览审计和碰撞可视化 | 否 |
+
+UI 不能只显示一条绿色线就称为“可执行”。必须同时显示语义状态、验证状态、修复状态、指纹、平台、地图 hash 和执行资格。
+
+## 9.3 离线入口的安全边界
+
+离线覆盖 preview 只允许启动：
+
+- map server；
+- planner server；
+- Coverage Server；
+- preview adapter；
+- Validator/Repair/Auditor/Time Simulator；
+- RViz 或 offline Qt5 profile。
+
+禁止启动：
+
+- localization；
+- Nav2 controller；
+- BT navigator；
+- waypoint follower；
+- safety motion enable；
+- velocity publisher；
+- BUNKER driver；
+- 机械臂或其他执行器。
+
+# 10. 下一阶段开发任务分解
+
+## TASK-N1：语义任务版本化与输入快照
+
+**目标：** 让一次离线规划能够被完整复现。
+
+**工作内容：**
+
+- 建立 semantic task manifest；
+- 绑定 map image/YAML hash；
+- 绑定 GeoJSON、coverage.yaml、platform profile hash；
+- 记录 OpenNav/Fields2Cover 版本；
+- 记录 route variant、planning mode 和 request start pose；
+- 规划前拒绝陈旧 validation、repair、mask 产品。
+
+**验收：** 修改基础地图、语义文件或平台 profile 任一内容后，旧报告必须被识别为 stale，不能继续作为有效输入。
+
+## TASK-N2：语义编辑器闭环加固
+
+**目标：** 从 Qt5 交互稳定产生合法语义任务。
+
+**工作内容：**
+
+- 完善 field/keepout/crop row/access lane/entry/headland 的编辑体验；
+- 保留自交多边形可修复草稿；
+- 保存前展示 code、对象 ID 和具体错误；
+- 明确 direct swaths 与 crop centerlines 的 row interpretation；
+- 保存 GeoJSON 与 coverage.yaml 时使用原子事务；
+- map 切换时清除旧 topology、markers、mask 和路径预览。
+
+**验收：** 合法样例可以保存、重载、生成 mask；schema、hash、身份和底图失败进入只读/失败闭环。
+
+## TASK-N3：Fields2Cover/OpenNav 路径生成稳定化
+
+**目标：** 解决真实大棚请求的空结果和零长度 SWATH。
+
+**工作内容：**
+
+- 构造最小复现语义任务；
+- 对 direct swaths、crop centerlines、access lane 分别回放；
+- 校验临时 GML 点数、端点、闭合性和行宽；
+- 记录 Coverage Server 每一步返回和错误；
+- 只使用精确验证请求做端点补偿；
+- 对零长度 SWATH 做 fail-closed，不伪造作业行；
+- 形成 upstream issue/patch 或 adapter workaround 记录。
+
+**验收：** 合法场景不再出现无法解释的零长度 SWATH；若上游仍不能生成有效 component，系统给出稳定错误码和最小复现包。
+
+## TASK-N4：PathComponents 语义重建与指纹闭环
+
+**目标：** 使每段路径都有可审计语义。
+
+**工作内容：**
+
+- 固定 SWATH ID 算法和端点几何归一化；
+- 固定 route order 与 stable ID 的分离；
+- 对 raw/reconstructed path 进行长度和 fingerprint 校验；
+- 生成语义 JSON、Marker 和报告；
+- 禁止从 heading 猜测 swath/connection。
+
+**验收：** 路径反向、排序变化或重复规划时，ID 稳定；任一区间缺语义、重叠或指纹过期都会失败。
+
+## TASK-N5：全 footprint 离线验证
+
+**目标：** 以平台 profile 为唯一几何真源判断路径是否安全。
+
+**工作内容：**
+
+- 对 PGM、global costmap 和 keepout mask 做一致性检查；
+- 使用完整 polygon 做碰撞；
+- 按 resolution 和 footprint radius 自适应插值；
+- 检查 unknown、越界、曲率、旋转和最小转弯半径；
+- 输出碰撞 pose、component ID、clearance 和 cost。
+
+**验收：** 中心点安全但 footprint 碰撞的路径必须失败；未知区域默认失败；旧 validated path 在新输入下必须清空。
+
+## TASK-N6：连接段修复与入口 approach
+
+**目标：** 在不修改作业行的前提下修复可规划的连接段。
+
+**工作内容：**
+
+- 只消费匹配的 validation report 和 semantics；
+- 只请求 invalid CONNECTION 的 Nav2 planner；
+- 候选端点按原始端点容差检查并恢复；
+- 对 connection candidate 和最终拼接路径再次验证；
+- 入口 approach 单独输出、单独审计；
+- 修复失败时保持 source path、semantic source 和 mask 不变。
+
+**验收：** invalid SWATH 永远不可被自动修复；connection 修复不能改变任何 SWATH 坐标或 ID；最终失败时没有残留可执行输出。
+
+## TASK-N7：Qt5/RViz 离线结果与报告
+
+**目标：** 让算法结果可用于汇报、调试和复现。
+
+**工作内容：**
+
+- 显示 base map、keepout、field、row、entry、raw/reconstructed/repaired path；
+- 显示碰撞 footprint 和无效 component；
+- 显示语义/验证/修复状态；
+- 输出 JSON、Markdown 和可选 CSV；
+- 接入 metrics-only 时间估算和 variant comparison；
+- 报告明确 `eligible_for_execution=false` 的原因。
+
+**验收：** 一个报告目录可以让另一台电脑复现同一条候选路径和同一份失败结论。
+
+## TASK-N8：离线质量评测和数据集
+
+**目标：** 从“有一条路径”升级为“可比较的规划实验”。
+
+**工作内容：**
+
+- 建立至少一个合法、一个边界、一个自交、一个 keepout 阻断、一个零长度 SWATH 的样例；
+- 比较行序、方向、倒车策略和 planner variant；
+- 统计路径长度、连接数量、最大曲率、最小净距、碰撞段、覆盖面积和重复覆盖率；
+- 对 coverage semantics 不完整时，将作业/非作业指标保持 null；
+- 固定报告 schema 和版本。
+
+**验收：** 几何时间最优不能自动成为执行最优；每个候选均有独立 eligibility 判定。
+
+# 11. 路径可执行性的判定体系
+
+## 11.1 分层状态
+
+```text
+GENERATED
+  Coverage Server 产生几何路径
+
+SEMANTICALLY_RECONSTRUCTED
+  PathComponents 可重建，SWATH/CONNECTION 完整
+
+VALIDATED
+  全 footprint、costmap、unknown、曲率和平台约束通过
+
+REPAIRED
+  仅允许的 CONNECTION 已修复并重新验证
+
+READY
+  语义、地图、平台、mask、验证、修复和 Nav2 状态全部匹配
+
+EXECUTING
+  未来执行 Action 已发送标准 Nav2 FollowPath
+```
+
+当前仓库的离线覆盖结果可以达到 `GENERATED`，部分候选可达到 `SEMANTICALLY_RECONSTRUCTED` 和 `VALIDATED`；真实大棚当前因零长度 SWATH 和缺少完整语义而不能进入 `READY`。
+
+## 11.2 执行资格门槛
+
+未来允许执行前必须同时满足：
+
+- `execution_enabled=true` 是显式配置，而不是 UI 默认行为；
+- field_id、planning_mode、地图 hash、语义 fingerprint 和 platform snapshot 匹配；
+- semantic status 为 `LOADED`；
+- keepout mask 和 global costmap 是当前请求产品；
+- PathComponents 语义完整；
+- TASK-10 validation 有效；
+- TASK-12 repair 若存在则已成功；
+- Nav2 `FollowPath` server ready；
+- `agt_safety` 状态新鲜、运动已显式使能且急停未锁存；
+- 所有执行前检查通过；
+- 取消和安全丢失可使 child Action 先取消，再结束 parent Action。
+
+任何一项失败都必须拒绝、取消或失败，不得用路径时间、距离或机器人是否靠近目标推断成功。
+
+# 12. 配置、数据和版本治理
+
+## 12.1 配置层级
+
+| 层级 | 内容 | 示例 |
+| --- | --- | --- |
+| 模块默认 | 节点安全默认值 | timeout、threshold、QoS |
+| 传感器 profile | frame、topic、频率、设备参数 | MID360 |
+| 平台 profile | footprint、运动学、速度、转弯半径 | BUNKER、greenhouse_ackermann |
+| 环境 profile | 场景和地图约束 | greenhouse |
+| 任务文件 | GeoJSON、coverage.yaml、field_id | annotated rows |
+| 实验快照 | 真实生效参数和依赖版本 | future experiment manager |
+
+## 12.2 数据目录建议
+
+```text
+runtime/maps/<map_id>/
+├── <map_id>.yaml
+├── <map_id>.pgm
+├── map_manifest.yaml
+├── semantic/
+│   ├── semantic_map.geojson
+│   ├── coverage.yaml
+│   └── semantic_manifest.yaml
+├── planning_runs/<run_id>/
+│   ├── request.yaml
+│   ├── effective_profile.yaml
+│   ├── path_raw.yaml
+│   ├── path_semantics.json
+│   ├── path_reconstructed.yaml
+│   ├── path_repaired.yaml
+│   ├── validation_report.json
+│   ├── repair_report.json
+│   ├── simulation_report.json
+│   ├── comparison_report.json
+│   └── report.md
+└── pcd/
+    └── localization_map.pcd + processing.yaml
+```
+
+源码、schema、示例和小型离线测试地图进入 Git；真实 PCD、rosbag、GUI 状态、运行日志和大规模结果默认不进入 Git。大数据应通过独立数据包、对象存储或实验归档按 manifest 管理。
+
+## 12.3 复现最小集合
+
+一次离线规划要交接给另一台电脑，至少需要：
+
+- 主仓库 commit；
+- `nav_dependencies.repos` 和外部 coverage workspace commit；
+- 基础 PGM/YAML 或其数据包 URI；
+- semantic GeoJSON；
+- 相邻 coverage.yaml；
+- canonical platform profile；
+- request.yaml；
+- dependency/version snapshot；
+- 输出报告和 fingerprint。
+
+不需要上传：
+
+- build/install/log；
+- Qt 运行状态和用户偏好；
+- 临时 `.pids`、`.time`、`.asan` 和大段 launch log；
+- 与结论无关的所有历史 rosbag；
+- 可由 PCD/地图生产脚本重新生成的重复中间文件。
+
+# 13. 测试与验收计划
+
+## 13.1 语义和路径单元测试
+
+- schema 正常、缺字段、错误 frame、重复 ID、错误类型；
+- Polygon 自交、越界、包含关系和 footprint 净距；
+- GeoJSON/coverage.yaml 原子保存和重载；
+- map hash 改变后的只读降级；
+- row interpretation 两种模式；
+- GML 至少三点和端点事务补偿；
+- 零长度 SWATH fail-closed；
+- path fingerprint、stable SWATH ID 和 component interval 覆盖；
+- full polygon collision、unknown、越界、曲率和原地旋转；
+- invalid SWATH 不可修复、invalid CONNECTION 可修复；
+- 修复失败清空输出且不修改源产品。
+
+## 13.2 离线系统测试
+
+每个场景按以下顺序运行：
+
+```text
+准备 PGM/YAML + semantic + coverage + profile
+  -> semantic server load
+  -> mask 生成
+  -> Coverage Server request
+  -> path semantics reconstruction
+  -> global costmap validation
+  -> optional connection repair
+  -> final validation
+  -> Qt/RViz preview
+  -> JSON/Markdown report
+```
+
+必须覆盖：
+
+- 小型可控示例；
+- 真实大棚地图；
+- 障碍阻断连接；
+- unknown 区域；
+- 入口不可达；
+- Ackermann 最小转弯半径；
+- BUNKER 差速/履带原地旋转；
+- stale semantic/mask/report；
+- Coverage Server 返回无路径或零长度 component。
+
+## 13.3 基础导航系统测试
+
+- MID360 topic 频率、时间戳、QoS 和丢包；
+- FAST-LIVO2 纯 LIO 连续输出和正常关机 PCD 保存；
+- 多位置、多初值 NDT/ICP 重定位；
+- TF 单父节点和时间连续性；
+- Nav2 global/local costmap 与 footprint；
+- 局部障碍 cloud 的清除和标记；
+- MPPI 输出经过 Collision Monitor 和 safety；
+- 手动优先、超时、急停锁存和 CAN 断连归零；
+- Qt5 waypoint Action 成功、拒绝、取消、missed waypoint 和地图不匹配。
+
+## 13.4 长时间和产品化测试
+
+下一阶段如果继续走向可商用目标，必须增加：
+
+| 类别 | 测试内容 | 关键记录 |
+| --- | --- | --- |
+| 实时性 | 10 Hz 点云、LIO、局部障碍和 Nav2 并发 | P50/P95/P99 延迟、丢帧、队列 |
+| 资源 | 2 h、8 h 及更长运行 | CPU、RSS、线程、磁盘、温度 |
+| 可靠性 | 传感器断流、TF 缺失、时间跳变、DDS 堵塞 | 故障检测时间、恢复行为 |
+| 持久化 | 磁盘满、写盘失败、进程重启 | 是否保留有效数据、是否 fail-closed |
+| 地图质量 | 独立 bag 对比离线金标准 | 漏检、误检、未知误转 free |
+| 导航 | 障碍、窄通道、长距离、多目标 | 成功率、横向误差、人工接管 |
+| 安全 | 急停、CAN 断连、定位跳变、节点退出 | 停止延迟、制动距离、零速确认 |
+| 交付 | 全新工作区和全新电脑复现 | 依赖、配置、数据和许可证完整率 |
+
+“可商用”不是单元测试通过的同义词。它至少要求：可复现、可观测、有边界、有故障降级、有实车安全证据、有长期稳定性数据，并完成第三方许可证、固件、地图和数据权利审查。
+
+# 14. 分阶段开发路线
 
 ```mermaid
 flowchart LR
-  P0[0 冻结基线
-Tag、bag、地图、TF、话题清单] -->
-  P1[1 仓库骨架
-文档、接口、依赖、CI、AGENTS.md] -->
-  P2[2 TF与描述
-base_footprint、外参、底盘profile] -->
-  P3[3 FAST-LIVO2适配
-统一mapping输出，隔离原生接口] -->
-  P4[4 重定位
-ICP/NDT、map→odom、回放验证] -->
-  P5[5 地图处理
-OctoMap基线+几何地面分割] -->
-  P6[6 Nav2与安全
-静态全局+过滤局部障碍+急停] -->
-  P7[7 实验平台
-配置合并、参数快照、录包、评测] -->
-  P8[8 Qt5与覆盖规划
-地图编辑、Fields2Cover适配] -->
-  P9[9 扩展研究
-16线雷达、RTK/UWB、语义点云]
+  B[当前基础导航闭环] --> N1[语义任务 manifest 与版本快照]
+  N1 --> N2[Qt5 语义编辑与 map hash 闭环]
+  N2 --> N3[Coverage Server 输入适配稳定化]
+  N3 --> N4[PathComponents 语义重建]
+  N4 --> N5[Full-footprint 验证]
+  N5 --> N6[Connection 修复与 approach 预览]
+  N6 --> N7[Qt/RViz 报告与 variant comparison]
+  N7 --> N8[独立数据集和离线验收]
+  N8 --> R[未来执行 Action 与实车覆盖验收]
 ```
 
-*图 3 agt_navigation_v2 分阶段迁移路线*
+| 阶段 | 目标 | 主要工作 | 进入条件 |
+| --- | --- | --- | --- |
+| N0 | 固化当前基线 | 记录 MID360、FAST-LIVO2、Nav2、MPPI、BUNKER 和当前报告 | 当前仓库 commit 可复现 |
+| N1 | 任务和版本可复现 | manifest、hash、profile snapshot、stale 检查 | 语义文件已具备 schema |
+| N2 | 语义编辑可靠 | Qt5 editor、GeoJSON、coverage、server、mask | 合法/非法样例测试通过 |
+| N3 | 路径生成稳定 | F2C/OpenNav、GML、row interpretation、零长度定位 | 最小复现用例建立 |
+| N4 | 路径语义完整 | SWATH/CONNECTION、stable ID、fingerprint、reconstruction | 上游 component 可解释 |
+| N5 | 几何安全验证 | footprint、costmap、unknown、曲率、keepout | canonical profile 已确认 |
+| N6 | 连接和入口处理 | Nav2 planner repair、approach preview、事务清理 | N5 能稳定输出报告 |
+| N7 | 汇报和对比 | Qt/RViz 分层显示、JSON/Markdown、variant comparison | 多候选可重复生成 |
+| N8 | 离线阶段验收 | 真实地图、多种 profile、独立数据集和报告 | 所有失败有稳定错误码 |
+| R1 | 未来执行闭环 | ExecuteCoverageTask、FollowPath、safety、BUNKER 实车 | N8 全部通过且实车审批 |
+| R2 | 商用化验证 | 长时、故障注入、制动、安全、质量和许可证审计 | R1 实车数据完整 |
 
-| **阶段** | **目标**            | **主要工作**                                         | **验收结果**             |
-|----------|---------------------|------------------------------------------------------|--------------------------|
-| Phase 0  | 冻结旧仓库基线      | Tag、地图、PCD、bag、TF、topic、参数和测试结果       | 可完整复现旧系统         |
-| Phase 1  | 建立 V2 骨架        | 目录、package、文档、依赖、CI、AGENTS.md             | 全仓库可编译，职责清晰   |
-| Phase 2  | TF 与机器人描述     | base_footprint、base_link、MID360 外参、底盘 profile | TF 自动检查通过          |
-| Phase 3  | FAST-LIVO2 适配     | 隔离原生 topic，输出统一 mapping 接口                | 同 bag 下输出与旧链一致  |
-| Phase 4  | 重定位迁移          | ICP/NDT、地图加载、初值和 map→odom                   | 位姿误差和成功率达标     |
-| Phase 5  | 地图处理迁移        | OctoMap baseline、几何地面分割、多后端输出           | 同数据集完成地图质量对比 |
-| Phase 6  | Nav2 与安全链       | 静态全局、过滤局部障碍、独立急停、底盘适配           | 实机基本导航闭环         |
-| Phase 7  | 实验与评测          | 配置合并、参数快照、bag、指标与报告                  | 实验可一键复现           |
-| Phase 8  | Qt5 与 Fields2Cover | 场景编辑、覆盖路径、路径评价和显示                   | 完成覆盖作业演示         |
-| Phase 9  | 扩展研究            | 16线雷达、高精度IMU、RTK/UWB、语义点云               | 按实验课题逐项接入       |
+# 15. 风险与控制措施
 
-## 13.1 当前建议立即开展的工作
-5.  旧仓库打 Tag，并整理一份真正可运行的基线数据包。
+| 风险 | 可能表现 | 控制措施 |
+| --- | --- | --- |
+| 上游 PathComponents 缺陷 | 零长度 SWATH、语义无法重建 | 最小复现、稳定错误码、只做精确 adapter 补偿，不伪造语义 |
+| 几何路径误当可执行 | Qt 显示有路线但 footprint 碰撞 | raw/reconstructed/validated 分层显示，执行前强制门槛 |
+| 基础地图和语义错位 | mask 或 rows 偏移 | map hash、origin、resolution、frame 和 manifest 绑定 |
+| Ackermann/BUNKER 混用 | 曲率、原地旋转或控制器不匹配 | profile 选择 repair planner，禁止参数回退 |
+| 动态物体写入静态图 | 地图越来越堵或产生拖影 | PGM 只读，动态点只进入局部链，静态证据异步固化 |
+| 语义服务器失效 | KeepoutFilter fail-open | 运动前必须检查 `LOADED`、mask、FilterInfo 和 costmap |
+| 长时间资源增长 | 内存、tile、bag 或日志无界增长 | 有界队列、活动 cell/tile 上限、持久化后淘汰和诊断 |
+| 实车参数未标定 | footprint、速度、转弯和制动不可信 | 实测后才更新 canonical profile，并同步合同测试 |
+| 文档状态失真 | 汇报把 preview 写成执行 | 每个能力标记 L0-L6 和 execution eligibility |
+| 第三方许可证问题 | 无法合法发布整套产品 | 固定 provenance、许可证审计和发布前法律审查 |
 
-6.  创建空的 `agt_navigation_v2` 仓库，只建立目录、文档、package 骨架和依赖管理。
+# 16. 阶段性成果与评价指标
 
-7.  第一项实际迁移只做 `agt_description + TF + MID360 外参`。
+## 16.1 下一阶段工程成果
 
-8.  TF 验收通过后，再迁移 FAST-LIVO2 adapter；暂不同时迁移 Nav2、Qt5 和 Fields2Cover。
+- 一份版本化的语义地图任务格式和 manifest。
+- Qt5 语义编辑器到 GeoJSON/coverage.yaml 的可复现保存链。
+- 基础地图、语义地图、keepout mask 和平台 profile 的一致性检查。
+- Fields2Cover/OpenNav 生成结果的稳定适配和最小复现用例。
+- PathComponents 到 SWATH/CONNECTION 的权威语义重建。
+- 基于 canonical footprint 的完整离线碰撞与曲率验证。
+- 仅连接段修复、入口 approach 预览和事务式失败清理。
+- Qt5/RViz 分层可视化和 JSON/Markdown/CSV 报告。
+- 多路线 variant comparison 和 metrics-only 时间估算。
+- 可在另一台电脑重复运行的源代码、依赖、配置和小型样例包。
 
-# 14. 风险分析与控制措施
-| **风险**         | **可能表现**                                     | **控制措施**                                   |
-|------------------|--------------------------------------------------|------------------------------------------------|
-| 范围失控         | 同时接入多个传感器、算法和 GUI，长期无法形成闭环 | 严格按阶段迁移；每阶段只允许一个主要目标       |
-| 接口过度设计     | 创建大量空包和抽象但无可运行实现                 | 只预留领域边界和最小接口，算法按需加入         |
-| 旧系统不可复现   | 迁移后无法判断功能是否退化                       | Phase 0 保存 tag、bag、地图、参数和运行说明    |
-| TF 冲突          | 重复发布、地图跳变、Costmap 异常                 | 自动检测 TF 发布源，建立唯一责任表             |
-| 第三方 Fork 漂移 | 上游更新后本地修改难以合并                       | 小步修改、固定 commit、记录 upstream、定期同步 |
-| 配置再次分散     | 新仓库继续出现多个互相覆盖 YAML                  | 实验管理器生成 effective_config 并保存快照     |
-| 实机验证不足     | 单元测试通过但导航表现异常                       | bag 回放、仿真、台架、低速实机分级验证         |
-| 语义算法过早引入 | 模型和数据问题掩盖基础几何/TF问题                | 先建立几何 baseline，再开展语义对比            |
+## 16.2 建议量化指标
 
-# 15. 预期成果与阶段性评价指标
-## 15.1 工程成果
-- 一个结构清晰、可编译、可测试、可迁移的 `agt_navigation_v2` 主仓库。
+| 类别 | 指标 |
+| --- | --- |
+| 语义数据 | 合法任务加载成功率、错误定位完整率、map hash mismatch 检出率 |
+| 路径生成 | 规划成功率、空路径率、零长度 component 数、平均生成耗时 |
+| 语义重建 | 区间覆盖率、component 重叠数、raw/reconstructed 长度误差 |
+| 碰撞验证 | 碰撞 pose 数、unknown/越界数、最小 clearance、最大曲率 |
+| 修复 | 可修复 connection 比例、修复成功率、SWATH 不变性 |
+| 覆盖几何 | 覆盖面积、重复面积、漏作面积、连接长度、转弯次数 |
+| 路径对比 | 总长度、估算时间、倒车次数、曲率峰值、候选 eligibility |
+| UI | 大地图加载时间、预览响应时间、任务状态可解释性 |
+| 复现 | 同输入 fingerprint 一致率、报告完整率、外部依赖版本一致率 |
+| 基础导航 | waypoint 成功率、定位恢复时间、障碍漏检/误检、人工接管次数 |
 
-- 固定且有自动检查的 TF 树和多底盘 profile。
+覆盖率、重复率和漏作面积只有在 PathComponents 通过完整语义重建后才允许计算；否则必须为 `null`，不能用 heading 或几何 fallback 伪造作业统计。
 
-- FAST-LIVO2、定位、地图处理、Nav2、安全和底盘之间的统一接口。
+# 17. 结论与汇报决策建议
 
-- 时间同步、内外参标定、bag、地图和诊断工具集。
+当前仓库已经不是只有目录骨架的迁移项目，而是一个具备真实基础导航集成能力的工程 baseline：MID360 和 FAST-LIVO2 提供建图前端，离线地图处理生成 PGM/YAML，Qt5 提供地图和任务交互，Nav2 负责规划与控制，Collision Monitor 和 `agt_safety` 形成速度保护，BUNKER CAN 完成底盘接口。
 
-- Qt5 地图编辑与 Fields2Cover 的标准化适配层。
+当前最重要的技术判断是：
 
-- RTK/UWB 和语义点云可在不破坏基础系统的情况下接入。
+1. 基础 waypoint 导航链已经形成闭环，但当前控制器实际是 MPPI，不是 RPP。
+2. 局部避障不是单个未知算法，而是点云过滤、VoxelLayer、InflationLayer、Collision Monitor 和 MPPI 的组合链。
+3. 离线地图处理已经具备地面、时间、高度和车体扫掠逻辑，但不能原样同步搬进实时建图回调；后续实时化必须采用异步、有界、资源可诊断的设计。
+4. 语义地图编辑、GeoJSON、coverage.yaml、keepout mask 和 Fields2Cover 适配已经建立，下一阶段要做的是稳定化、可复现和可审计，而不是重新发明数据格式。
+5. 覆盖路径当前不能执行的根因不是“还缺一个显示按钮”，而是上游 PathComponents 存在零长度 SWATH，以及完整语义、碰撞、运动学和安全门槛尚未同时满足。
+6. 未来执行覆盖任务必须继续走项目 Action、Nav2、`agt_safety` 和 BUNKER watchdog，Qt5 只能作为前端。
+7. 商用目标还必须补充长时间资源测试、故障注入、独立数据集、实车定位/避障/制动验收和许可证审计。
 
-## 15.2 实验与科研成果
-- 三维点云转二维栅格地图方法的可复现对比平台。
+> **本阶段建议汇报决策**
+> 批准以当前 MID360 + FAST-LIVO2 + Nav2 + BUNKER waypoint 闭环作为工程基线；下一阶段集中完成语义地图和离线覆盖路径的版本化、规划、语义重建、完整 footprint 验证、连接段修复、可视化和报告；在 `zero_length_swath`、执行资格和独立离线数据集问题解决前，不开放覆盖路径实车执行。
 
-- 温室地面、植被、硬障碍和动态点云误判问题的量化实验。
+# 附录 A：当前核心接口
 
-- ICP/NDT、RTK/UWB 融合和稳定行间重定位的测试框架。
+| 类别 | 接口 | 作用 |
+| --- | --- | --- |
+| 传感器 | `/agt/sensors/lidar/custom` | MID360 Livox CustomMsg，供 FAST-LIVO2 使用 |
+| 传感器 | `/agt/sensors/imu/data` | MID360 IMU |
+| 建图 | `/agt/mapping/odometry` | 项目连续里程计 |
+| 建图 | `/agt/mapping/registered_points_lidar` | lidar frame 注册点云 |
+| 定位 | `/initialpose` | Qt/RViz 初始位姿输入 |
+| 定位 | `/agt/localization/status` | NDT/ICP 状态和质量 |
+| 地图 | `/agt/map/global_occupancy` | Nav2 基础静态地图 |
+| 感知 | `/agt/perception/obstacle_cloud` | 局部障碍点云 |
+| 导航 | `/agt/navigation/cmd_vel_raw` | Nav2 controller 原始速度 |
+| 导航 | `/agt/navigation/cmd_vel` | Collision Monitor 输出速度 |
+| 任务 | `/agt/navigation/execute_waypoint_task` | 项目 waypoint Action |
+| 语义 | `/agt/map/semantic_status` | 语义地图加载状态 |
+| 语义 | `/agt/map/keepout_mask` | 独立 keepout OccupancyGrid |
+| 覆盖 | `/agt/coverage/path_preview` | 只读几何预览路径 |
+| 覆盖 | `/agt/coverage/path_raw` | Coverage Server 原始路径 |
+| 覆盖 | `/agt/coverage/path_reconstructed` | PathComponents 语义重建路径 |
+| 覆盖 | `/agt/coverage/path_repaired` | 连接段修复候选路径 |
+| 覆盖 | `/agt/coverage/path_validated` | 通过验证的路径，当前仍不等于可执行 |
+| 覆盖 | `/agt/coverage/path_semantics` | SWATH/CONNECTION 语义和 fingerprint |
+| 覆盖 | `/agt/coverage/validation_report` | 全 footprint 验证报告 |
+| 安全 | `/agt/safety/cmd_vel` | 安全层最终速度 |
+| 安全 | `/agt/safety/status` | motion、急停和 watchdog 状态 |
+| 底盘 | `/agt/chassis/cmd_vel` | command guard 到官方驱动的速度 |
+| 底盘 | `/agt/chassis/status` | BUNKER 标准诊断 |
 
-- Fields2Cover 路径、车辆运动学可执行性和车体投影碰撞评价。
+# 附录 B：模块非目标
 
-- 可直接支撑论文实验、比赛复盘、工程部署和求职作品展示的数据与文档。
+| 模块 | 当前不负责的事项 |
+| --- | --- |
+| FAST-LIVO2 | 全局 `map -> odom`、语义编辑、覆盖规划和底盘安全 |
+| map processing | 实时控制和 Nav2 执行 |
+| semantic editor | 直接发布速度、修改基础 PGM、判断实车任务成功 |
+| Coverage Server | 车辆控制、局部避障、底盘通讯和执行安全 |
+| Validator | 修复路径、发布 TF、指挥底盘 |
+| Repair | 修改 SWATH、修改源 GeoJSON、替代最终 Validator |
+| Qt5 | 直接发布速度、用距离轮询判断 Action 成功 |
+| Nav2 | 替代 `agt_safety` 和硬件急停 |
+| agt_safety | 代替定位、全局规划和语义判断 |
+| BUNKER driver | 代替上层路径规划和任务管理 |
 
-## 15.3 建议评价指标
-| **类别**   | **核心指标**                                             |
-|------------|----------------------------------------------------------|
-| 建图与地图 | 地图重影率、障碍误检/漏检、通道保留宽度、处理耗时        |
-| 定位       | 重定位成功率、收敛时间、位置/航向误差、失效恢复时间      |
-| 导航       | 到点成功率、横向误差、终点误差、路径长度、人工接管次数   |
-| 障碍与安全 | 急停触发距离、误停率、漏检率、清除延迟                   |
-| 覆盖规划   | 覆盖率、重复覆盖率、转弯次数、总路径长度、不可执行段比例 |
-| 系统资源   | CPU/GPU、内存、话题延迟、丢帧率、启动时间                |
-| 复现能力   | 一键启动成功率、参数快照完整率、实验数据完整率           |
+# 附录 C：当前与未来能力标签
 
-# 16. 结论与汇报决策建议
-当前最合理的路线不是继续在旧仓库中叠加功能，也不是完全推倒重写，而是建立 `agt_navigation_v2`，将旧仓库作为可运行基线，并通过统一 TF、统一接口、分层 package、依赖管理和实验配置逐步迁移。
+| 标签 | 含义 |
+| --- | --- |
+| `implemented-offline` | 代码和离线测试已存在，可重复运行 |
+| `integrated-baseline` | 已接入 ROS 运行链，仍需实车验收 |
+| `preview-only` | 只用于显示、审计或 metrics，不可执行 |
+| `provisional` | 参数或算法候选，未经独立数据验证 |
+| `skeleton` | 只有 package/接口边界，无运行实现 |
+| `execution-blocked` | 有输出但至少一个安全、语义或几何门槛失败 |
+| `field-validated` | 已通过规定的实车和数据验收 |
+| `commercial-ready` | 完成长时、故障、安全、复现和发布审计 |
 
-系统当前以 MID360 和 FAST-LIVO2-ROS2 为建图前端，但架构上将其限定为可替换后端。16 线雷达、高精度 IMU、RTK、UWB 和点云语义聚类应提前预留领域模块与接口，但具体实现按研究和工程需求逐项进入，避免过早堆积复杂度。
-
-Qt5 地图编辑工具和 Fields2Cover 应通过标准场景数据、路径接口和 UI bridge 接入，不能重新成为系统的隐式控制中心。第三方算法通过个人 Fork 保存和维护，V2 主仓库用固定 commit 的依赖清单拉取，从而保证可升级、可回滚和许可证边界清晰。
-
-> **建议本次汇报形成的决策**  
-> 批准创建 `agt_navigation_v2`；冻结旧仓库基线；第一阶段只完成仓库骨架、架构文档与迁移规范；第二阶段只迁移 TF、机器人描述和 MID360 外参；后续所有模块以“单项迁移、自动测试、bag 对比、实机验收”方式推进。
-
-# 附录 A：建议统一的核心接口（初稿）
-| **类别** | **建议接口**                   | **说明**                                   |
-|----------|--------------------------------|--------------------------------------------|
-| 传感器   | /agt/sensors/lidar/points      | 统一 PointCloud2，frame 为实际 lidar frame |
-| 传感器   | /agt/sensors/imu/data          | 统一 IMU 数据及协方差                      |
-| 建图     | /agt/mapping/odometry          | 统一连续里程计输出                         |
-| 建图     | /agt/mapping/registered_cloud  | 统一注册点云                               |
-| 建图     | /agt/mapping/status            | 状态、频率、错误码和 active backend        |
-| 感知     | /agt/perception/ground_cloud   | 地面点云                                   |
-| 感知     | /agt/perception/obstacle_cloud | 局部导航障碍点云                           |
-| 感知     | /agt/perception/semantic_cloud | 可选语义点云                               |
-| 定位     | /agt/localization/status       | 重定位状态、质量和失败原因                 |
-| 导航     | /agt/navigation/cmd_vel        | Nav2 输出速度                              |
-| 安全     | /agt/safety/cmd_vel            | 最终安全速度                               |
-| 底盘     | /agt/chassis/status            | 底盘状态与故障                             |
-| 实验     | /agt/experiment/events         | 实验事件、备注与阶段标记                   |
-
-# 附录 B：第一阶段 Codex 工作边界
-| **允许完成**                       | **本阶段禁止**                |
-|------------------------------------|-------------------------------|
-| 创建目录和 ROS 2 package 骨架      | 迁移 FAST-LIVO2 源码          |
-| 编写架构、接口和迁移文档           | 迁移 ICP/NDT 实现             |
-| 创建 AGENTS.md 与迁移矩阵          | 迁移 Nav2 参数和控制器        |
-| 创建 nav_dependencies.repos 示例   | 直接复制 Qt5 项目             |
-| 创建 .gitignore、CI 和最小编译测试 | 加入 RTK/UWB/语义算法业务实现 |
-| 为每个 package 编写职责 README     | 修改旧仓库已验证参数          |
+当前覆盖链的准确标签是：`implemented-offline` + `preview-only` + `execution-blocked`；当前 BUNKER 基础 waypoint 链的准确标签是：`integrated-baseline`，不是 `field-validated` 或 `commercial-ready`。

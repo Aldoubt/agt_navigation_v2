@@ -91,13 +91,14 @@ runtime/maps/greenhouse_01/pcd/                 # FAST-LIVO2 PCD 输出目录
 
 ## 使用同源地图启动导航
 
-将 `global_map_pcd` 指向本次建图正常结束后生成的对应 PCD：
+将 `global_map_pcd` 和 `global_map_processing_record` 指向本次建图正常结束后生成的同源文件：
 
 ```bash
 ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:="$(pwd)/runtime/maps/greenhouse_01/greenhouse_01.yaml" \
   global_map_pcd:="$(pwd)/runtime/maps/greenhouse_01/pcd/<generated-map>.pcd" \
+  global_map_processing_record:="$(pwd)/runtime/maps/greenhouse_01/pcd/localization_map.processing.yaml" \
   backend:=ndt start_gui:=true \
   start_semantic_map_server:=false \
   start_coverage_planning:=false

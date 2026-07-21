@@ -27,7 +27,7 @@ def validate_mode_arguments(context):
             raise RuntimeError("map_name may contain only letters, numbers, '_' and '-'")
         return []
 
-    for argument in ("map", "global_map_pcd"):
+    for argument in ("map", "global_map_pcd", "global_map_processing_record"):
         value = LaunchConfiguration(argument).perform(context)
         if not value:
             raise RuntimeError(f"navigation mode requires {argument}:=/absolute/path")
@@ -137,7 +137,22 @@ def generate_launch_description():
             DeclareLaunchArgument("map_name", default_value="mid360_map"),
             DeclareLaunchArgument("map", default_value=""),
             DeclareLaunchArgument("global_map_pcd", default_value=""),
+            DeclareLaunchArgument("global_map_processing_record", default_value=""),
             DeclareLaunchArgument("backend", default_value="ndt"),
+            DeclareLaunchArgument("map_id", default_value=""),
+            DeclareLaunchArgument("configured_candidates_yaml", default_value=""),
+            DeclareLaunchArgument("last_valid_pose_path", default_value=""),
+            DeclareLaunchArgument(
+                "manual_initialpose_enabled",
+                default_value="true",
+                description="Keep the original RViz/Qt /initialpose comparison path enabled",
+            ),
+            DeclareLaunchArgument("auto_relocalize_on_start", default_value="false"),
+            DeclareLaunchArgument("auto_relocalize_delay_s", default_value="3.0"),
+            DeclareLaunchArgument("auto_relocalize_server_wait_s", default_value="15.0"),
+            DeclareLaunchArgument("auto_relocalize_timeout_s", default_value="30.0"),
+            DeclareLaunchArgument("auto_relocalize_max_candidates", default_value="0"),
+            DeclareLaunchArgument("auto_relocalize_publish_debug", default_value="false"),
             DeclareLaunchArgument("start_semantic_map_server", default_value="false"),
             DeclareLaunchArgument("start_coverage_planning", default_value="false"),
             DeclareLaunchArgument("semantic_map", default_value=""),
@@ -165,7 +180,36 @@ def generate_launch_description():
                     **common,
                     "map": LaunchConfiguration("map"),
                     "global_map_pcd": LaunchConfiguration("global_map_pcd"),
+                    "global_map_processing_record": LaunchConfiguration(
+                        "global_map_processing_record"
+                    ),
+                    "map_id": LaunchConfiguration("map_id"),
+                    "configured_candidates_yaml": LaunchConfiguration(
+                        "configured_candidates_yaml"
+                    ),
+                    "last_valid_pose_path": LaunchConfiguration("last_valid_pose_path"),
                     "backend": LaunchConfiguration("backend"),
+                    "manual_initialpose_enabled": LaunchConfiguration(
+                        "manual_initialpose_enabled"
+                    ),
+                    "auto_relocalize_on_start": LaunchConfiguration(
+                        "auto_relocalize_on_start"
+                    ),
+                    "auto_relocalize_delay_s": LaunchConfiguration(
+                        "auto_relocalize_delay_s"
+                    ),
+                    "auto_relocalize_server_wait_s": LaunchConfiguration(
+                        "auto_relocalize_server_wait_s"
+                    ),
+                    "auto_relocalize_timeout_s": LaunchConfiguration(
+                        "auto_relocalize_timeout_s"
+                    ),
+                    "auto_relocalize_max_candidates": LaunchConfiguration(
+                        "auto_relocalize_max_candidates"
+                    ),
+                    "auto_relocalize_publish_debug": LaunchConfiguration(
+                        "auto_relocalize_publish_debug"
+                    ),
                     "start_gui": LaunchConfiguration("start_gui"),
                     "start_semantic_map_server": LaunchConfiguration(
                         "start_semantic_map_server"

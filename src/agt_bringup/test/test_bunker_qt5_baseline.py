@@ -26,6 +26,17 @@ def test_navigation_mode_starts_navigation_gui_and_defaults_optional_features_of
     assert '"map_frame_id": "map"' in source
     assert 'DeclareLaunchArgument("start_semantic_map_server", default_value="false")' in source
     assert 'DeclareLaunchArgument("start_coverage_planning", default_value="false")' in source
+    assert '"global_map_processing_record"' in source
+    assert 'DeclareLaunchArgument("map_id", default_value="")' in source
+    assert "OpaqueFunction(function=validate_navigation_arguments)" in source
+    nav_source = read("src/agt_navigation/launch/navigation.launch.py")
+    assert 'DeclareLaunchArgument("autostart", default_value="false")' in nav_source
+    assert 'DeclareLaunchArgument("enable_localization_gate", default_value="true")' in nav_source
+    assert '"auto_relocalize_on_start"' in source
+    assert 'executable="automatic_relocalization.py"' in source
+    assert 'auto_relocalize_on_start": LaunchConfiguration(' in read(
+        "src/agt_bringup/launch/system.launch.py"
+    )
 
 
 def test_system_passes_gui_to_both_modes_and_keeps_optional_features_off():
@@ -35,6 +46,8 @@ def test_system_passes_gui_to_both_modes_and_keeps_optional_features_off():
     assert '"start_mapping_gui",\n                default_value="false"' in source
     assert 'DeclareLaunchArgument("start_semantic_map_server", default_value="false")' in source
     assert 'DeclareLaunchArgument("start_coverage_planning", default_value="false")' in source
+    assert 'DeclareLaunchArgument("global_map_processing_record", default_value="")' in source
+    assert '"global_map_processing_record": LaunchConfiguration(' in source
 
 
 def test_nav_velocity_passes_collision_monitor_and_safety():

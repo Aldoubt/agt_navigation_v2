@@ -7,8 +7,15 @@
 ```bash
 ros2 launch agt_bringup system.launch.py mode:=mapping map_name:=greenhouse_01
 ros2 launch agt_bringup system.launch.py mode:=navigation \
-  map:=/absolute/path/map.yaml global_map_pcd:=/absolute/path/map.pcd
+  map:=/absolute/path/map.yaml \
+  global_map_pcd:=/absolute/path/map.pcd \
+  global_map_processing_record:=/absolute/path/localization_map.processing.yaml \
+  auto_relocalize_on_start:=false
 ```
+
+自动和手动重定位的完整操作、候选 YAML、`/initialpose` 命令和技术差异见
+[`docs/workflows/relocalization_usage.md`](../docs/workflows/relocalization_usage.md)。自动启动默认关闭；
+开启 `auto_relocalize_on_start:=true` 只会发送一次有界 Action，不代表无先验全地图搜索。
 
 `mapping` 启动 BUNKER TF、传感器、FAST-LIVO2 PCD 保存、二维投影、底盘和 RViz；可用
 `start_mapping_gui:=true` 额外启动只监视/编辑、禁止导航任务执行的 mapping Qt profile。
@@ -26,6 +33,7 @@ ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:=/absolute/path/greenhouse_01.yaml \
   global_map_pcd:=/absolute/path/localization_map.pcd \
+  global_map_processing_record:=/absolute/path/localization_map.processing.yaml \
   semantic_map:=/absolute/path/semantic_map.geojson \
   coverage_params:=/absolute/path/coverage.yaml \
   start_semantic_map_server:=true \
@@ -37,7 +45,7 @@ ros2 launch agt_bringup system.launch.py \
 platform profile；覆盖规划不能脱离语义服务器启动。
 
 进程按 Nav2、语义服务器、覆盖规划的所有者顺序加入同一 launch。运行时 readiness 由
-`map_server active -> localization ready -> semantic LOADED -> keepout mask -> global costmap ->
+`map_server active -> localization TRACKING/accepted -> safety localization guard -> semantic LOADED -> keepout mask -> global costmap ->
 coverage planner` 链共同决定；进程存在不等于可执行。只有下列检查通过后才允许手动使能安全层：
 
 ```bash
@@ -58,6 +66,7 @@ ros2 action info /agt/coverage/execute
 ros2 launch agt_bringup system.launch.py \
   mode:=navigation map:=/absolute/path/greenhouse_01.yaml \
   global_map_pcd:=/absolute/path/localization_map.pcd \
+  global_map_processing_record:=/absolute/path/localization_map.processing.yaml \
   semantic_map:=/absolute/path/semantic_map.geojson \
   coverage_params:=/absolute/path/coverage.yaml \
   start_semantic_map_server:=true annotation_mode:=true

@@ -10,6 +10,17 @@
 - `/agt/perception/obstacle_cloud`
 - `/agt/perception/semantic_cloud`
 - `/agt/localization/status`
+- `/agt/localization/status_text`
+- `/agt/localization/global_pose`
+- `/agt/localization/coarse_pose`
+- `/agt/localization/candidate_pose`
+- `/agt/localization/aligned_points`
+- `/agt/localization/relocalize`
+
+`LocalizationStatus.map_hash` is the active localization PCD content identity in the canonical
+`sha256:<64 lowercase hexadecimal characters>` form. It is recomputed at map readiness time and is
+used to bind configured candidates and last-pose records; a processing record `pcd_sha256` is checked
+when present.
 - `/agt/navigation/cmd_vel`
 - `/agt/navigation/cmd_vel_raw`
 - `/agt/navigation/status`

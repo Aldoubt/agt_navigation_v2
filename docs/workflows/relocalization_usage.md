@@ -1,0 +1,181 @@
+# 自动与手动重定位使用说明
+
+本文只覆盖 BUNKER + MID360 + FAST-LIVO2 + Nav2 基线。定位成功后，`agt_localization` 才会发布
+唯一的 `map -> odom`；FAST-LIVO2 adapter 继续发布 `odom -> base_footprint`。定位失败不会启动
+Nav2 运动链，`agt_safety` 也不会因为定位成功而自动使能底盘运动。
+
+## 先建图再导航
+
+### 1. 建图并保存
+
+在仓库根目录、已 source ROS 2 Humble 和本工作区的终端中启动建图：
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+
+ros2 launch agt_bringup system.launch.py \
+  mode:=mapping map_name:=<map_id> \
+  start_rviz:=true start_mapping_gui:=false record_bag:=true
+```
+
+建图运行期间保持 FAST-LIVO2 和总控不退出。在另一个已 source 的终端保存二维地图：
+
+```bash
+tools/save_mapping_outputs.sh <map_id>
+```
+
+确认二维地图保存成功后，对建图总控执行正常 `Ctrl+C`，等待 FAST-LIVO2 完成 PCD 落盘。然后
+确认以下文件都存在：
+
+```text
+runtime/maps/<map_id>/<map_id>.yaml
+runtime/maps/<map_id>/<map_id>.pgm
+runtime/maps/<map_id>/pcd/localization_map.pcd
+runtime/maps/<map_id>/pcd/localization_map.processing.yaml
+```
+
+`localization_map.processing.yaml` 必须有 `state: ready` 且 `map_file` 必须指向同目录的
+`localization_map.pcd`。启动定位时会重新计算 PCD SHA-256；旧记录没有 `pcd_sha256` 时可以
+读取，但会发出未验证告警。不要使用 `kill -9` 代替正常保存。
+
+### 2. 启动导航的共同参数
+
+自动和手动模式都必须使用同一批次生成的 PGM/YAML、PCD 和 processing record：
+
+```bash
+ros2 launch agt_bringup system.launch.py \
+  mode:=navigation \
+  map:="$PWD/runtime/maps/<map_id>/<map_id>.yaml" \
+  global_map_pcd:="$PWD/runtime/maps/<map_id>/pcd/localization_map.pcd" \
+  global_map_processing_record:="$PWD/runtime/maps/<map_id>/pcd/localization_map.processing.yaml" \
+  map_id:=<map_id> \
+  start_semantic_map_server:=false \
+  start_coverage_planning:=false
+```
+
+导航模式默认 `auto_relocalize_on_start:=false`，因为定位节点不会从零进行无界全地图搜索。
+Nav2 lifecycle manager 初始保持非活动，定位状态进入 `TRACKING` 后才由 gate 发送标准
+`STARTUP`。即使 gate 启动 Nav2，运动仍需单独检查安全状态并显式调用 motion enable。
+
+## 自动重定位
+
+自动模式是一个启动后只发送一次的、有候选上限和超时的 `Relocalize` Action 请求。客户端会
+先等待首帧 `/agt/mapping/registered_points_lidar` 和 Action Server，满足后才发送请求。它按
+顺序使用以下可选来源：
+
+- 带当前 `map_id`/`map_hash` 的 `last_valid_pose.yaml`；
+- 带当前 PCD `sha256:<64位小写十六进制>` 的 configured candidate YAML；
+- 当前时间窗口内、`map` frame 且协方通过校验的外部 coarse pose。
+
+这不是 Scan Context 或无界全地图 place recognition。首次在一个新地图上使用自动模式时，
+至少应提供 configured candidate YAML。以 `config/candidates.example.yaml` 为模板建立部署
+配置，并把 `map_hash` 写成实际 PCD 摘要：
+
+```bash
+PCD="$PWD/runtime/maps/<map_id>/pcd/localization_map.pcd"
+sha256sum "$PCD"
+```
+
+候选 YAML 中的 `map_id` 和 `map_hash` 必须与当前地图一致，候选坐标使用 `map` frame。然后
+使用自动启动参数：
+
+```bash
+ros2 launch agt_bringup system.launch.py \
+  mode:=navigation \
+  map:="$PWD/runtime/maps/<map_id>/<map_id>.yaml" \
+  global_map_pcd:="$PWD/runtime/maps/<map_id>/pcd/localization_map.pcd" \
+  global_map_processing_record:="$PWD/runtime/maps/<map_id>/pcd/localization_map.processing.yaml" \
+  map_id:=<map_id> \
+  configured_candidates_yaml:="$PWD/runtime/maps/<map_id>/localization_seeds.yaml" \
+  auto_relocalize_on_start:=true \
+  auto_relocalize_timeout_s:=30.0 \
+  auto_relocalize_max_candidates:=128 \
+  start_semantic_map_server:=false \
+  start_coverage_planning:=false
+```
+
+验证定位结果：
+
+```bash
+ros2 topic echo /agt/localization/status --once
+ros2 run tf2_ros tf2_echo map odom
+ros2 lifecycle get /map_server
+ros2 lifecycle get /planner_server
+```
+
+成功条件是 `state: 3`（`TRACKING`）、`pose_valid: true`、`localization_accepted: true`、
+`error_code: 0`，并且 `map -> odom` 持续存在。候选耗尽、PCD hash 不匹配、点云未到达、TF
+缺失或质量门禁失败都会保持 fail-closed；启动客户端不会自动无限重试。需要再次恢复时，
+使用手动 `/initialpose` 或显式 Action 请求。
+
+也可以不通过启动客户端，导航已经启动后手动发送一次同样的自动 Action：
+
+```bash
+ros2 action send_goal /agt/localization/relocalize \
+  agt_interfaces/action/Relocalize \
+  "{mode: 0, use_last_valid_pose: true, use_configured_candidates: true, use_external_coarse_pose: true, timeout_s: 30.0, publish_debug: true}"
+```
+
+## 手动给定位姿
+
+手动模式默认开启 `manual_initialpose_enabled:=true`。先使用共同导航参数启动，但显式关闭
+自动启动：
+
+```bash
+ros2 launch agt_bringup system.launch.py \
+  mode:=navigation \
+  map:="$PWD/runtime/maps/<map_id>/<map_id>.yaml" \
+  global_map_pcd:="$PWD/runtime/maps/<map_id>/pcd/localization_map.pcd" \
+  global_map_processing_record:="$PWD/runtime/maps/<map_id>/pcd/localization_map.processing.yaml" \
+  map_id:=<map_id> \
+  manual_initialpose_enabled:=true \
+  auto_relocalize_on_start:=false \
+  start_semantic_map_server:=false \
+  start_coverage_planning:=false
+```
+
+在 navigation Qt/RViz 操作界面使用 `2D Pose Estimate`，第一点给出 `map` 中的机器人位置，
+拖动方向给出 yaw 后释放。该入口发布 `/initialpose`，定位节点将它转换为同一内部配准路径，
+但只测试一个初始候选。
+
+没有图形界面时可以直接发布一个示例初值。下面的四元数表示 yaw=0；实际使用时必须替换为
+操作者在 `map` 中测得的坐标和方向：
+
+```bash
+ros2 topic pub --once /initialpose \
+  geometry_msgs/msg/PoseWithCovarianceStamped \
+  "{header: {frame_id: map}, pose: {pose: {position: {x: 0.0, y: 0.0, z: 0.0}, orientation: {x: 0.0, y: 0.0, z: 0.0, w: 1.0}}}}"
+```
+
+等待 `LocalizationStatus` 达到 `TRACKING` 后再检查 Nav2 和安全层。手动初值很差时可能被
+innovation、fitness、点数或 TF 门禁拒绝；拒绝不会直接写 `map -> odom`。
+
+## 技术原理对比
+
+| 项目 | 自动重定位 | 手动给初值 |
+| --- | --- | --- |
+| 操作者输入 | 候选 YAML、last pose 或外部 coarse pose | `/initialpose` 的一个 `map -> base_link` 初值 |
+| 搜索范围 | 候选周围有界 SE(2) 展开，按优先级和上限顺序测试 | 只测试一个候选，不展开全局搜索 |
+| 配准后端 | 与手动模式相同的 NDT/ICP | 与自动模式相同的 NDT/ICP |
+| 质量门禁 | fitness、点数、创新量、候选歧义和后续 supervisor | 同一套质量门禁 |
+| 适合场景 | 已知若干安全起点、上次有效位姿或有外部粗定位 | 操作者能在地图上识别当前车位，首次联调和错误恢复 |
+| 失败行为 | 一次 Action 超时/拒绝后停止，不无限重试 | 发布明确失败状态，等待再次给初值 |
+| TF 责任 | 只有质量接受后由 `agt_localization` 发布 `map -> odom` | 完全相同 |
+| 安全关系 | 不发布速度、不使能安全层、不绕过 Nav2 | 完全相同 |
+
+两种方式不是两套定位算法。差异只在初值来源和候选数量：最终都必须通过同一个配准、质量、
+supervisor、TF 和 Nav2/safety gate。自动模式也不会把“Action Server 在线”当作定位成功。
+
+## 排查顺序
+
+```bash
+ros2 topic echo /agt/localization/status --once
+ros2 topic echo /agt/localization/status_text --once
+ros2 topic info /agt/mapping/registered_points_lidar -v
+ros2 run tf2_ros tf2_echo odom base_footprint
+ros2 service call /agt/safety/set_motion_enabled std_srvs/srv/SetBool '{data: false}'
+```
+
+先处理 `map not ready`、`scan too small`、`TF unavailable`、`map hash mismatch` 或
+`no candidates`，确认定位稳定后才进行任何运动测试。正常停止使用 `Ctrl+C`，不要用 `kill -9`。

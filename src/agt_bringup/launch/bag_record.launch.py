@@ -41,6 +41,11 @@ RECORDED_TOPICS = [
     "/local_costmap/costmap",
     "/agt/perception/obstacle_cloud",
     "/agt/localization/status",
+    "/agt/localization/status_text",
+    "/agt/localization/global_pose",
+    "/agt/localization/coarse_pose",
+    "/agt/localization/candidate_pose",
+    "/agt/localization/aligned_points",
     "/agt/navigation/status",
     "/agt/navigation/cmd_vel_raw",
     "/agt/navigation/cmd_vel",
@@ -55,6 +60,9 @@ RECORDED_TOPICS = [
     "/agt/chassis/rc_state",
     "/goal_pose",
     "/initialpose",
+    "/agt/localization/relocalize/_action/goal",
+    "/agt/localization/relocalize/_action/feedback",
+    "/agt/localization/relocalize/_action/result",
 ]
 
 

@@ -3,12 +3,13 @@
 `agt_navigation_v2` 是面向农业机器人导航实验的 ROS 2 模块化平台。
 
 当前已完成仓库与接口骨架、机器人描述、MID360 驱动、FAST-LIVO2 建图适配、OctoMap
-二维投影、ICP/NDT 重定位、维护版 Qt5 地图与多点 Action 界面、完整 Nav2 离线闭环，以及 BUNKER
-底盘通讯和履带安全层。
+二维投影、ICP/NDT 重定位、维护版 Qt5 地图与多点 Action 界面、Nav2 waypoint 离线闭环，以及 BUNKER
+底盘通讯和履带安全层。基础 waypoint 导航链已经形成工程集成闭环，但尚未完成完整实车指标验收。
 现有 MID360 bag 已完成字段审计、CustomMsg 转换、完整大包建图和同源 PCD 重定位初验；
 大地图保存已改为过滤异常点并使用稀疏 64 位体素累计，NDT 线程参数边界已修复。批量重定位
-收敛率、精确外参和完整实机安全验收仍待执行。农业语义覆盖链已完成
-TASK-00~15，TASK-16 已落地路径时间估算 baseline，覆盖率、重叠率与可复现实验汇总仍待完成。
+收敛率、精确外参和完整实机安全验收仍待执行。农业语义覆盖链已经具备语义编辑、Coverage Server
+适配、路径语义重建、全 footprint 验证、连接段修复和离线预览能力，但真实大棚仍存在
+`zero_length_swath`，当前覆盖结果为 `execution-blocked`；覆盖率、重叠率和可复现实验汇总仍待完成。
 
 ## 项目进度概览
 
@@ -22,7 +23,7 @@ TASK-00~15，TASK-16 已落地路径时间估算 baseline，覆盖率、重叠�
 | Phase 5：地图处理 | baseline 可用 | OctoMap 动态射线原点、二维 OccupancyGrid 和 PGM/YAML 保存通过回放 | 固定最终高度阈值并形成二维地图质量对比报告 |
 | Phase 6：Nav2 与安全链 | 离线 baseline 完成 | Smac2D、MPPI、BT、costmap、Collision Monitor、Qt action、BUNKER 安全链完成闭环目标测试 | 用真实地图/定位调参；完成障碍、CAN 与制动验收 |
 | Phase 7：实验与评测 | 部分完成 | 总控扩展录包、runtime 产物边界和离线路径时间 JSON 报告可用 | 实现配置/Git 快照、覆盖质量指标和统一报告生成 |
-| Phase 8：Qt5 与覆盖规划 | TASK-00~15 完成，TASK-16 部分 | 语义/Keepout、覆盖 Action、总控条件启动、fail-closed 校验和时间估算通过 | 修复零长度 SWATH，再增加覆盖率、重叠率和可复现报告 |
+| Phase 8：Qt5 与覆盖规划 | 离线链基本实现，但 `execution-blocked` | 语义/Keepout、Coverage Server 适配、路径语义、fail-closed 校验、连接修复和时间估算通过 | 修复零长度 SWATH；补齐任务 manifest、覆盖质量指标和可复现报告 |
 
 项目契约与各 package 均提供离线回归；BUNKER 无 CAN 运行测试已验证默认禁用、手动优先、
 履带速度投影、输入超时归零、急停锁存和复位后保持禁用。当前 `mid360_map` 离线覆盖预览
@@ -189,6 +190,7 @@ ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:=/absolute/path/greenhouse_01.yaml \
   global_map_pcd:=/absolute/path/localization_map.pcd \
+  global_map_processing_record:=/absolute/path/localization_map.processing.yaml \
   semantic_map:=/absolute/path/semantic_map.geojson \
   coverage_params:=/absolute/path/coverage.yaml \
   start_semantic_map_server:=true \
@@ -308,6 +310,13 @@ NOTICE 机制；它也与当前全部 `agt_*` package 声明一致。但它不�
 - `agt_ui_bridge`
 - `agt_experiment_manager`
 - `agt_evaluation`
+
+自动重定位接口已在 `agt_interfaces` 生成：`LocalizationStatus.msg` 提供机器可解析状态，
+`Relocalize.action` 提供统一请求边界；`agt_localization` 已接入候选加载/展开、外部 coarse
+pose 校验、顺序配准、质量门禁、Action 编排和基础定位 supervisor。当前 supervisor 已提供
+低频只读 tracking 验证与 `DEGRADED/RECOVERING/LOST` 状态转换，但 PCD ready 元数据门禁、
+Nav2 lifecycle gate、内容 hash 绑定和实车验收仍按后续阶段进行；waypoint Action 与
+`agt_safety` 已增加基础定位有效门禁。
 
 ## 构建与验证
 
@@ -648,6 +657,7 @@ ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:="$MAP_DIR/greenhouse_01.yaml" \
   global_map_pcd:="$MAP_DIR/pcd/localization_map.pcd" \
+  global_map_processing_record:="$MAP_DIR/pcd/localization_map.processing.yaml" \
   record_bag:=true
 ```
 
@@ -662,6 +672,7 @@ ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:=/absolute/path/greenhouse_01.yaml \
   global_map_pcd:=/absolute/path/localization_map.pcd \
+  global_map_processing_record:=/absolute/path/localization_map.processing.yaml \
   semantic_map:=/absolute/path/semantic_map.geojson \
   coverage_params:=/absolute/path/coverage.yaml \
   start_semantic_map_server:=true \
@@ -729,6 +740,7 @@ ros2 launch agt_bringup system.launch.py \
   mode:=navigation \
   map:="$NAV_MAP" \
   global_map_pcd:="$GLOBAL_PCD" \
+  global_map_processing_record:="$GLOBAL_PCD_RECORD" \
   semantic_map:="$SEMANTIC_MAP" \
   coverage_params:="$COVERAGE_PARAMS" \
   platform_profile:="$PLATFORM_PROFILE" \

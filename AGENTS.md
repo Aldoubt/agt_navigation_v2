@@ -79,6 +79,13 @@
 - `ndt_num_threads` must be a positive integer. The validated Bunker baseline is `4`; zero and negative values must be rejected at the ROS parameter boundary and clamped defensively before reaching NDT-OMP.
 - NDT-OMP must never size per-thread work buffers from an unchecked thread count.
 - A successful field trial and low fitness score do not replace parameter-boundary regression tests or validation with the map PCD used for navigation.
+- The generated `agt_interfaces/msg/LocalizationStatus` and `agt_interfaces/action/Relocalize` are the machine-readable localization contract. The legacy string status topic remains human-facing compatibility only.
+- `has_converged` is backend convergence; `localization_accepted`/`pose_valid` require project quality validation and may not be inferred from fitness alone.
+- `/agt/localization/relocalize` is the only project relocalization Action boundary; `/initialpose` must be adapted into the same internal request path.
+- Baseline TF ownership remains unique: `agt_localization` publishes `map -> odom`, FAST-LIVO2 adapter publishes `odom -> base_footprint`, and description publishes robot/sensor frames.
+- The localization supervisor owns structured `TRACKING/DEGRADED/RECOVERING/LOST` transitions. Low-frequency tracking validation may publish status but must not rewrite `map -> odom`; a lost state waits for an explicit recovery request.
+- Startup automatic relocalization, when explicitly enabled, may send only one bounded project Action request. It must not publish velocity, enable motion, bypass Nav2/safety, or retry without a new explicit recovery request.
+- `agt_navigation` must reject waypoint Actions without a fresh accepted `LocalizationStatus`; `agt_safety` must independently fail-closed for navigation input while preserving manual priority.
 
 ## Realtime Traversability Resource Contract
 - `bunker_realtime_traversability_provisional.yaml` is a non-running design candidate until a bounded runtime node, diagnostics, persistence, and bag regression exist; it must remain disabled by default.
@@ -137,6 +144,7 @@
 - LIO-only Bunker mapping must build the navigation PCD incrementally with sparse signed 64-bit voxel keys; it must not retain the complete raw accumulated cloud merely to downsample at shutdown.
 - Non-finite points and finite points outside the configured absolute coordinate bound must be rejected before voxel insertion, and the saved processing record must report both rejection counts and observed bounds.
 - A navigation PCD is ready only when `localization_map.processing.yaml` reports `state: ready`; legacy raw/downsampled files that are byte-identical or produced after PCL grid-index overflow are not valid localization inputs.
+- Localization computes the active PCD `map_hash` as `sha256:<64 lowercase hexadecimal characters>` before loading candidates or persisting last pose. A processing record's optional `pcd_sha256` (or compatibility `map_hash`) must match the file when present; missing hashes are legacy metadata and must remain visible as unverified.
 - x86 FAST-LIVO builds that exchange Eigen-aligned point storage with distribution PCL binaries must preserve the distribution's 16-byte alignment ABI; native AVX alignment flags are forbidden unless PCL is rebuilt with the same ABI.
 
 ## Coverage Path Validation Contract
