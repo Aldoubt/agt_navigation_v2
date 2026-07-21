@@ -1,0 +1,39 @@
+/**:
+  ros__parameters:
+    # Design candidate only. No runtime node consumes this file yet.
+    enabled: false
+    configuration_status: provisional_not_runtime_connected
+
+    # Geometry and bounded live display window.
+    resolution: 0.05
+    local_window_width: 10.0
+    local_window_height: 10.0
+
+    # Static-evidence qualification and expiry. Immediate collision avoidance
+    # must continue to use the un-delayed Nav2 local obstacle layer.
+    temporal_window: 2.0
+    minimum_observations: 3
+    minimum_static_span: 0.5
+    cell_stale_timeout: 3.0
+
+    # Sparse global storage. A 256-cell tile spans 12.8 m at 0.05 m/cell.
+    # Finalized tiles must be persisted before eviction.
+    tile_size_cells: 256
+    max_active_tiles: 64
+    max_active_cells: 2000000
+    memory_budget_mib: 256
+
+    # Current offline RANSAC baseline, retained for the first live benchmark.
+    ground_distance: 0.08
+    ground_maximum_slope_degrees: 20.0
+    ground_max_samples: 1500
+    ground_ransac_iterations: 32
+
+    # Full-grid publication is deliberately slower than internal updates.
+    map_update_frequency: 5.0
+    full_map_publish_frequency: 1.0
+
+    # A resource-limit breach is an explicit degraded state, never permission
+    # to silently discard an unpersisted tile or bypass the local obstacle map.
+    persist_before_evict: true
+    fail_closed_on_persistence_error: true

@@ -123,6 +123,33 @@ canonical footprint 扫掠。
 MID360、支架和线束组成的整车最高点尚未实测，因此 `0.65 m` 只是对比阈值，不能据此
 放行真实导航。
 
+## 有界实时化候选参数
+
+[`config/bunker_realtime_traversability_provisional.yaml`](config/bunker_realtime_traversability_provisional.yaml)
+保存第一轮实时化基准，但当前没有节点消费它，`enabled=false` 且状态固定为
+`provisional_not_runtime_connected`。它不能通过修改 launch 参数变成可执行地图链。
+
+- `temporal_window` 是每个活动栅格保留观测证据的时间窗；超过窗口的旧证据不再参与当前
+  静态判断。
+- `cell_stale_timeout` 是最后一次观测后允许栅格继续驻留的时间；到期后可以从活动内存中
+  清除，但已经接受为全局静态证据的 tile 必须先持久化。
+- `max_active_cells` 限制活动稀疏单元总量，`max_active_tiles` 限制同时驻留的全局分块数量，
+  `memory_budget_mib` 是进程软预算；三者任一触发都必须产生可诊断的降级状态。
+- `tile_size_cells=256` 在 `0.05 m` 分辨率下对应 `12.8×12.8 m`。活动 tile 可按距机器人
+  远近和最近访问时间淘汰，但只有已成功原子落盘的 tile 才能被淘汰。
+- `10×10 m` 局部窗口覆盖当前约 `5 m` 射线清除范围；完整栅格只按 `1 Hz` 发布，内部证据
+  可按 `5 Hz` 更新，避免 Qt/RViz 重复传输整幅大图。
+
+候选时间参数以 MID360 `10 Hz` 为前提：三次观测的理论最短跨度只有 `0.2 s`，当前仍要求
+至少 `0.5 s`，并保留 `2 s` 证据窗口。它只服务于静态地图判断；Nav2 local costmap 必须
+继续无延迟消费当前障碍点，不能等待时序静态确认。正式节点应使用紧凑数组/分块结构，禁止
+照搬离线 Python 字典，并在独立 bag 上测量峰值 RSS、积压、落盘延迟和地图差异后才能启用。
+
+RANSAC 的 `0.08 m` 是点到候选地面平面的固定残差阈值，不随 URDF 外参自动缩放。每帧拟合
+的平面会随正确变换后的点云改变，但外参修正后仍须重新扫描距离阈值、坡度、障碍最低高度，
+并用独立数据验证。`base_link -> lidar_link` 车体外参与 FAST-LIVO2 的 LiDAR/内置 IMU 外参
+是两个标定问题，不得用一套结果静默覆盖另一套。
+
 ## 后续后端
 
 - 几何地面分割与可通行性栅格。

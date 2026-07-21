@@ -212,6 +212,9 @@ agt_navigation_v2/
 ├── third_party/
 ├── tools/
 ├── AGENTS.md
+├── LICENSE
+├── NOTICE
+├── THIRD_PARTY_NOTICES.md
 ├── nav_dependencies.repos
 └── README.md
 ```
@@ -220,6 +223,73 @@ FAST-LIVO 和它所需的 Vikit 已按固定提交 vendor 在 `third_party/`，�
 不依赖旧工作区 overlay。覆盖规划外部依赖仍由 [`nav_dependencies.repos`](nav_dependencies.repos) 固定到 commit，必须在
 独立工作区导入和构建。TASK-08 的系统依赖、`vcs import`、rosdep、最小构建及版本核验流程见
 [`docs/development/coverage_dependencies.md`](docs/development/coverage_dependencies.md)。
+
+## 第三方项目与致谢
+
+本项目建立在机器人与开源社区长期积累之上。感谢以下项目的作者、维护者和贡献者公开算法、
+驱动、工具与文档，使本仓库能够专注于 BUNKER 平台集成、接口收敛、安全链和农业任务实验。
+列出项目表示致谢与来源说明，不表示原作者为本项目提供商业背书、质量保证或实车安全认证。
+
+| 项目 | 本仓库中的用途 | 当前许可证线索与致谢 |
+| --- | --- | --- |
+| [ROS 2](https://github.com/ros2) 与 [Navigation2](https://github.com/ros-navigation/navigation2) | 通信、中间件、TF、Action、定位导航与 costmap 基础设施 | 感谢 Open Robotics、Nav2 维护者及社区；各 ROS package 许可证以其发行文件为准 |
+| [FAST-LIVO2](https://github.com/hku-mars/FAST-LIVO2) 与 [SuperLDG ROS 2 port](https://github.com/SuperLDG/FAST-LIVO2) | MID360 LiDAR-IMU(-Vision) 里程计和三维建图 | 感谢 HKU MARS Lab、Chunran Zheng 及 ROS 2 移植贡献者；本地快照为 `GPL-2.0-only` |
+| [rpg_vikit](https://github.com/uzh-rpg/rpg_vikit) 及 [ROS 2 fisheye lineage](https://github.com/Rhymer-Lcy/rpg_vikit_ros2_fisheye) | FAST-LIVO2 相机模型、几何和插值依赖 | 感谢 UZH RPG、Chunran Zheng、integralrobotics、Rhymer-Lcy 等维护者；本地 manifests 标为 `GPLv3`，但固定上游提交缺少独立 LICENSE 文本 |
+| [Livox ROS Driver 2](https://github.com/Livox-SDK/livox_ros_driver2) | MID360 驱动、CustomMsg 与 IMU 数据入口 | 感谢 Livox SDK 团队；本地许可证为 MIT，Livox-SDK2 和固件仍须分别核对 |
+| [BUNKER ROS 2](https://github.com/agilexrobotics/bunker_ros2) 与 [ugv_sdk](https://github.com/westonrobot/ugv_sdk) | BUNKER CAN 协议、底盘状态和命令适配 | 感谢 AgileX Robotics、Weston Robot 与 Ruixiang Du；本地顶层 LICENSE 为 Apache-2.0，但部分 package metadata 写 BSD，发布前必须澄清 |
+| [ndt_omp](https://github.com/koide3/ndt_omp) | OpenMP NDT/GICP 重定位后端 | 感谢 Kenji Koide、PCL、Willow Garage 与 Open Perception 贡献者；本地许可证为 BSD-2-Clause |
+| [ROS Qt5 GUI App](https://github.com/chengyangkj/Ros_Qt5_Gui_App) | 地图显示、编辑、重定位和多点任务前端基础 | 感谢 chengyangkj 及贡献者；维护版源码仍受 GPL-2.0 约束 |
+| [Open Navigation Coverage](https://github.com/open-navigation/opennav_coverage) | Coverage Server、消息与行覆盖适配 | 感谢 Open Navigation 维护者；外部固定依赖为 Apache-2.0 |
+| [Fields2Cover](https://github.com/Fields2Cover/Fields2Cover) | 农业区域分解、作业行与覆盖路径算法 | 感谢 Fields2Cover 作者与贡献者；核心为 BSD-3-Clause，固定传递依赖另含 Apache-2.0、MIT 等许可证 |
+| [OctoMap](https://github.com/OctoMap/octomap)、[PCL](https://github.com/PointCloudLibrary/pcl)、[Eigen](https://gitlab.com/libeigen/eigen)、[OpenCV](https://github.com/opencv/opencv)、[Qt](https://www.qt.io/) 与 [Shapely](https://github.com/shapely/shapely) | 地图、点云、线性代数、图像、GUI 与语义几何 | 感谢各基金会、实验室和社区；具体模块、二进制包和传递依赖必须以实际发布版本的许可证为准 |
+
+`third_party/` 中的版权声明和许可证必须原样保留；外部工作区依赖由
+[`nav_dependencies.repos`](nav_dependencies.repos) 固定版本。本表不是完整 SBOM，也不能替代每次
+产品发布时基于实际二进制、容器、固件、模型权重和安装包生成的许可证清单。
+
+## 许可证与商用边界
+
+项目自有材料现通过根 [`LICENSE`](LICENSE) 与 [`NOTICE`](NOTICE) 采用
+**Apache License 2.0**；全部 `src/agt_*` package 的 metadata 也声明 `Apache-2.0`。仓库仍是
+多许可证集合：根许可证明确不覆盖 `third_party/`、外部依赖工作区、生成物、runtime 数据集、
+地图、模型权重、固件和其他另行标注文件。主要来源、许可证线索和发布阻断项集中记录在
+[`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。贡献代码前仍应确认个人、公司或学校的
+代码版权归属和贡献授权。
+
+Apache-2.0 适合本项目自有模块的原因是允许商业使用、修改和再发布，并包含明确的专利许可与
+NOTICE 机制；它也与当前全部 `agt_*` package 声明一致。但它不能消除第三方 copyleft 义务。
+商用需要区分“内部使用”和“向客户交付机器人、镜像或二进制”：GPL 软件允许收费和商业使用，
+但向客户交付时通常必须同时满足相应版本的完整对应源码、构建脚本、许可证和再分发权要求。
+
+当前发布前的主要阻断项：
+
+1. `fast_livo2_ros2` 标记为 `GPL-2.0-only`，其同一构建产物所需 Vikit packages 标记为
+   `GPLv3`。GPLv2-only 与 GPLv3 不能当然合并为一个可分发程序；必须从版权所有者取得兼容
+   授权/版本声明，或替换其中一个依赖。仅在 README 写致谢不能解决兼容问题。
+2. 维护版 `ros_qt5_gui_app` 为 GPL-2.0。向客户交付修改后的 GUI 二进制时，不能只交付闭源
+   二进制；若希望闭源，应取得上游商业/例外授权或替换前端。它作为独立 ROS 进程并不自动
+   让所有项目进程都变成 GPL，但具体进程边界和打包方式仍需法律评审。
+3. Vikit 固定快照缺少独立 LICENSE/COPYING 文件，只有 package manifests 的 `GPLv3` 声明；
+   BUNKER/ugv_sdk 的顶层 LICENSE 与 package metadata 也不完全一致。这些来源和版本必须在
+   商业发布前向上游确认并归档。
+4. Qt Community Edition 的具体模块可能适用 LGPL/GPL。当前 GUI 动态链接 Qt5 Widgets、
+   Concurrent、Svg；发布设备必须核对实际 Qt 包许可、提供通知和对应源码/替换能力，或采购
+   合适的 Qt 商业许可证。购买 Qt 商业许可也不会自动解决 Qt GUI 自身的 GPL-2.0 上游代码。
+5. 地图、bag、相机图像、语义标注、未来本地 LLM 权重与训练数据都有独立的数据权利、隐私、
+   商标或模型许可证风险；硬件安全、产品责任、无线/网络安全和行业合规也不由开源许可证覆盖。
+
+推荐的商业化结构是保持 `agt_*` 自有模块为 Apache-2.0，把不同许可证的第三方程序作为边界
+清晰、可替换、通过 ROS topic/service/action 通信的组件；对必须交付的 GPL 组件按许可证完整
+提供对应源码和修改记录，对希望闭源的 GPL 组件则取得商业授权或替换。发布前至少应完成：
+
+- 固定所有源码、二进制、系统包、容器和固件版本，生成 SBOM；
+- 为每个交付物建立源码对应关系、许可证/NOTICE 集合和修改补丁记录；
+- 清除构建目录中未固定的 FetchContent 依赖，并复核 Qt、PCL、OpenCV 等传递组件；
+- 解决 FAST-LIVO2/Vikit 版本兼容与 Vikit 许可证文本缺失；
+- 让熟悉开源软件和机器人产品责任的律师审阅最终打包方式与客户合同。
+
+以上是基于当前仓库文件的工程合规盘点，不是正式法律意见。商用可以进行，但在上述 GPL
+兼容和来源问题解决前，不建议把当前完整系统镜像或整仓二进制直接交付客户。
 
 ## 核心功能包
 - `agt_interfaces`

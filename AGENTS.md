@@ -80,6 +80,12 @@
 - NDT-OMP must never size per-thread work buffers from an unchecked thread count.
 - A successful field trial and low fitness score do not replace parameter-boundary regression tests or validation with the map PCD used for navigation.
 
+## Realtime Traversability Resource Contract
+- `bunker_realtime_traversability_provisional.yaml` is a non-running design candidate until a bounded runtime node, diagnostics, persistence, and bag regression exist; it must remain disabled by default.
+- Temporal static evidence must never delay or replace the immediate Nav2 local obstacle layer.
+- Active cells, active tiles, and process memory must have positive finite limits. A tile may be evicted only after successful persistence; persistence failure is fail-closed and diagnostic.
+- Ground residual thresholds do not automatically follow URDF extrinsic changes. Recalibration requires threshold revalidation on an independent bag.
+
 ## Static Navigation Map Contract
 - Offline obstacle completion must preserve a ray-traced free/unknown baseline and add only repeatable registered-cloud obstacle evidence; a raw point projection must not silently turn unknown space into free space.
 - Registered-cloud height filtering is relative to a timestamp-matched/interpolated recorded base pose, and must reject non-finite points and canonical polygon-footprint self returns before grid accumulation. Callback-time latest pose is forbidden for offline evidence.

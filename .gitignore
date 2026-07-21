@@ -10,6 +10,10 @@ runtime/logs/
 runtime/results/
 runtime/cache/
 runtime/gui/
+runtime/evaluation/*.log
+runtime/evaluation/*.asan.*
+runtime/evaluation/*.pids
+runtime/evaluation/*.time
 
 # Local map-production assets (keep small records, matrices, and READMEs trackable)
 runtime/*.pcd

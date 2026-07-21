@@ -20,6 +20,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_static_obstacle_evidence test/test_static_obstacle_evidence.py
   )
+  ament_add_pytest_test(
+    test_realtime_traversability_config
+    test/test_realtime_traversability_config.py
+  )
 endif()
 
 ament_package()
