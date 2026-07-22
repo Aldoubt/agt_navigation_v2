@@ -4,7 +4,8 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import LaunchConfiguration
+import yaml
 
 
 RECORDED_TOPICS = [
@@ -77,34 +78,56 @@ def prepare_output(context):
     return []
 
 
+def make_record_process(context):
+    config_path = Path(LaunchConfiguration("profiles_file").perform(context)).expanduser()
+    profile_id = LaunchConfiguration("bag_profile").perform(context)
+    if not config_path.is_file():
+        raise RuntimeError(f"bag profiles file does not exist: {config_path}")
+    with open(config_path, "r", encoding="utf-8") as stream:
+        config = yaml.safe_load(stream) or {}
+    profile = (config.get("profiles") or {}).get(profile_id)
+    if not isinstance(profile, dict) or not isinstance(profile.get("topics"), list):
+        raise RuntimeError(f"unknown or malformed bag profile: {profile_id}")
+    topics = profile["topics"]
+    if not topics or any(not isinstance(topic, str) or not topic.startswith("/") for topic in topics):
+        raise RuntimeError(f"bag profile {profile_id} must contain explicit ROS topic names")
+    runtime_dir = LaunchConfiguration("runtime_dir").perform(context)
+    bag_name = LaunchConfiguration("bag_name").perform(context)
+    return [
+        ExecuteProcess(
+            cmd=[
+                "ros2",
+                "bag",
+                "record",
+                "--storage",
+                "sqlite3",
+                "--output",
+                str(Path(runtime_dir) / "rosbag" / bag_name),
+                *topics,
+            ],
+            output="screen",
+            sigterm_timeout="30",
+            sigkill_timeout="10",
+        )
+    ]
+
+
 def generate_launch_description():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     return LaunchDescription(
         [
             DeclareLaunchArgument("runtime_dir", default_value=default_runtime_dir()),
             DeclareLaunchArgument("bag_name", default_value=f"agt_system_{timestamp}"),
-            OpaqueFunction(function=prepare_output),
-            ExecuteProcess(
-                cmd=[
-                    "ros2",
-                    "bag",
-                    "record",
-                    "--storage",
-                    "sqlite3",
-                    "--output",
-                    PathJoinSubstitution(
-                        [
-                            LaunchConfiguration("runtime_dir"),
-                            "rosbag",
-                            LaunchConfiguration("bag_name"),
-                        ]
-                    ),
-                    *RECORDED_TOPICS,
-                ],
-                output="screen",
-                # Large sqlite3 bags may need time to flush metadata after SIGINT.
-                sigterm_timeout="30",
-                sigkill_timeout="10",
+            DeclareLaunchArgument("bag_profile", default_value="full_experiment"),
+            DeclareLaunchArgument(
+                "profiles_file",
+                default_value=str(
+                    Path(get_package_share_directory("agt_experiment_manager"))
+                    / "config"
+                    / "bag_profiles.yaml"
+                ),
             ),
+            OpaqueFunction(function=prepare_output),
+            OpaqueFunction(function=make_record_process),
         ]
     )

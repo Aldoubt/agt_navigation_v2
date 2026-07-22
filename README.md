@@ -226,6 +226,33 @@ FAST-LIVO 和它所需的 Vikit 已按固定提交 vendor 在 `third_party/`，�
 独立工作区导入和构建。TASK-08 的系统依赖、`vcs import`、rosdep、最小构建及版本核验流程见
 [`docs/development/coverage_dependencies.md`](docs/development/coverage_dependencies.md)。
 
+## Web 实验与运维控制台
+
+当前仓库已新增可独立验证的 Web 运维链：`agt_system_manager` 发布配置驱动的
+`SystemHealth` 和共享 `TaskReadiness`，`agt_map_manager` 管理不可变地图版本，
+`agt_experiment_manager` 保存实验 manifest、事件、定位结果、bag profile 和报告，
+`agt_web_console` 提供默认只监听 `127.0.0.1` 的 FastAPI/WebSocket 适配层与轻量静态页面。
+这些模块不重写 FAST-LIVO2、定位、Nav2、Qt 或安全层，也不发布速度或 TF。
+
+先构建新增 ROSIDL 和包：
+
+```bash
+source /opt/ros/humble/setup.bash
+colcon build --packages-select agt_interfaces agt_system_manager agt_map_manager agt_experiment_manager agt_web_console --symlink-install
+source install/setup.bash
+```
+
+系统管理器复用现有 `agt_bringup` launch/profile：
+
+```bash
+ros2 launch agt_system_manager system_manager.launch.py \
+  active_mode:=IDLE runtime_dir:=/absolute/path/to/runtime
+```
+
+Web 运行依赖 FastAPI、Starlette 和 Uvicorn（基础 ROS 镜像未预装），启动参数和接口清单见
+[`docs/workflows/web_console.md`](docs/workflows/web_console.md)。没有这些依赖时，纯离线 service、
+地图注册、实验和健康测试仍可运行。
+
 ## 第三方项目与致谢
 
 本项目建立在机器人与开源社区长期积累之上。感谢以下项目的作者、维护者和贡献者公开算法、

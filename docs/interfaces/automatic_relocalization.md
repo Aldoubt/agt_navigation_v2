@@ -6,6 +6,10 @@ supervisor 已实现。低频 TRACKING 验证不改写 `map -> odom`；PCD proce
 内容 hash 的读取、候选身份绑定和 processing-record 校验已接入；旧记录的 hash 写回以及完整
 的短期运动一致性验证仍按后续阶段实现。
 
+运维控制器的 `/agt/localization/set_mode` 只选择有界 `MANUAL_ONLY`、`AUTO_ON_START` 或
+`AUTO_RECOVERY` policy；它复用下方唯一 `/agt/localization/relocalize` Action，不创建第二套
+候选或 TF 链。失败不会无限重试，详情见 [`localization_modes.md`](localization_modes.md)。
+
 导航可通过 `agt_bringup` 显式启用一次性自动 Action 客户端。该客户端只等待 Action Server、发送
 一个有界 `MODE_AUTO_SEARCH` 请求并报告结果，不发布速度、不使能安全层、不进行无限重试。默认
 关闭时，启动导航不会自动发起重定位，仍由 `/initialpose` 或显式 Action 请求触发。

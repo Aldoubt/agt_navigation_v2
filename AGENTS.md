@@ -202,3 +202,39 @@
 - Prefer small, reviewable changes.
 - Keep placeholders explicit so future migration tasks know what is still missing.
 - For each module, document inputs, outputs, TF responsibility, and non-goals.
+
+## Web Experiment and Operations Console Contract
+- `agt_system_manager`, `agt_map_manager`, `agt_experiment_manager`, and
+  `agt_web_console` remain separate ownership boundaries; do not move their
+  health, process, map, or experiment logic into `agt_ui_bridge`.
+- Web control may call only generated project ROS interfaces and configured
+  map/experiment services. It must never accept or execute arbitrary shell,
+  publish final `/cmd_vel`, publish TF, or bypass `agt_safety`.
+- `ChangeSystemMode` profiles are argv allowlists. Profile arguments are
+  validated against declared keys; browser input is never a command string.
+  Managed processes use their own process group and only processes created by
+  the manager may be stopped.
+- `SystemHealth` is evidence-based: topic discovery alone is not health.
+  Required message freshness, frequency, TF, nodes, lifecycle state, boolean
+  conditions, and disk space must be evaluated from the versioned contract.
+- `TaskReadiness` is the shared fail-closed gate. Waypoint and future task
+  servers must check it at goal acceptance and again during execution; a GUI
+  button is never an authorization boundary.
+- Runtime map versions are immutable bundles under
+  `runtime/maps/<map_id>/versions/<map_version_id>/`. `manifest.yaml` is the
+  portable source of truth; SQLite is rebuildable index data. Activation
+  requires a READY manifest, verified navigation assets, and a ready PCD
+  processing record with matching content identity.
+- Experiment state transitions and event/summary/report writes are atomic.
+  An interrupted RUNNING session becomes `INTERRUPTED`, never `COMPLETED`.
+  Rosbag profiles contain explicit topic lists and must not use `record -a`.
+- Relocalization modes are `MANUAL_ONLY`, `AUTO_ON_START`, and
+  `AUTO_RECOVERY`; every automatic request is bounded by attempts, cooldown,
+  candidate count, and total timeout. Localization remains the only
+  `map -> odom` owner.
+- The Web default listener is `127.0.0.1`; a non-loopback listener requires a
+  token. Log browsing is limited to manager-owned runtime roots.
+- Web `offline` mode is an explicit UI-test backend only. It may simulate
+  configured profile state and bounded relocalization feedback, but must never
+  start ROS processes, record bags, publish TF/velocity, or mark task readiness
+  executable. Backend switching requires all managed modules to be stopped.

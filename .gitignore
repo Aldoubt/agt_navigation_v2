@@ -28,6 +28,10 @@ runtime/map_projects/**/50_nav2/**/*.yaml
 # Python
 __pycache__/
 *.pyc
+.venv-web/
+
+# Local hardware/runtime configuration
+runtime/config/
 
 # Editors
 .vscode/

@@ -22,6 +22,9 @@ ros2 launch agt_bringup system.launch.py mode:=navigation \
 `navigation` 关闭 PCD 保存，启动 LIO 里程计、重定位、Nav2、安全层、底盘和 Qt5。
 两个模式均可设置 `record_bag:=true`，输出到 `runtime/rosbag/`。
 
+录包入口兼容原调用，并支持版本化 `bag_profile:=minimal|mapping|localization|navigation|full_experiment`。
+profile 只包含显式 topic 名称，不接受任意 rosbag 参数或 `record -a`。
+
 原导航默认保持语义与覆盖模块关闭。启动完整覆盖作业链前，先 source TASK-08 的外部依赖工作区：
 
 ```bash

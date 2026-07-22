@@ -1,0 +1,19 @@
+schema_version: 1
+required:
+  - schema_version
+  - map_id
+  - map_version_id
+  - state
+  - created_at
+  - frame_id
+  - assets
+states: [DRAFT, PROCESSING, READY, INVALID, ARCHIVED]
+version_id_pattern: '^map_[0-9]{8}_[0-9]{6}_[0-9a-fA-F]{8}$'
+assets:
+  navigation_yaml: navigation/map.yaml
+  navigation_pgm: navigation/map.pgm
+  localization_pcd: pointcloud/localization_map.pcd
+  processing_record: pointcloud/localization_map.processing.yaml
+identity:
+  pcd_hash_format: 'sha256:<64 lowercase hexadecimal characters>'
+  manifest_is_portable_source_of_truth: true

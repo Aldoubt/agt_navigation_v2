@@ -1,0 +1,33 @@
+schema_version: 1
+allowed_executables: [ros2, rviz2]
+profiles:
+  sensor_only:
+    mode: SENSOR_ONLY
+    description: MID360 sensor adapter only
+    command: [ros2, launch, agt_sensor_adapters, mid360.launch.py]
+    allowed_argument_keys: [config_file, use_sim_time]
+  mapping:
+    mode: MAPPING
+    description: Existing modular mapping chain through agt_bringup
+    command: [ros2, launch, agt_bringup, system.launch.py, mode:=mapping, start_system_health:=false]
+    allowed_argument_keys: [runtime_dir, map_name, start_sensor, start_chassis, start_rviz, start_mapping_gui, record_bag, use_sim_time]
+  navigation:
+    mode: NAVIGATION
+    description: Existing modular navigation chain through agt_bringup
+    command: [ros2, launch, agt_bringup, system.launch.py, mode:=navigation, start_system_health:=false]
+    allowed_argument_keys: [runtime_dir, map, global_map_pcd, global_map_processing_record, map_id, configured_candidates_yaml, last_valid_pose_path, start_sensor, start_chassis, start_gui, record_bag, auto_relocalize_on_start, use_sim_time]
+  qt_mapping:
+    mode: MAPPING_FRONTEND
+    description: Maintained Qt mapping profile
+    command: [ros2, launch, agt_ui_bridge, ros_qt5_gui.launch.py, profile:=mapping]
+    allowed_argument_keys: [map, source_map_topic, map_frame_id, use_sim_time]
+  qt_navigation:
+    mode: NAVIGATION_FRONTEND
+    description: Maintained Qt navigation profile
+    command: [ros2, launch, agt_ui_bridge, ros_qt5_gui.launch.py, profile:=navigation]
+    allowed_argument_keys: [map, source_map_topic, map_frame_id, use_sim_time]
+  localization_rviz:
+    mode: LOCALIZATION_FRONTEND
+    description: RViz debug frontend; it has no TF or command publisher
+    command: [rviz2]
+    allowed_argument_keys: []

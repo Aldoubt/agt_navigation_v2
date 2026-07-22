@@ -67,6 +67,18 @@ when present.
 
 完整 QoS、状态和事务规则见 [`semantic_map_server.md`](semantic_map_server.md)。
 
+## 系统管理器
+
+- `/agt/system/health`：`agt_interfaces/msg/SystemHealth`，周期结构化健康快照。
+- `/agt/system/task_readiness`：`agt_interfaces/msg/TaskReadiness`，共享 fail-closed 任务门禁。
+- `/agt/system/get_health`：`agt_interfaces/srv/GetSystemHealth`。
+- `/agt/system/evaluate_task_readiness`：`agt_interfaces/srv/EvaluateTaskReadiness`。
+- `/agt/system/change_mode`：`agt_interfaces/action/ChangeSystemMode`，只接受白名单 profile。
+- `/agt/localization/set_mode`：`agt_interfaces/srv/SetLocalizationMode`，有界重定位策略。
+
+Web、Qt bridge 和 Action server 都消费这些机器接口；不得解析旧
+`/agt/localization/status_text` 参与控制。
+
 ## 覆盖规划服务
 - `/agt/coverage/plan`: `std_srvs/srv/Trigger`，按当前语义任务发起一次异步规划
 - polygon action：`/agt/coverage/polygon/compute_coverage_path`

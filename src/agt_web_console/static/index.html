@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AGT 导航实验与运维控制台</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <strong>AGT 导航控制台</strong>
+      <span>实验、建图、定位与导航运维</span>
+    </div>
+    <div class="topbar-state">
+      <span id="connection" class="status unknown">未连接</span>
+      <span id="top-mode">模式：未知</span>
+      <span id="top-backend" class="status unknown">后端：未知</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="workflow panel">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">启动流程</p>
+          <h1>从系统检查到任务执行</h1>
+          <p class="muted">先在终端启动系统管理器，之后可以在这里按顺序启动传感器、建图、导航和重定位模块。</p>
+        </div>
+        <button id="refresh" class="secondary">刷新状态</button>
+      </div>
+      <div class="runtime-switcher">
+        <div>
+          <strong>运行后端</strong>
+          <span id="runtime-description" class="muted">正在读取运行后端</span>
+        </div>
+        <select id="runtime-backend" aria-label="运行后端">
+          <option value="ros">ROS 2 真实模式</option>
+          <option value="offline">离线测试模式</option>
+        </select>
+        <button id="switch-backend" class="secondary">切换后端</button>
+      </div>
+      <p id="runtime-warning" class="runtime-warning"></p>
+      <div id="workflow-steps" class="workflow-steps"></div>
+    </section>
+
+    <section class="summary-grid" id="overview-cards"></section>
+
+    <nav class="tabs" aria-label="控制台页面">
+      <button data-tab="overview" class="active">总览</button>
+      <button data-tab="control">系统流程</button>
+      <button data-tab="localization">重定位</button>
+      <button data-tab="maps">地图</button>
+      <button data-tab="tasks">任务门禁</button>
+      <button data-tab="experiments">实验</button>
+      <button data-tab="logs">日志</button>
+    </nav>
+
+    <section id="overview" class="panel tab-panel active">
+      <div class="panel-head"><div><p class="eyebrow">系统状态</p><h2>当前运行概况</h2></div><span id="overview-updated" class="muted"></span></div>
+      <div id="overview-detail" class="detail-grid"></div>
+    </section>
+
+    <section id="control" class="panel tab-panel">
+      <div class="panel-head"><div><p class="eyebrow">系统流程</p><h2>模块启动与停止</h2></div><button id="stop-mode" class="danger">停止受管理模块</button></div>
+      <div class="control-grid">
+        <div class="form-block">
+          <h3>选择启动模块</h3>
+          <label for="mode-profile">启动 profile</label>
+          <select id="mode-profile">
+            <option value="sensor_only">仅启动传感器</option>
+            <option value="mapping">建图模式</option>
+            <option value="navigation">导航模式</option>
+            <option value="qt_mapping">Qt 建图前端</option>
+            <option value="qt_navigation">Qt 导航前端</option>
+            <option value="localization_rviz">定位 RViz</option>
+          </select>
+          <button id="start-profile" class="primary">启动选定模块</button>
+          <p id="control-message" class="form-hint">模块命令来自白名单 profile，网页不会执行任意 shell 命令。</p>
+        </div>
+        <div class="form-block">
+          <h3>公共参数</h3>
+          <label for="runtime-dir">运行目录</label>
+          <input id="runtime-dir" value="runtime" placeholder="runtime">
+          <label for="map-name">建图名称</label>
+          <input id="map-name" value="mid360_map" placeholder="mid360_map">
+          <label for="map-id">地图 ID</label>
+          <input id="map-id" placeholder="greenhouse_01">
+        </div>
+      </div>
+      <div class="form-block navigation-params">
+        <h3>导航与定位参数</h3>
+        <p class="form-hint">启动导航时必须填写同源的二维地图、定位 PCD 和 processing record。</p>
+        <div class="form-grid">
+          <label>导航地图 YAML<input id="map-yaml" placeholder="/absolute/path/map.yaml"></label>
+          <label>定位 PCD<input id="map-pcd" placeholder="/absolute/path/localization_map.pcd"></label>
+          <label>PCD processing record<input id="map-record" placeholder="/absolute/path/localization_map.processing.yaml"></label>
+          <label>候选位姿 YAML（可选）<input id="candidate-yaml" placeholder="/absolute/path/candidates.yaml"></label>
+          <label>最近有效位姿（可选）<input id="last-pose" placeholder="/absolute/path/last_pose.yaml"></label>
+          <label>使用仿真时间
+            <select id="use-sim-time"><option value="false">否</option><option value="true">是</option></select>
+          </label>
+          <label>启动 Qt 导航界面
+            <select id="start-gui"><option value="true">是</option><option value="false">否</option></select>
+          </label>
+          <label>启动时自动重定位
+            <select id="auto-relocalize"><option value="false">否</option><option value="true">是</option></select>
+          </label>
+        </div>
+      </div>
+      <div class="process-panel"><h3>受管理进程</h3><pre id="process-state">暂无受管理进程</pre></div>
+    </section>
+
+    <section id="localization" class="panel tab-panel">
+      <div class="panel-head"><div><p class="eyebrow">定位恢复</p><h2>重定位控制</h2></div><span class="guard-note">只调用项目 Relocalize Action，不发布 TF 或速度</span></div>
+      <div class="control-grid">
+        <div class="form-block">
+          <h3>运行模式</h3>
+          <label for="localization-mode">自动重定位策略</label>
+          <select id="localization-mode">
+            <option value="MANUAL_ONLY">仅手动</option>
+            <option value="AUTO_ON_START">启动时自动一次</option>
+            <option value="AUTO_RECOVERY">故障后自动恢复</option>
+          </select>
+          <label for="relocalize-action-mode">本次执行方式</label>
+          <select id="relocalize-action-mode">
+            <option value="AUTO_SEARCH">自动搜索候选位姿</option>
+            <option value="LOCAL_CANDIDATES">仅使用本地候选位姿</option>
+            <option value="EXTERNAL_COARSE_POSE">使用外部粗定位结果</option>
+          </select>
+          <div class="form-grid compact">
+            <label>最大候选数<input id="relocalize-max-candidates" type="number" min="1" max="512" value="128"></label>
+            <label>总超时（秒）<input id="relocalize-timeout" type="number" min="1" max="300" value="30"></label>
+          </div>
+          <button id="set-localization-mode" class="secondary">保存重定位模式</button>
+          <button id="run-relocalization" class="primary">立即执行一次重定位</button>
+          <p id="localization-message" class="form-hint">自动请求受最大候选数、尝试次数和总超时限制。</p>
+        </div>
+        <div class="form-block">
+          <h3>结构化定位状态</h3>
+          <div id="localization-metrics" class="metrics-grid"></div>
+        </div>
+      </div>
+      <div class="process-panel"><h3>最近一次重定位结果</h3><pre id="relocalization-result">尚未执行网页端重定位。</pre></div>
+    </section>
+
+    <section id="maps" class="panel tab-panel">
+      <div class="panel-head"><div><p class="eyebrow">地图版本</p><h2>地图版本管理</h2></div><span><button id="new-map-import">导入旧地图</button><button id="reload-maps" class="secondary">刷新列表</button></span></div>
+      <div class="form-hint">只激活 READY 且 hash 校验通过的不可变版本。激活地图后再启动导航。</div>
+      <div id="map-list" class="list"></div>
+    </section>
+
+    <section id="tasks" class="panel tab-panel">
+      <div class="panel-head"><div><p class="eyebrow">执行许可</p><h2>任务执行门禁</h2></div></div>
+      <div id="task-readiness" class="readiness"></div>
+      <p class="muted">网页只显示门禁状态。任务仍由项目 Action、Nav2 和 agt_safety 负责执行与拒绝。</p>
+    </section>
+
+    <section id="experiments" class="panel tab-panel">
+      <div class="panel-head"><div><p class="eyebrow">实验记录</p><h2>实验会话</h2></div><button id="new-experiment" class="primary">新建实验</button></div>
+      <div id="experiment-list" class="list"></div>
+    </section>
+
+    <section id="logs" class="panel tab-panel">
+      <div class="panel-head"><div><p class="eyebrow">运行记录</p><h2>受管理日志</h2></div><span><select id="log-component"><option value="system_manager">系统管理器</option><option value="web_console">Web 控制台</option><option value="experiments">实验会话</option></select><button id="reload-logs" class="secondary">刷新日志</button></span></div>
+      <div id="log-list" class="list"></div>
+    </section>
+  </main>
+  <div id="toast" class="toast" role="status"></div>
+  <script src="app.js"></script>
+</body>
+</html>

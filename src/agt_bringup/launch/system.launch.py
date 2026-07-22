@@ -9,9 +9,10 @@ from launch.actions import (
     LogInfo,
     OpaqueFunction,
 )
-from launch.conditions import LaunchConfigurationEquals
+from launch.conditions import IfCondition, LaunchConfigurationEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 
 
 def bringup_launch(name):
@@ -113,6 +114,9 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument("start_system_health", default_value="true"),
+            DeclareLaunchArgument("health_contract", default_value=str(Path(get_package_share_directory("agt_system_manager")) / "config" / "health_contracts.yaml")),
+            DeclareLaunchArgument("active_map_pointer", default_value=""),
             DeclareLaunchArgument("start_sensor", default_value="true"),
             DeclareLaunchArgument("start_chassis", default_value="true"),
             DeclareLaunchArgument(
@@ -164,6 +168,20 @@ def generate_launch_description():
             ),
             OpaqueFunction(function=validate_mode_arguments),
             LogInfo(msg=["AGT system mode: ", LaunchConfiguration("mode")]),
+            Node(
+                package="agt_system_manager",
+                executable="system_health_node.py",
+                name="agt_system_manager_health",
+                output="screen",
+                parameters=[{
+                    "active_mode": LaunchConfiguration("mode"),
+                    "runtime_dir": LaunchConfiguration("runtime_dir"),
+                    "active_map_pointer": LaunchConfiguration("active_map_pointer"),
+                    "health_contract": LaunchConfiguration("health_contract"),
+                    "task_valid": True,
+                }],
+                condition=IfCondition(LaunchConfiguration("start_system_health")),
+            ),
             IncludeLaunchDescription(
                 bringup_launch("mapping_mode.launch.py"),
                 launch_arguments={

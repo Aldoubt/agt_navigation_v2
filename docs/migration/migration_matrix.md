@@ -1,6 +1,6 @@
 # 迁移矩阵
 
-更新时间：2026-07-21。
+更新时间：2026-07-22。
 
 状态按“代码迁移、离线验证、数据回放、实机验收”分级记录。测试数量随模块增长，以提交时
 测试报告为准；离线通过不代表定位精度、导航性能或实车安全验收通过。
@@ -21,7 +21,10 @@
 | `agt_safety` | 6 | baseline 与基础 localization guard 完成 | BUNKER 履带仲裁、手动优先、导航定位失效 fail-closed、限速、输入超时、急停锁存和复位保持禁用的回归通过；手动输入不被定位 guard 抢占 | 架空履带验证方向和急停，再完成低速制动距离、进程退出和通信中断验收 |
 | `agt_chassis` | 6 | baseline 完成 | 官方 `bunker_ros2`、状态桥接、TF 隔离和双层命令 watchdog 已接入并离线构建 | CAN 实机验证协议版本、轮速里程计、错误码、方向、断连归零和长时间通讯稳定性 |
 | `agt_ui_bridge` | 6/8 | mapping/navigation/offline 三 profile 能力隔离；维护版 Qt 接入 | navigation 调用项目多点 Action，offline 仅允许路径预览，mapping 禁止任务；导航点两次点击；Task 绑定当前行并随拓扑刷新；离线平移/缩放解除机器人跟随；默认中文、设置页完整双语且可持久切换英文；大地图默认禁用全量 costmap 渲染；MapGeometry 显式校验 P2/P5/PNG | 用昨日大地图验证多段预览、交互帧率和中英文设置页；实车验证两点 yaw 与 navigation Action；后续前端只消费项目 Actions |
-| `agt_experiment_manager` | 7 | 仅骨架 | package、profile 和 runtime 目录边界已建立 | 实现配置合并、Git/参数快照、产物命名、失败恢复和一键复现实验 |
+| `agt_system_manager` | 1/2/4/6 | P0/P1/P2/P6 离线完成 | `SystemHealth`/`TaskReadiness` ROSIDL、健康合同、频率/新鲜度/TF/lifecycle/条件 evaluator、白名单进程组、模式 Action 和有界重定位策略通过；ROS adapter 已接入结构化 topic；无硬件 smoke publisher 覆盖传感器、底盘、安全、定位、栅格、TF 和 fake lifecycle | 用真实 active-map、Nav2 lifecycle 和硬件执行 graph smoke；完成实机长期健康/进程回收验收 |
+| `agt_map_manager` | 7 | P3 离线完成 | manifest source of truth、SQLite scan rebuild、PGM/YAML/PCD processing record/hash 校验、原子 active pointer、pin/archive/trash/retention 通过 | 为已有 legacy runtime maps 编写显式导入工具并在真实地图上审计资产 |
+| `agt_experiment_manager` | 7 | P4 离线完成 | 原子 session manifest、events/localization JSONL、health snapshots、异常恢复、显式 bag profiles、Web bag start/stop、summary/report 通过 | 接入完整健康/导航事件和真实 rosbag 长包后生成统一报告 |
+| `agt_web_console` | 7/8 | P5/P6/P8 离线完成，FastAPI runtime optional | REST/WebSocket 路由、loopback/token 边界、审计事件、受限日志根、中文总控台、ROS/离线后端切换、白名单 profile 流程和模拟重定位入口完成；ROS bridge 只调用项目 Action/SRV；离线后端不启动 ROS/录包/发 TF 或速度且任务门禁始终关闭 | 在目标镜像安装 FastAPI/Starlette/Uvicorn 后做真实 localhost smoke；用真实地图、传感器、底盘和安全链做硬件验收 |
 | `agt_evaluation` | 7 | 仅骨架 | package 和指标职责边界已建立 | 实现轨迹、重定位、导航、地图质量和资源占用指标，并生成可复现报告 |
 
 阶段 A-E 记录（2026-07-21）：`agt_interfaces` 已新增并生成 `LocalizationStatus.msg` 与

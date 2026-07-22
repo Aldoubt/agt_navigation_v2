@@ -1,0 +1,132 @@
+schema_version: 1
+health:
+  period_sec: 1.0
+  components:
+    - component_id: mid360_pointcloud
+      display_name: MID360 point cloud
+      required_in_modes: [SENSOR_ONLY, MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      required_topics:
+        - name: /agt/sensors/lidar/points
+          expected_message_type: sensor_msgs/msg/PointCloud2
+          min_rate_hz: 5.0
+          max_age_sec: 1.0
+    - component_id: imu
+      display_name: MID360 IMU
+      required_in_modes: [SENSOR_ONLY, MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      required_topics:
+        - name: /agt/sensors/imu/data
+          expected_message_type: sensor_msgs/msg/Imu
+          min_rate_hz: 50.0
+          max_age_sec: 0.5
+    - component_id: fast_livo_odometry
+      display_name: FAST-LIVO2 odometry
+      required_in_modes: [MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      required_topics:
+        - name: /agt/mapping/odometry
+          expected_message_type: nav_msgs/msg/Odometry
+          min_rate_hz: 5.0
+          max_age_sec: 1.0
+      required_frames: [odom->base_footprint]
+    - component_id: registered_cloud
+      display_name: Registered point cloud
+      required_in_modes: [MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      required_topics:
+        - name: /agt/mapping/registered_points_lidar
+          expected_message_type: sensor_msgs/msg/PointCloud2
+          min_rate_hz: 1.0
+          max_age_sec: 2.0
+    - component_id: localization_tf
+      display_name: Localization TF chain
+      required_in_modes: [LOCALIZATION_DEBUG, NAVIGATION]
+      required_frames: [map->odom, odom->base_footprint, base_link->lidar_link]
+    - component_id: chassis
+      display_name: BUNKER chassis
+      required_in_modes: [MAPPING, NAVIGATION]
+      required_topics:
+        - name: /agt/chassis/connected
+          expected_message_type: std_msgs/msg/Bool
+          max_age_sec: 1.0
+        - name: /agt/chassis/odometry
+          expected_message_type: nav_msgs/msg/Odometry
+          min_rate_hz: 5.0
+          max_age_sec: 1.0
+        - name: /agt/chassis/status
+          expected_message_type: diagnostic_msgs/msg/DiagnosticArray
+          max_age_sec: 1.0
+    - component_id: safety
+      display_name: agt_safety
+      required_in_modes: [NAVIGATION]
+      required_topics:
+        - name: /agt/safety/status
+          expected_message_type: diagnostic_msgs/msg/DiagnosticArray
+          min_rate_hz: 2.0
+          max_age_sec: 1.0
+        - name: /agt/safety/emergency_stop
+          expected_message_type: std_msgs/msg/Bool
+          max_age_sec: 1.0
+      conditions:
+        - name: safety.motion_enabled
+          expected: true
+          severity: ERROR
+        - name: safety.emergency_stop_clear
+          expected: true
+          severity: ERROR
+    - component_id: localization
+      display_name: Structured localization
+      required_in_modes: [LOCALIZATION_DEBUG, NAVIGATION]
+      required_topics:
+        - name: /agt/localization/status
+          expected_message_type: agt_interfaces/msg/LocalizationStatus
+          max_age_sec: 1.0
+      required_nodes: [agt_relocalization]
+    - component_id: nav2
+      display_name: Nav2 lifecycle
+      required_in_modes: [NAVIGATION]
+      required_nodes: [map_server, planner_server, controller_server, bt_navigator, waypoint_follower]
+      required_lifecycle_states:
+        map_server: active
+        planner_server: active
+        controller_server: active
+        bt_navigator: active
+        waypoint_follower: active
+    - component_id: map_and_costmap
+      display_name: Navigation map and costmap
+      required_in_modes: [NAVIGATION]
+      required_topics:
+        - name: /agt/map/global_occupancy
+          expected_message_type: nav_msgs/msg/OccupancyGrid
+          max_age_sec: 2.0
+        - name: /global_costmap/costmap
+          expected_message_type: nav_msgs/msg/OccupancyGrid
+          max_age_sec: 2.0
+    - component_id: disk
+      display_name: Runtime disk
+      required_in_modes: [SENSOR_ONLY, MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      conditions:
+        - name: disk.free_space_ok
+          expected: true
+          severity: ERROR
+    - component_id: web_console
+      display_name: Web console
+      required_in_modes: [SENSOR_ONLY, MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      optional: true
+      conditions:
+        - name: web.process_alive
+          expected: true
+          severity: WARN
+    - component_id: qt_or_rviz
+      display_name: Operator frontend
+      required_in_modes: [MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      optional: true
+      conditions:
+        - name: frontend.process_alive
+          expected: true
+          severity: WARN
+    - component_id: rosbag
+      display_name: Experiment recorder
+      required_in_modes: [MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      optional: true
+      conditions:
+        - name: rosbag.process_alive
+          expected: true
+          severity: WARN
