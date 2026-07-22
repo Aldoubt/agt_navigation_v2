@@ -43,6 +43,20 @@ ros2 run agt_web_console web_console.py \
 切换前必须先点击“停止受管理模块”。离线模式的“任务门禁”始终禁止执行，
 离线重定位结果会明确标记为模拟结果，不能用于判断真实 PCD 定位精度。
 
+局域网访问时，把配置中的 `host` 改为 `0.0.0.0`，并设置非空的随机
+`token`；Web 页面打开后在“局域网访问令牌”输入框填写相同令牌。不要在
+局域网配置中保留空 token：
+
+```yaml
+host: 0.0.0.0
+port: 8080
+token: "replace-with-a-long-random-token"
+```
+
+在其他设备上访问工控机的局域网 IP，例如
+`http://192.168.x.x:8080/`。工控机防火墙还必须允许来自受信任局域网网段的
+TCP 8080；不建议直接暴露到公共网络。
+
 Web 进程只调用 `ChangeSystemMode`、`SetLocalizationMode` 和现有的有界
 `Relocalize` Action，不自行执行 launch 命令。Localization 页面中的一次性
 操作调用现有的 `/agt/localization/relocalize` Action。所有 launch 命令只能

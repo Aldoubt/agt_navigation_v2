@@ -1,7 +1,9 @@
 # Web Console API
 
 The runtime adapter is FastAPI plus WebSocket. It defaults to `127.0.0.1`; when
-`token` is configured, REST uses `X-AGT-Token` and WebSocket uses the same header.
+`token` is configured, REST uses `X-AGT-Token`. WebSocket uses that header for
+native clients and accepts the same token as the `token` query parameter for
+browser clients, because the browser WebSocket API cannot set arbitrary headers.
 No endpoint accepts a shell command.
 
 | Method | Path | Purpose |

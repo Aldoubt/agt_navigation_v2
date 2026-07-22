@@ -40,6 +40,12 @@
         </select>
         <button id="switch-backend" class="secondary">切换后端</button>
       </div>
+      <div class="access-token-row">
+        <label for="access-token">局域网访问令牌</label>
+        <input id="access-token" type="password" autocomplete="off" placeholder="仅在配置 token 后填写">
+        <button id="save-token" class="secondary">保存令牌</button>
+        <span class="muted">默认本机访问无需令牌；局域网模式必须填写。</span>
+      </div>
       <p id="runtime-warning" class="runtime-warning"></p>
       <div id="workflow-steps" class="workflow-steps"></div>
     </section>

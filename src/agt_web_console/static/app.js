@@ -1,9 +1,14 @@
+const urlToken = new URLSearchParams(window.location.search).get("token");
+if (urlToken) localStorage.setItem("agt_console_token", urlToken);
 const state = { overview: {}, runtime: {}, maps: [], experiments: [], lastRelocalization: null };
 
+function consoleToken() { return localStorage.getItem("agt_console_token") || ""; }
+
 const api = async (path, options = {}) => {
+  const headers = { "Content-Type": "application/json", ...(consoleToken() ? { "X-AGT-Token": consoleToken() } : {}), ...(options.headers || {}) };
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
+    headers,
   });
   if (!response.ok) {
     const body = await response.text();
@@ -240,6 +245,8 @@ document.querySelectorAll(".tabs button").forEach((button) => button.addEventLis
 }));
 
 document.querySelector("#refresh").addEventListener("click", () => refresh().catch((error) => showToast(error.message, true)));
+document.querySelector("#access-token").value = consoleToken();
+document.querySelector("#save-token").addEventListener("click", () => { localStorage.setItem("agt_console_token", document.querySelector("#access-token").value.trim()); window.location.reload(); });
 document.querySelector("#switch-backend").addEventListener("click", async () => {
   const button = document.querySelector("#switch-backend");
   button.disabled = true;
@@ -267,7 +274,9 @@ document.querySelector("#map-list").addEventListener("click", async (event) => {
 document.querySelector("#experiment-list").addEventListener("click", async (event) => { const action = event.target.dataset.expAction; const id = event.target.dataset.expId; if (!action || !id) return; try { await api(`/api/v1/experiments/${id}/${action}`, { method: "POST", body: JSON.stringify(action === "start_bag" ? { profile: "minimal" } : {}) }); await refresh(); } catch (error) { showToast(error.message, true); } });
 
 refresh().catch((error) => { const connection = document.querySelector("#connection"); connection.textContent = "离线"; connection.className = "status error"; showToast(`无法连接 Web 服务：${error.message}`, true); });
-const socket = new WebSocket(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`);
+const websocketUrl = new URL(`${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/ws`);
+if (consoleToken()) websocketUrl.searchParams.set("token", consoleToken());
+const socket = new WebSocket(websocketUrl.toString());
 socket.onopen = () => { const connection = document.querySelector("#connection"); connection.textContent = "实时在线"; connection.className = "status ok"; };
 socket.onmessage = (event) => { try { const update = JSON.parse(event.data); if (update.health) { state.overview = { ...state.overview, ...update }; render(); } else refresh().catch(() => {}); } catch (error) { console.error(error); } };
 socket.onclose = () => { const connection = document.querySelector("#connection"); connection.textContent = "在线（无实时通道）"; connection.className = "status unknown"; };

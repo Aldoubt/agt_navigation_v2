@@ -154,7 +154,8 @@ def create_app(service: WebConsoleService):
     async def websocket(websocket: WebSocket):
         import asyncio
 
-        if service.config.token and websocket.headers.get("x-agt-token") != service.config.token:
+        websocket_token = websocket.headers.get("x-agt-token") or websocket.query_params.get("token")
+        if service.config.token and websocket_token != service.config.token:
             await websocket.close(code=4401)
             return
         await websocket.accept()

@@ -136,10 +136,13 @@ def test_static_console_is_chinese_and_exposes_ordered_workflow_controls():
     assert "从系统检查到任务执行" in html
     assert "runtime-backend" in html
     assert "switch-backend" in html
+    assert "access-token" in html
     assert "relocalize-action-mode" in html
     assert 'action: "relocalize"' in javascript
     assert '"/api/v1/localization/relocalize"' in javascript
     assert "timeout_s:" in javascript
     assert "timeout_sec:" not in javascript
     assert '"/api/v1/runtime/backend"' in javascript
+    assert "X-AGT-Token" in javascript
+    assert "websocketUrl.searchParams" in javascript
     assert "profileArguments" in javascript
