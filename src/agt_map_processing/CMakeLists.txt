@@ -6,6 +6,7 @@ find_package(ament_cmake REQUIRED)
 install(PROGRAMS
   scripts/apply_swept_footprint_to_map.py
   scripts/generate_traversability_variants.py
+  scripts/octomap_cloud_throttle.py
   scripts/static_obstacle_evidence.py
   DESTINATION lib/${PROJECT_NAME}
 )

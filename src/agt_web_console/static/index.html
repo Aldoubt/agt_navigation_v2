@@ -52,6 +52,56 @@
 
     <section class="summary-grid" id="overview-cards"></section>
 
+    <section id="mapping-observability" class="panel mapping-observability">
+      <div class="panel-head">
+        <div><p class="eyebrow">建图观测</p><h2>实时建图状态</h2></div>
+        <span id="mapping-state-badge" class="status unknown">未启动</span>
+      </div>
+      <p id="mapping-status-message" class="mapping-status-message">启动建图后，这里会显示 FAST-LIVO2、注册点云和二维地图的实时状态。</p>
+      <div id="mapping-metrics" class="metrics-grid mapping-metrics"></div>
+      <div class="mapping-topics">
+        <span>二维地图：<code>/agt/map/mapping_occupancy</code></span>
+        <span>建图健康点云：<code>/agt/mapping/registered_points_lidar</code></span>
+        <span>预览注册点云：<code>/agt/mapping/registered_points</code></span>
+        <span>里程计：<code>/agt/mapping/odometry</code></span>
+      </div>
+      <div class="mapping-preview">
+        <div class="mapping-preview-head"><strong>二维地图预览</strong><span id="mapping-map-meta" class="muted">等待地图数据</span></div>
+        <div id="mapping-map-empty" class="mapping-map-empty">尚未收到二维建图地图</div>
+        <div class="preview-actions preview-actions-floating"><button id="mapping-map-center" class="secondary" title="将视图中心移到机器人当前位置">回到机器人位置</button></div>
+        <canvas id="mapping-map-canvas" hidden aria-label="二维建图地图预览"></canvas>
+      </div>
+      <div class="mapping-preview">
+        <div class="mapping-preview-head"><strong>降采样点云地图预览</strong><span id="mapping-pointcloud-meta" class="muted">等待点云数据</span></div>
+        <div id="mapping-pointcloud-empty" class="mapping-map-empty">尚未收到注册点云</div>
+        <div class="preview-actions preview-actions-floating pointcloud-controls">
+          <div class="pointcloud-view-modes" role="group" aria-label="点云投影视图">
+            <button type="button" class="secondary active" data-pointcloud-view="xy" aria-pressed="true">俯视 X-Y</button>
+            <button type="button" class="secondary" data-pointcloud-view="xz" aria-pressed="false">侧视 X-Z</button>
+            <button type="button" class="secondary" data-pointcloud-view="yz" aria-pressed="false">侧视 Y-Z</button>
+          </div>
+          <label for="mapping-pointcloud-rotation">视角旋转 <input id="mapping-pointcloud-rotation" type="range" min="-180" max="180" step="1" value="0"><output id="mapping-pointcloud-rotation-value">0°</output></label>
+          <button id="mapping-pointcloud-center" class="secondary" title="重置点云视角并将中心移到机器人当前位置">重置视角</button>
+        </div>
+        <canvas id="mapping-pointcloud-canvas" hidden aria-label="降采样点云地图预览"></canvas>
+      </div>
+    </section>
+
+    <section id="chassis-observability" class="panel chassis-observability">
+      <div class="panel-head">
+        <div><p class="eyebrow">底盘与 CAN</p><h2>BUNKER 通讯状态</h2></div>
+        <span id="chassis-state-badge" class="status unknown">未启动</span>
+      </div>
+      <p id="chassis-status-message" class="mapping-status-message">建图可选启用只读 CAN 监测；导航控制必须经过安全链。</p>
+      <div id="chassis-metrics" class="metrics-grid mapping-metrics"></div>
+      <p class="form-hint">网页只检查 CAN 和底盘状态，不执行 sudo、ip link 或底盘控制命令。CAN 接口需要由系统预配置或管理员一次性启动。</p>
+      <div class="admin-command-panel">
+        <div class="panel-head"><div><p class="eyebrow">管理员操作</p><h3>CAN 初始化与底盘通讯</h3></div><button id="copy-chassis-command" class="secondary">复制命令</button></div>
+        <p class="form-hint">请管理员在工控机终端执行。第一段初始化 CAN，第二段启动只读状态监测；真实导航时再按安全流程启用 control 模式。</p>
+        <pre id="chassis-admin-command">正在生成 can0 管理命令…</pre>
+      </div>
+    </section>
+
     <nav class="tabs" aria-label="控制台页面">
       <button data-tab="overview" class="active">总览</button>
       <button data-tab="control">系统流程</button>
@@ -75,32 +125,62 @@
           <label for="mode-profile">启动 profile</label>
           <select id="mode-profile">
             <option value="sensor_only">仅启动传感器</option>
-            <option value="mapping">建图模式</option>
-            <option value="navigation">导航模式</option>
             <option value="qt_mapping">Qt 建图前端</option>
             <option value="qt_navigation">Qt 导航前端</option>
             <option value="localization_rviz">定位 RViz</option>
           </select>
-          <button id="start-profile" class="primary">启动选定模块</button>
+          <button id="start-profile" class="primary">启动辅助模块</button>
           <p id="control-message" class="form-hint">模块命令来自白名单 profile，网页不会执行任意 shell 命令。</p>
         </div>
         <div class="form-block">
           <h3>公共参数</h3>
           <label for="runtime-dir">运行目录</label>
           <input id="runtime-dir" value="runtime" placeholder="runtime">
+          <label for="sensor-config">MID360 网络配置 JSON（可选）</label>
+          <input id="sensor-config" placeholder="留空使用默认配置">
           <label for="map-name">建图名称</label>
           <input id="map-name" value="mid360_map" placeholder="mid360_map">
+          <label for="mapping-input-source">建图输入源</label>
+          <select id="mapping-input-source">
+            <option value="live">实时 MID360 传感器</option>
+            <option value="bag">历史 rosbag（不启动真实传感器）</option>
+          </select>
+          <p id="mapping-input-hint" class="form-hint">实时模式启动传感器；历史 bag 模式只启动建图算法，等待 rosbag 输入话题。</p>
           <label for="map-id">地图 ID</label>
           <input id="map-id" placeholder="greenhouse_01">
+          <label for="start-chassis">启动底盘</label>
+          <select id="start-chassis"><option value="false">否（无车辆时推荐）</option><option value="true">是（实车）</option></select>
+          <label for="start-chassis-monitor">建图时只读监测 CAN</label>
+          <select id="start-chassis-monitor"><option value="false">否</option><option value="true">是（只接收状态）</option></select>
+          <label for="chassis-backend">底盘通讯后端</label>
+          <select id="chassis-backend"><option value="bunker_can">BUNKER CAN（当前）</option><option value="none">不启用（预留替换）</option></select>
+          <label for="can-interface">CAN 接口名</label>
+          <input id="can-interface" value="can0" placeholder="can0">
+          <label for="record-bag-profile">录制 rosbag</label>
+          <select id="record-bag-profile"><option value="none">不录制</option><option value="mapping">建图实验</option><option value="localization">定位实验</option><option value="navigation">导航实验</option><option value="full_experiment">完整实验</option></select>
+        </div>
+      </div>
+      <div class="main-chain-grid">
+        <div class="form-block" id="mapping-chain-control">
+          <h3>建图链</h3>
+          <p class="form-hint">ROS 2 真实模式会保存 PGM/YAML/PCD 并登记版本；离线模式只保留一个模拟地图槽位，不能导出真实文件。结束时必须选择保留或删除。</p>
+          <button id="start-mapping-profile" class="primary">启动建图链</button>
+          <button id="finish-mapping" class="danger" hidden>结束建图并选择保存方式</button>
+          <span id="mapping-action-state" class="form-hint">未启动</span>
+        </div>
+        <div class="form-block" id="navigation-chain-control">
+          <h3>导航链</h3>
+          <p class="form-hint">导航只能使用地图版本管理中已登记并激活的 READY 版本。</p>
+          <button id="start-navigation-profile" class="primary">启动导航链</button>
+          <span id="navigation-action-state" class="form-hint">请先选择地图版本</span>
         </div>
       </div>
       <div class="form-block navigation-params">
         <h3>导航与定位参数</h3>
-        <p class="form-hint">启动导航时必须填写同源的二维地图、定位 PCD 和 processing record。</p>
+        <p class="form-hint">启动导航时必须选择一个已登记、校验通过且已激活的地图版本；路径由版本清单提供。</p>
         <div class="form-grid">
-          <label>导航地图 YAML<input id="map-yaml" placeholder="/absolute/path/map.yaml"></label>
-          <label>定位 PCD<input id="map-pcd" placeholder="/absolute/path/localization_map.pcd"></label>
-          <label>PCD processing record<input id="map-record" placeholder="/absolute/path/localization_map.processing.yaml"></label>
+          <label>导航地图版本<select id="navigation-map-version"><option value="">暂无 READY 地图版本</option></select></label>
+          <label>当前版本资产<input id="navigation-map-summary" value="未选择" readonly></label>
           <label>候选位姿 YAML（可选）<input id="candidate-yaml" placeholder="/absolute/path/candidates.yaml"></label>
           <label>最近有效位姿（可选）<input id="last-pose" placeholder="/absolute/path/last_pose.yaml"></label>
           <label>使用仿真时间
@@ -159,12 +239,25 @@
     <section id="tasks" class="panel tab-panel">
       <div class="panel-head"><div><p class="eyebrow">执行许可</p><h2>任务执行门禁</h2></div></div>
       <div id="task-readiness" class="readiness"></div>
+      <p class="task-flow-note">当前任务链：Qt5 任务编辑 -> `/agt/navigation/execute_waypoint_task` -> 项目任务服务 -> Nav2 `FollowWaypoints` -> `agt_safety` -> BUNKER 底盘。Qt5 不直接发布底盘速度，网页也不绕过这条链路。</p>
       <p class="muted">网页只显示门禁状态。任务仍由项目 Action、Nav2 和 agt_safety 负责执行与拒绝。</p>
     </section>
 
     <section id="experiments" class="panel tab-panel">
       <div class="panel-head"><div><p class="eyebrow">实验记录</p><h2>实验会话</h2></div><button id="new-experiment" class="primary">新建实验</button></div>
       <div id="experiment-list" class="list"></div>
+      <div class="process-panel">
+        <div class="panel-head"><div><p class="eyebrow">数据回放</p><h3>已配置 rosbag</h3></div><button id="stop-bag-playback" class="danger">停止回放</button></div>
+        <p class="form-hint">只列出运行目录 `rosbag` 下含 metadata.yaml 的 bag。离线后端只模拟回放和地图预览；ROS 2 后端才会使用固定的 `ros2 bag play --clock` 并生成真实地图输入。</p>
+        <div class="bag-control-row">
+          <label>指定 bag<select id="bag-selection"><option value="">暂无完整 bag</option></select></label>
+          <label>回放速率<input id="bag-rate" type="number" min="0.1" max="4" step="0.1" value="1.0"></label>
+          <button id="play-selected-bag" class="primary" disabled>回放指定 bag</button>
+        </div>
+        <p id="bag-replay-hint" class="form-hint">等待选择 bag。</p>
+        <div id="bag-playback-state" class="form-hint">未回放</div>
+        <div id="bag-list" class="list"></div>
+      </div>
     </section>
 
     <section id="logs" class="panel tab-panel">
@@ -172,6 +265,19 @@
       <div id="log-list" class="list"></div>
     </section>
   </main>
+  <dialog id="mapping-finish-dialog">
+    <form method="dialog">
+      <div class="panel-head"><div><p class="eyebrow">建图完成</p><h2 id="mapping-finish-title">选择如何处理本次建图</h2></div></div>
+      <p id="mapping-finish-detail" class="form-hint">正在读取 PGM/YAML 和 PCD 写入状态。</p>
+      <label id="mapping-finish-map-name-label" for="mapping-finish-map-name">地图名称</label>
+      <input id="mapping-finish-map-name" value="mid360_map" pattern="[A-Za-z0-9_-]+" autocomplete="off">
+      <label id="mapping-finish-confirm-label" class="finish-confirm"><input id="mapping-finish-confirm" type="checkbox"> 我确认本次采集已经完成，允许结束建图并保存</label>
+      <div class="button-row">
+        <button id="discard-mapping" type="button" class="danger">删除本次建图</button>
+        <button id="retain-mapping" type="button" class="primary">保留并写入地图版本</button>
+      </div>
+    </form>
+  </dialog>
   <div id="toast" class="toast" role="status"></div>
   <script src="app.js"></script>
 </body>

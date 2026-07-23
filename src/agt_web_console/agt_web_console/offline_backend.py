@@ -33,8 +33,17 @@ class OfflineConsoleBackend:
         self._active_profile = ""
         self._active_mode = "IDLE"
         self._started_at = 0.0
+        self._offline_preview_available = False
         self._localization_mode = "MANUAL_ONLY"
         self._localization = self._initial_localization()
+        self._playback = {
+            "playing": False,
+            "bag_id": "",
+            "pid": 0,
+            "returncode": None,
+            "simulated": True,
+            "message": "离线模式未进行 bag 模拟回放",
+        }
 
     @staticmethod
     def _initial_localization() -> dict[str, Any]:
@@ -87,8 +96,10 @@ class OfflineConsoleBackend:
         return self._active_profile in {"sensor_only", "mapping", "navigation"}
 
     def health(self) -> dict[str, Any]:
-        sensor_active = self._sensor_active()
-        localization_ready = self._localization["localization_accepted"]
+        with self._lock:
+            sensor_active = self._sensor_active()
+            localization_ready = self._localization["localization_accepted"]
+            mapping_preview = self._active_mode == "MAPPING" and self._offline_preview_available
         return {
             "overall_state": "OK",
             "revision": int(time.monotonic() * 10),
@@ -102,6 +113,9 @@ class OfflineConsoleBackend:
                 self._component("agt_localization", "定位模块", localization_ready, "离线模拟定位结果"),
                 self._component("agt_safety", "安全链", False, "离线模式不启动安全链"),
                 self._component("agt_chassis", "底盘", False, "未连接车辆，离线模式不发送底盘命令"),
+                self._component("fast_livo_odometry", "FAST-LIVO2 里程计", mapping_preview, "离线 bag 建图预览输入"),
+                self._component("registered_cloud", "注册点云", mapping_preview, "离线 bag 建图预览输入"),
+                self._component("mapping_occupancy", "二维建图地图", mapping_preview, "离线 bag 建图预览输入"),
             ],
         }
 
@@ -161,6 +175,7 @@ class OfflineConsoleBackend:
         with self._lock:
             self._active_profile = profile
             self._active_mode = self._PROFILE_MODES[profile]
+            self._offline_preview_available = self._active_mode == "MAPPING" and self._playback["playing"]
             self._started_at = time.time()
             log_path = self._runtime_dir / "logs" / "offline" / f"{profile}.log"
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -186,6 +201,7 @@ class OfflineConsoleBackend:
                 stopped.append({"pid": 0, "profile": self._active_profile, "simulated": True})
             self._active_profile = ""
             self._active_mode = "IDLE"
+            self._offline_preview_available = False
         self._emit()
         return stopped
 
@@ -244,5 +260,129 @@ class OfflineConsoleBackend:
             "message": status["message"],
         }
 
+    def _bag_path(self, bag_id: str) -> Path:
+        if not isinstance(bag_id, str) or not bag_id.strip() or Path(bag_id).is_absolute():
+            raise ValueError("bag_id 必须是运行目录 rosbag 下的相对 bundle 名称")
+        root = (self._runtime_dir / "rosbag").resolve()
+        path = (root / bag_id).resolve()
+        try:
+            path.relative_to(root)
+        except ValueError as error:
+            raise ValueError("bag_id 不能越出运行目录 rosbag") from error
+        if not path.is_dir() or not (path / "metadata.yaml").is_file():
+            raise ValueError("指定 bag 不是完整的 metadata.yaml bundle")
+        return path
+
+    def start_playback(self, bag_id: str, *, rate: float = 1.0) -> dict[str, Any]:
+        path = self._bag_path(bag_id)
+        try:
+            rate = float(rate)
+        except (TypeError, ValueError) as error:
+            raise ValueError("bag 回放速率必须是数字") from error
+        if not 0.1 <= rate <= 4.0:
+            raise ValueError("bag 回放速率必须在 0.1 到 4.0 之间")
+        with self._lock:
+            if self._playback["playing"]:
+                raise RuntimeError("已有 bag 正在离线模拟回放")
+            self._playback = {
+                "playing": True,
+                "bag_id": str(path.relative_to((self._runtime_dir / "rosbag").resolve())),
+                "pid": 0,
+                "returncode": None,
+                "rate": rate,
+                "simulated": True,
+                "message": "离线模拟回放：不会读取 ROS 消息、发布 topic 或启动 ros2 bag play",
+            }
+            self._offline_preview_available = self._active_mode == "MAPPING"
+            result = dict(self._playback)
+        self._emit()
+        return result
+
+    def stop_playback(self) -> dict[str, Any]:
+        with self._lock:
+            if self._playback["playing"]:
+                bag_id = self._playback["bag_id"]
+                self._playback = {
+                    "playing": False,
+                    "bag_id": bag_id,
+                    "pid": 0,
+                    "returncode": 0,
+                    "simulated": True,
+                    "message": "离线模拟回放已停止",
+                }
+            result = dict(self._playback)
+        self._emit()
+        return result
+
+    def playback_status(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._playback)
+
+    def mapping_status(self) -> dict[str, Any]:
+        """Return a bounded, clearly simulated preview for Web workflow checks."""
+        with self._lock:
+            if self._active_mode != "MAPPING":
+                return {"available": False, "message": "未启动建图链，离线二维地图预览为空"}
+            if not self._offline_preview_available:
+                return {
+                    "available": False,
+                    "message": "请先播放指定 bag；离线后端不会读取 bag 消息，只提供模拟预览",
+                }
+            width, height, resolution = 64, 48, 0.1
+            data = []
+            for y in range(height):
+                for x in range(width):
+                    boundary = x in {0, width - 1} or y in {0, height - 1}
+                    obstacle = 20 <= x <= 28 and 17 <= y <= 31 or 41 <= x <= 51 and 9 <= y <= 14
+                    data.append(100 if boundary or obstacle else 0)
+            return {
+                "available": True,
+                "simulated": True,
+                "source": self._playback["bag_id"],
+                "message": "离线 bag 建图预览（模拟数据，不是 bag 中的真实地图）",
+                "frame_id": "map",
+                "width": width,
+                "height": height,
+                "resolution": resolution,
+                "origin": {"x": -3.2, "y": -2.4},
+                "data": data,
+                "downsample_factor": 1,
+                "robot_pose": {"available": True, "frame_id": "map", "x": 0.0, "y": 0.0, "yaw": 0.0, "age_sec": 0.0},
+            }
+
+    def mapping_pointcloud_status(self) -> dict[str, Any]:
+        """Return a bounded, clearly simulated point-cloud preview."""
+        with self._lock:
+            if self._active_mode != "MAPPING":
+                return {"available": False, "message": "未启动建图链，离线点云地图预览为空"}
+            if not self._offline_preview_available:
+                return {
+                    "available": False,
+                    "message": "请先播放指定 bag；离线后端不会读取点云消息，只提供模拟预览",
+                }
+            points = []
+            for x in range(-30, 31, 2):
+                points.extend(((x * 0.1, -2.0, 0.0), (x * 0.1, 2.0, 0.0)))
+            for y in range(-20, 21, 2):
+                points.extend(((-3.0, y * 0.1, 0.0), (3.0, y * 0.1, 0.0)))
+            for x in range(20, 29, 1):
+                for y in range(17, 32, 2):
+                    points.append(((x - 32) * 0.1, (y - 24) * 0.1, 0.25))
+            for x in range(41, 52, 1):
+                for y in range(9, 15, 2):
+                    points.append(((x - 32) * 0.1, (y - 24) * 0.1, 0.35))
+            return {
+                "available": True,
+                "simulated": True,
+                "source": self._playback["bag_id"],
+                "message": "离线 bag 点云预览（模拟数据，不是 bag 中的真实点云）",
+                "frame_id": "map",
+                "point_count": len(points),
+                "voxel_size": 0.1,
+                "points": points,
+                "robot_pose": {"available": True, "frame_id": "map", "x": 0.0, "y": 0.0, "yaw": 0.0, "age_sec": 0.0},
+            }
+
     def close(self) -> None:
+        self.stop_playback()
         self.stop_all()

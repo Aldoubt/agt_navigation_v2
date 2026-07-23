@@ -8,7 +8,7 @@ from launch.actions import (
     IncludeLaunchDescription,
     OpaqueFunction,
 )
-from launch.conditions import IfCondition, UnlessCondition
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
@@ -143,6 +143,15 @@ def generate_launch_description():
                     / "runtime"
                 ),
             ),
+            DeclareLaunchArgument(
+                "user_config_path",
+                default_value=str(
+                    Path(get_package_share_directory("agt_sensor_adapters"))
+                    / "config"
+                    / "mid360_network.json"
+                ),
+                description="Livox MID360 network configuration JSON",
+            ),
             DeclareLaunchArgument("backend", default_value="ndt"),
             DeclareLaunchArgument("map_id", default_value=""),
             DeclareLaunchArgument("configured_candidates_yaml", default_value=""),
@@ -164,9 +173,17 @@ def generate_launch_description():
             DeclareLaunchArgument("auto_relocalize_publish_debug", default_value="false"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("start_sensor", default_value="true"),
-            DeclareLaunchArgument("start_chassis", default_value="true"),
+            DeclareLaunchArgument(
+                "start_chassis",
+                default_value="false",
+                description="Navigation does not start chassis control unless explicitly enabled",
+            ),
+            DeclareLaunchArgument("start_chassis_monitor", default_value="false"),
+            DeclareLaunchArgument("chassis_backend", default_value="bunker_can"),
+            DeclareLaunchArgument("can_interface", default_value="can0"),
             DeclareLaunchArgument("start_gui", default_value="true"),
             DeclareLaunchArgument("record_bag", default_value="false"),
+            DeclareLaunchArgument("bag_profile", default_value="full_experiment"),
             DeclareLaunchArgument("start_semantic_map_server", default_value="false"),
             DeclareLaunchArgument("start_coverage_planning", default_value="false"),
             DeclareLaunchArgument("semantic_map", default_value=""),
@@ -182,6 +199,10 @@ def generate_launch_description():
             include(
                 "agt_sensor_adapters",
                 "mid360.launch.py",
+                {
+                    "user_config_path": LaunchConfiguration("user_config_path"),
+                    "use_sim_time": use_sim_time,
+                },
                 condition=IfCondition(LaunchConfiguration("start_sensor")),
             ),
             include(
@@ -309,13 +330,43 @@ def generate_launch_description():
                 "agt_safety",
                 "bunker_safety.launch.py",
                 {"use_sim_time": use_sim_time},
-                UnlessCondition(LaunchConfiguration("start_chassis")),
+                IfCondition(
+                    PythonExpression(
+                        [
+                            "'",
+                            LaunchConfiguration("start_chassis"),
+                            "'.lower() not in ('true', '1', 'yes', 'on') and '",
+                            LaunchConfiguration("start_chassis_monitor"),
+                            "'.lower() not in ('true', '1', 'yes', 'on')",
+                        ]
+                    )
+                ),
             ),
             include(
                 "agt_chassis",
                 "bunker.launch.py",
-                {"use_sim_time": use_sim_time, "start_safety": "true"},
+                {
+                    "use_sim_time": use_sim_time,
+                    "chassis_backend": LaunchConfiguration("chassis_backend"),
+                    "can_interface": LaunchConfiguration("can_interface"),
+                    "operation_mode": "control",
+                    "start_safety": "true",
+                },
                 condition=IfCondition(LaunchConfiguration("start_chassis")),
+            ),
+            include(
+                "agt_chassis",
+                "bunker.launch.py",
+                {
+                    "use_sim_time": use_sim_time,
+                    "chassis_backend": LaunchConfiguration("chassis_backend"),
+                    "can_interface": LaunchConfiguration("can_interface"),
+                    "operation_mode": "monitor",
+                    "start_driver": "true",
+                    "start_safety": "false",
+                    "command_topic": "/agt/chassis/monitor_cmd_vel",
+                },
+                condition=IfCondition(LaunchConfiguration("start_chassis_monitor")),
             ),
             include(
                 "agt_ui_bridge",
@@ -342,7 +393,11 @@ def generate_launch_description():
             include(
                 "agt_bringup",
                 "bag_record.launch.py",
-                {"runtime_dir": runtime_dir, "bag_name": bag_name},
+                {
+                    "runtime_dir": runtime_dir,
+                    "bag_name": bag_name,
+                    "bag_profile": LaunchConfiguration("bag_profile"),
+                },
                 IfCondition(LaunchConfiguration("record_bag")),
             ),
         ]

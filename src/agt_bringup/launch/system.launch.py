@@ -11,7 +11,7 @@ from launch.actions import (
 )
 from launch.conditions import IfCondition, LaunchConfigurationEquals
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 
 
@@ -22,6 +22,19 @@ def bringup_launch(name):
 
 def validate_mode_arguments(context):
     mode = LaunchConfiguration("mode").perform(context)
+    chassis_backend = LaunchConfiguration("chassis_backend").perform(context)
+    if chassis_backend not in {"bunker_can", "none"}:
+        raise RuntimeError(
+            "unsupported chassis_backend; available backends are bunker_can and none"
+        )
+    start_chassis = _as_bool(LaunchConfiguration("start_chassis").perform(context))
+    start_chassis_monitor = _as_bool(
+        LaunchConfiguration("start_chassis_monitor").perform(context)
+    )
+    if start_chassis and start_chassis_monitor:
+        raise RuntimeError("start_chassis and start_chassis_monitor are mutually exclusive")
+    if chassis_backend == "none" and (start_chassis or start_chassis_monitor):
+        raise RuntimeError("chassis_backend:=none cannot start a chassis process")
     if mode == "mapping":
         map_name = LaunchConfiguration("map_name").perform(context)
         if not re.fullmatch(r"[A-Za-z0-9_-]+", map_name):
@@ -95,9 +108,14 @@ def generate_launch_description():
     common = {
         "runtime_dir": LaunchConfiguration("runtime_dir"),
         "use_sim_time": LaunchConfiguration("use_sim_time"),
+        "user_config_path": LaunchConfiguration("user_config_path"),
         "start_sensor": LaunchConfiguration("start_sensor"),
         "start_chassis": LaunchConfiguration("start_chassis"),
+        "start_chassis_monitor": LaunchConfiguration("start_chassis_monitor"),
+        "chassis_backend": LaunchConfiguration("chassis_backend"),
+        "can_interface": LaunchConfiguration("can_interface"),
         "record_bag": LaunchConfiguration("record_bag"),
+        "bag_profile": LaunchConfiguration("bag_profile"),
     }
     return LaunchDescription(
         [
@@ -114,11 +132,31 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument(
+                "user_config_path",
+                default_value=str(
+                    Path(get_package_share_directory("agt_sensor_adapters"))
+                    / "config"
+                    / "mid360_network.json"
+                ),
+                description="Livox MID360 network configuration JSON",
+            ),
             DeclareLaunchArgument("start_system_health", default_value="true"),
             DeclareLaunchArgument("health_contract", default_value=str(Path(get_package_share_directory("agt_system_manager")) / "config" / "health_contracts.yaml")),
             DeclareLaunchArgument("active_map_pointer", default_value=""),
             DeclareLaunchArgument("start_sensor", default_value="true"),
-            DeclareLaunchArgument("start_chassis", default_value="true"),
+            DeclareLaunchArgument(
+                "start_chassis",
+                default_value="false",
+                description="Start the safety-protected chassis control chain explicitly",
+            ),
+            DeclareLaunchArgument(
+                "start_chassis_monitor",
+                default_value="false",
+                description="Start BUNKER CAN telemetry without safety or command output",
+            ),
+            DeclareLaunchArgument("chassis_backend", default_value="bunker_can"),
+            DeclareLaunchArgument("can_interface", default_value="can0"),
             DeclareLaunchArgument(
                 "start_rviz",
                 default_value="true",
@@ -138,8 +176,20 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("record_bag", default_value="false"),
+            DeclareLaunchArgument("bag_profile", default_value="full_experiment"),
             DeclareLaunchArgument("map_name", default_value="mid360_map"),
+            DeclareLaunchArgument(
+                "mapping_output_dir",
+                default_value=PathJoinSubstitution(
+                    [LaunchConfiguration("runtime_dir"), "maps", LaunchConfiguration("map_name"), "pcd"]
+                ),
+            ),
             DeclareLaunchArgument("map", default_value=""),
+            DeclareLaunchArgument(
+                "map_version_id",
+                default_value="",
+                description="Selected immutable map version identity for audit and health context",
+            ),
             DeclareLaunchArgument("global_map_pcd", default_value=""),
             DeclareLaunchArgument("global_map_processing_record", default_value=""),
             DeclareLaunchArgument("backend", default_value="ndt"),
@@ -187,6 +237,7 @@ def generate_launch_description():
                 launch_arguments={
                     **common,
                     "map_name": LaunchConfiguration("map_name"),
+                    "mapping_output_dir": LaunchConfiguration("mapping_output_dir"),
                     "start_rviz": LaunchConfiguration("start_rviz"),
                     "start_gui": LaunchConfiguration("start_mapping_gui"),
                 }.items(),

@@ -37,6 +37,42 @@ def create_app(service: WebConsoleService):
         authorize(x_agt_token)
         return service.mode_status()
 
+    @app.get("/api/v1/mapping/map")
+    def mapping_map(x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        return service.mapping_status()
+
+    @app.get("/api/v1/mapping/pointcloud")
+    def mapping_pointcloud(x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        return service.mapping_pointcloud_status()
+
+    @app.get("/api/v1/mapping/session")
+    def mapping_session(x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        return service.mapping_session_status()
+
+    @app.post("/api/v1/mapping/session/prepare")
+    def prepare_mapping_session(body: dict[str, Any], x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        try:
+            return service.prepare_mapping_session(str(body.get("map_name", "")))
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/v1/mapping/finish")
+    def finish_mapping(body: dict[str, Any], x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        try:
+            return service.finish_mapping(str(body.get("action", "")), str(body.get("map_name", "")))
+        except (ValueError, RuntimeError, OSError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.get("/api/v1/chassis/status")
+    def chassis_status(x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        return service.chassis_status()
+
     @app.post("/api/v1/system/mode")
     def system_mode(body: dict[str, Any], x_agt_token: str | None = Header(default=None)):
         authorize(x_agt_token)
@@ -94,6 +130,19 @@ def create_app(service: WebConsoleService):
     def experiments(state: str | None = None, x_agt_token: str | None = Header(default=None)):
         authorize(x_agt_token)
         return service.experiments(state=state)
+
+    @app.get("/api/v1/bags")
+    def bags(x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        return service.bags()
+
+    @app.post("/api/v1/bags/{action}")
+    def bag_action(action: str, body: dict[str, Any] | None = None, x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        try:
+            return service.bag_action(action, body or {})
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     @app.post("/api/v1/experiments")
     def create_experiment(body: dict[str, Any], x_agt_token: str | None = Header(default=None)):

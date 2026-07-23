@@ -4,3 +4,4 @@ port: 8080
 token: ""
 runtime_dir: runtime
 backend: ros
+can_interface: can0

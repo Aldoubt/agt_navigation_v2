@@ -5,6 +5,7 @@
 import time
 from pathlib import Path
 import shutil
+import threading
 
 import rclpy
 from ament_index_python.packages import get_package_share_directory
@@ -13,9 +14,13 @@ from agt_interfaces.msg import ComponentHealth as ComponentHealthMsg
 from agt_interfaces.msg import LocalizationStatus, SystemHealth, TaskReadiness
 from agt_interfaces.srv import EvaluateTaskReadiness, GetSystemHealth
 from diagnostic_msgs.msg import DiagnosticArray
+from livox_ros_driver2.msg import CustomMsg
 from lifecycle_msgs.srv import GetState
 from nav_msgs.msg import OccupancyGrid, Odometry
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from rclpy.time import Time
 from sensor_msgs.msg import Imu, PointCloud2
 from std_msgs.msg import Bool
@@ -26,10 +31,11 @@ from agt_system_manager.readiness import ReadinessInputs, evaluate_task_readines
 
 
 _TOPIC_TYPES = {
-    "/agt/sensors/lidar/points": (PointCloud2, "sensor_msgs/msg/PointCloud2"),
+    "/agt/sensors/lidar/custom": (CustomMsg, "livox_ros_driver2/msg/CustomMsg"),
     "/agt/sensors/imu/data": (Imu, "sensor_msgs/msg/Imu"),
     "/agt/mapping/odometry": (Odometry, "nav_msgs/msg/Odometry"),
     "/agt/mapping/registered_points_lidar": (PointCloud2, "sensor_msgs/msg/PointCloud2"),
+    "/agt/map/mapping_occupancy": (OccupancyGrid, "nav_msgs/msg/OccupancyGrid"),
     "/agt/chassis/connected": (Bool, "std_msgs/msg/Bool"),
     "/agt/chassis/odometry": (Odometry, "nav_msgs/msg/Odometry"),
     "/agt/chassis/status": (DiagnosticArray, "diagnostic_msgs/msg/DiagnosticArray"),
@@ -39,6 +45,10 @@ _TOPIC_TYPES = {
     "/agt/map/global_occupancy": (OccupancyGrid, "nav_msgs/msg/OccupancyGrid"),
     "/global_costmap/costmap": (OccupancyGrid, "nav_msgs/msg/OccupancyGrid"),
 }
+
+_LATCHED_MAP_QOS = QoSProfile(depth=1)
+_LATCHED_MAP_QOS.reliability = ReliabilityPolicy.RELIABLE
+_LATCHED_MAP_QOS.durability = DurabilityPolicy.TRANSIENT_LOCAL
 
 
 class SystemHealthNode(Node):
@@ -64,6 +74,9 @@ class SystemHealthNode(Node):
         # validator publishes a task-specific decision.
         self._task_valid = bool(self.declare_parameter("task_valid", True).value)
         self._min_free_space_bytes = int(float(self.declare_parameter("min_free_space_gb", 1.0).value) * 1024**3)
+        self._stats_lock = threading.Lock()
+        self._topic_callback_group = ReentrantCallbackGroup()
+        self._control_callback_group = MutuallyExclusiveCallbackGroup()
         self._stats: dict[str, dict[str, object]] = {}
         self._conditions: dict[str, object] = {
             "disk.free_space_ok": True,
@@ -76,7 +89,7 @@ class SystemHealthNode(Node):
         self._lifecycle_states: dict[str, str] = {}
         self._lifecycle_futures = {}
         self._lifecycle_clients = {
-            node: self.create_client(GetState, f"/{node}/get_state")
+            node: self.create_client(GetState, f"/{node}/get_state", callback_group=self._control_callback_group)
             for node in ("map_server", "planner_server", "controller_server", "bt_navigator", "waypoint_follower")
         }
         self._tf_buffer = Buffer()
@@ -88,41 +101,43 @@ class SystemHealthNode(Node):
         self._health = None
         self._publisher = self.create_publisher(SystemHealth, "/agt/system/health", 10)
         self._readiness_publisher = self.create_publisher(TaskReadiness, "/agt/system/task_readiness", 10)
-        self.create_service(GetSystemHealth, "/agt/system/get_health", self._get_health)
-        self.create_service(EvaluateTaskReadiness, "/agt/system/evaluate_task_readiness", self._evaluate_readiness)
+        self.create_service(GetSystemHealth, "/agt/system/get_health", self._get_health, callback_group=self._control_callback_group)
+        self.create_service(EvaluateTaskReadiness, "/agt/system/evaluate_task_readiness", self._evaluate_readiness, callback_group=self._control_callback_group)
         for topic, (message_type, type_name) in _TOPIC_TYPES.items():
             self.create_subscription(
                 message_type,
                 topic,
                 lambda message, topic=topic, type_name=type_name: self._topic_callback(topic, type_name, message),
-                10,
+                _LATCHED_MAP_QOS if topic == "/agt/map/mapping_occupancy" else 10,
+                callback_group=self._topic_callback_group,
             )
-        self.create_timer(self._evaluator.period_sec, self._tick)
+        self.create_timer(self._evaluator.period_sec, self._tick, callback_group=self._control_callback_group)
         self._tick()
 
     def _topic_callback(self, topic: str, type_name: str, message) -> None:
         now = time.monotonic()
-        stat = self._stats.setdefault(topic, {"count": 0, "first_seen": now, "last_seen": now, "message_type": type_name})
-        stat["count"] = int(stat["count"]) + 1
-        stat["last_seen"] = now
-        if topic == "/agt/localization/status":
-            self._localization = message
-        elif topic == "/agt/chassis/connected":
-            self._chassis_connected = bool(message.data)
-        elif topic == "/agt/safety/emergency_stop":
-            self._emergency_stop = bool(message.data)
-        elif topic == "/agt/safety/status":
-            for status in message.status:
-                for value in status.values:
-                    if value.key == "motion_enabled":
-                        self._conditions["safety.motion_enabled"] = value.value.lower() == "true"
-                    if value.key in ("emergency_stop", "estop_latched"):
-                        self._conditions["safety.emergency_stop_clear"] = value.value.lower() == "false"
-                self._safety_allows_navigation = (
-                    status.level == status.OK
-                    and self._conditions.get("safety.motion_enabled", False)
-                    and not self._emergency_stop
-                )
+        with self._stats_lock:
+            stat = self._stats.setdefault(topic, {"count": 0, "first_seen": now, "last_seen": now, "message_type": type_name})
+            stat["count"] = int(stat["count"]) + 1
+            stat["last_seen"] = now
+            if topic == "/agt/localization/status":
+                self._localization = message
+            elif topic == "/agt/chassis/connected":
+                self._chassis_connected = bool(message.data)
+            elif topic == "/agt/safety/emergency_stop":
+                self._emergency_stop = bool(message.data)
+            elif topic == "/agt/safety/status":
+                for status in message.status:
+                    for value in status.values:
+                        if value.key == "motion_enabled":
+                            self._conditions["safety.motion_enabled"] = value.value.lower() == "true"
+                        if value.key in ("emergency_stop", "estop_latched"):
+                            self._conditions["safety.emergency_stop_clear"] = value.value.lower() == "false"
+                    self._safety_allows_navigation = (
+                        status.level == status.OK
+                        and self._conditions.get("safety.motion_enabled", False)
+                        and not self._emergency_stop
+                    )
 
     def _refresh_graph(self) -> None:
         self._nodes = {
@@ -206,7 +221,8 @@ class SystemHealthNode(Node):
             self._conditions["disk.free_space_ok"] = shutil.disk_usage(self._runtime_dir).free >= self._min_free_space_bytes
         except OSError:
             self._conditions["disk.free_space_ok"] = False
-        observations = {key: TopicObservation(**value) for key, value in self._stats.items()}
+        with self._stats_lock:
+            observations = {key: TopicObservation(**value) for key, value in self._stats.items()}
         self._health = self._evaluator.evaluate(
             self._mode,
             observations,
@@ -220,10 +236,14 @@ class SystemHealthNode(Node):
         self._publisher.publish(message)
         self._readiness_publisher.publish(self._readiness_message(self._evaluate()))
 
+    @staticmethod
+    def _state_value(message_type, state: str) -> int:
+        return int(getattr(message_type, f"STATE_{state}", message_type.STATE_UNKNOWN))
+
     def _to_message(self, snapshot):
         message = SystemHealth()
         message.header.stamp = self.get_clock().now().to_msg()
-        message.overall_state = getattr(SystemHealth, snapshot.overall_state, SystemHealth.STATE_UNKNOWN)
+        message.overall_state = self._state_value(SystemHealth, snapshot.overall_state)
         message.revision = snapshot.revision
         message.blocker_codes = snapshot.blocker_codes
         message.blocker_messages = snapshot.blocker_messages
@@ -234,7 +254,7 @@ class SystemHealthNode(Node):
             component.header = message.header
             component.component_id = item.component_id
             component.display_name = item.display_name
-            component.state = getattr(ComponentHealthMsg, item.state, ComponentHealthMsg.STATE_UNKNOWN)
+            component.state = self._state_value(ComponentHealthMsg, item.state)
             component.required = item.required
             component.present = item.present
             component.observed_rate_hz = item.observed_rate_hz
@@ -252,7 +272,11 @@ class SystemHealthNode(Node):
         return message
 
     def _evaluate(self):
-        localization = self._localization
+        with self._stats_lock:
+            localization = self._localization
+            emergency_stop = self._emergency_stop
+            chassis_connected = self._chassis_connected
+            safety_allows_navigation = self._safety_allows_navigation
         return evaluate_task_readiness(
             ReadinessInputs(
                 active_mode=self._mode,
@@ -268,9 +292,9 @@ class SystemHealthNode(Node):
                 pose_valid=localization.pose_valid,
                 localization_accepted=localization.localization_accepted,
                 status_stale=localization.status_stale,
-                emergency_stop=self._emergency_stop,
-                chassis_connected=self._chassis_connected,
-                safety_allows_navigation=self._safety_allows_navigation,
+                emergency_stop=emergency_stop,
+                chassis_connected=chassis_connected,
+                safety_allows_navigation=safety_allows_navigation,
                 nav2_active=all(self._lifecycle_states.get(node) == "active" for node in (
                     "map_server", "planner_server", "controller_server", "bt_navigator", "waypoint_follower"
                 )),
@@ -324,11 +348,14 @@ class SystemHealthNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = SystemHealthNode()
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(node)
     try:
-        rclpy.spin(node)
+        executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

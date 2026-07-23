@@ -1,7 +1,8 @@
 # 核心接口草案
 
 ## Topics
-- `/agt/sensors/lidar/points`
+- `/agt/sensors/lidar/custom`：`livox_ros_driver2/msg/CustomMsg`，MID360 原始输入。
+- `/agt/sensors/lidar/points`：通用 `sensor_msgs/msg/PointCloud2` 输出，不是当前 MID360 原始驱动输入。
 - `/agt/sensors/imu/data`
 - `/agt/mapping/odometry`
 - `/agt/mapping/registered_cloud`
@@ -28,14 +29,28 @@ when present.
 - `/agt/safety/emergency_stop`
 - `/agt/safety/status`
 - `/agt/chassis/cmd_vel`
+- `/agt/chassis/monitor_cmd_vel`：只读 CAN 监测模式的故意无人发布占位输入；不可用于导航或安全链。
 - `/agt/chassis/odometry`
 - `/agt/chassis/status`
 - `/agt/chassis/connected`
+- `/battery`：`sensor_msgs/msg/BatteryState`，BUNKER 状态桥接提供电压，百分比未知时保持未知。
 - `/agt/experiment/events`
-- `/agt/map/mapping_occupancy`: OctoMap 建图过程中的实时二维工作图
+- `/agt/map/mapping_occupancy`: OctoMap 建图过程中的二维工作图，采用
+  `RELIABLE + TRANSIENT_LOCAL + KEEP_LAST(1)`；它是持久快照，不是固定周期的健康流
 - `/agt/map/octomap_occupancy`: 离线静态障碍补全使用的射线/free-space 基图（内部 topic）
 - `/agt/map/static_obstacle_evidence_status`: 离线重复观测障碍补全统计 JSON，仅用于审计
 - `/agt/map/global_occupancy`: 导航模式下由 Nav2 map server 发布的已保存静态地图
+
+建图健康证据同时检查 `/agt/mapping/odometry`、`/agt/mapping/registered_points_lidar` 和
+`/agt/map/mapping_occupancy` 的消息类型和持久快照可用性；该话题不使用三秒新鲜度门限。Web 只读预览会对二维栅格做有界降采样，
+不发布新地图，也不参与建图算法或导航决策。Web 还可以对
+`/agt/mapping/registered_points` 的 `PointCloud2` 做固定体素降采样预览；该缓存不等于持久化
+导航 PCD，不能馈入定位、规划、验证或控制。
+
+`agt_chassis` 的 `operation_mode:=monitor` 只接收 BUNKER CAN 状态，启动状态桥接和驱动但不启动
+`agt_safety` 或命令 guard；真实导航必须使用
+`/agt/navigation/cmd_vel_raw -> /agt/navigation/cmd_vel -> /agt/safety/cmd_vel -> /agt/chassis/cmd_vel`。
+CAN 接口的 up/down 配置不属于 ROS/Web 接口，必须由主机管理员预先完成。
 - `/agt/navigation/preview_footprint`: planner-only 离线预览起点处的 canonical 多边形车体
 - `/agt/map/semantic_markers`: 语义服务器发布的 transient-local 标注可视化
 - `/agt/map/keepout_mask`: 语义服务器发布、与基础地图严格对齐的 transient-local 语义 mask

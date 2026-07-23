@@ -12,6 +12,11 @@ No endpoint accepts a shell command.
 | GET | `/api/v1/health` | current `SystemHealth` projection |
 | GET | `/api/v1/task-readiness` | current shared gate |
 | GET | `/api/v1/system/status` | managed process/mode projection |
+| GET | `/api/v1/mapping/map` | mode-gated bounded occupancy preview and current mapping robot pose; includes `active_mode` |
+| GET | `/api/v1/mapping/pointcloud` | mode-gated bounded registered-point preview and current mapping robot pose; includes `active_mode` |
+| GET | `/api/v1/mapping/session` | current managed mapping session and PGM/PCD asset evidence |
+| POST | `/api/v1/mapping/session/prepare` | create or reuse a managed temporary mapping session |
+| POST | `/api/v1/mapping/finish` | retain/register or delete the current mapping session; retain may include a validated `map_name` |
 | POST | `/api/v1/system/mode` | start a configured profile with declared key/value launch args |
 | POST | `/api/v1/system/stop` | stop manager-owned mode process groups |
 | GET | `/api/v1/maps` | list/filter registered versions |
@@ -21,6 +26,8 @@ No endpoint accepts a shell command.
 | POST | `/api/v1/maps/import` | explicitly package legacy PGM/YAML, PCD and processing record |
 | GET/POST | `/api/v1/experiments` | list/create sessions |
 | POST | `/api/v1/experiments/{id}/{start,event,start_bag,stop_bag,finalize,invalid}` | controlled session and explicit bag-profile transitions |
+| GET | `/api/v1/bags` | list complete configured rosbag bundles and playback state |
+| POST | `/api/v1/bags/{play,stop}` | simulate selected-bag state in offline mode or start/stop real `ros2 bag play --clock` in ROS mode |
 | POST | `/api/v1/localization/mode` | call `SetLocalizationMode` |
 | POST | `/api/v1/localization/relocalize` | send one bounded structured `Relocalize` Action goal |
 | GET | `/api/v1/runtime` | current `ros` or `offline` backend |
@@ -29,11 +36,47 @@ No endpoint accepts a shell command.
 | WebSocket | `/ws` | initial overview plus live structured health/readiness/localization, audit, and mode events |
 
 The static page defaults to `zh-CN` and provides a Chinese operations dashboard
-with an ordered startup workflow, profile controls for sensor/mapping/navigation,
+with an ordered startup workflow, separate sensor/mapping/navigation controls,
 map lifecycle actions, task-readiness display, experiment recording, and a
 bounded relocalization Action form. It does not expose a velocity or TF control.
 
+Mapping completion is transactional from the operator's point of view: the UI first
+requires confirmation that acquisition is complete and shows the final map name.
+Retain waits for both the map-saver PGM/YAML pair and a ready FAST-LIVO2 PCD
+processing record before importing an immutable map version. For a managed Web
+session, if FAST-LIVO2 reports `state: ready` without `pcd_sha256`, Web computes
+the SHA-256 after the mapping process has stopped and records it in the session
+processing record before import. Navigation accepts only an active READY
+version and derives its three navigation asset paths from that version's manifest.
+
 The configured `offline` backend is a deterministic Web-only simulator. It may
-simulate profile state and one bounded relocalization result for UI checks, but
-it never launches ROS processes, records bags, publishes TF or velocity, or
-opens task readiness.
+simulate profile state, one bounded relocalization result, and the playback state
+of a selected complete bag bundle for UI checks, but it never reads ROS messages,
+launches ROS processes, runs `ros2 bag play`, records bags, publishes TF or
+velocity, or opens task readiness. The ROS backend accepts only a relative bag
+identifier discovered below the configured runtime rosbag root, validates its
+metadata bundle, and launches it in a manager-owned process group with
+`--clock`; nodes under test must use simulated time when replaying historical data.
+
+When the offline simulator is in simulated `MAPPING` and a bag has been selected
+for simulated playback, the two mapping preview endpoints expose bounded,
+deterministic occupancy and point-cloud examples marked `simulated: true`. These
+examples are for UI interaction checks only, are never decoded from bag contents,
+and are cleared when mapping stops. Offline retain/delete uses one in-memory
+simulated map slot and never exports PGM/YAML/PCD. Real assets for semantic
+authoring, navigation, and relocalization require the ROS backend with
+`start_sensor:=false`, historical bag playback, and the normal ready-PCD map
+registration flow.
+
+The ROS mapping preview endpoints are evidence views, not topic mirrors. They
+return an empty preview unless the managed mode is `MAPPING`; a bag that contains
+mapping topics cannot populate the preview while only bag playback is running.
+The mapping profile may start FAST-LIVO2 with `start_sensor:=false`, allowing a
+historical bag to provide the input topics. The returned `robot_pose` is only for
+view centering and does not publish or modify TF. `active_mode` distinguishes a
+stopped mapping chain from a running chain that is still waiting for its first
+registered cloud. Entering `MAPPING` does not clear a preview that arrived during
+the startup/readiness transition; leaving `MAPPING` clears it. The Web point-cloud
+canvas is a read-only view with X-Y top, X-Z side, and Y-Z side projections, pan,
+zoom, a bounded rotation slider, and frame/grid/axis overlays; it does not alter
+the ROS cloud or navigation geometry.

@@ -1,7 +1,15 @@
+import hashlib
+import threading
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
+import yaml
 
+from agt_map_manager.registry import MapRegistry
+from agt_experiment_manager.manager import ExperimentManager
+from agt_web_console.instance_lock import WebConsoleInstanceLock
+from agt_web_console.ros_bridge import RosConsoleBridge
 from agt_web_console.service import WebConsoleConfig, WebConsoleService
 from agt_web_console.offline_backend import OfflineConsoleBackend
 
@@ -35,10 +43,43 @@ class Experiments:
         return []
 
 
+class MappingController(ModeController):
+    def __init__(self):
+        super().__init__()
+        self.active_mode = "IDLE"
+
+    def start(self, profile, arguments):
+        result = super().start(profile, arguments)
+        self.active_mode = "MAPPING"
+        return result
+
+    def stop_all(self):
+        self.active_mode = "IDLE"
+        return super().stop_all()
+
+    def status(self):
+        return {"active_mode": self.active_mode, "processes": []}
+
+
 def test_remote_listener_requires_token_and_loopback_is_default():
     with pytest.raises(ValueError):
         WebConsoleConfig(host="0.0.0.0").validate()
     WebConsoleConfig(host="0.0.0.0", token="local-test-token").validate()
+    with pytest.raises(ValueError):
+        WebConsoleConfig(can_interface="can0;sudo").validate()
+
+
+def test_web_console_runtime_allows_only_one_instance(tmp_path):
+    first = WebConsoleInstanceLock(tmp_path)
+    second = WebConsoleInstanceLock(tmp_path)
+    first.acquire()
+    try:
+        with pytest.raises(RuntimeError, match="Web 控制台已经在运行"):
+            second.acquire()
+    finally:
+        first.release()
+    second.acquire()
+    second.release()
 
 
 def test_offline_backend_validates_profiles_and_never_opens_task_gate(tmp_path):
@@ -62,6 +103,94 @@ def test_offline_backend_validates_profiles_and_never_opens_task_gate(tmp_path):
     assert relocalization["offline"] is True
     assert backend.localization()["simulated"] is True
     backend.stop_all()
+
+
+def test_offline_backend_simulates_selected_bag_without_ros_process(tmp_path):
+    bag = tmp_path / "rosbag" / "mapping_trial"
+    bag.mkdir(parents=True)
+    (bag / "metadata.yaml").write_text("rosbag2_bagfile_information: {}\n", encoding="utf-8")
+    backend = OfflineConsoleBackend(
+        {
+            "sensor_only": {
+                "mode": "SENSOR_ONLY",
+                "command": ["ros2", "launch", "test", "sensor.launch.py"],
+                "allowed_argument_keys": [],
+            }
+        },
+        runtime_dir=tmp_path,
+    )
+    result = backend.start_playback("mapping_trial", rate=1.5)
+    assert result["playing"] is True
+    assert result["simulated"] is True
+    assert "不会读取 ROS 消息" in result["message"]
+    assert backend.stop_playback()["playing"] is False
+
+    with pytest.raises(ValueError, match="不能越出"):
+        backend.start_playback("../outside")
+
+
+def test_offline_bag_preview_requires_mapping_and_is_marked_simulated(tmp_path):
+    bag = tmp_path / "rosbag" / "mapping_trial"
+    bag.mkdir(parents=True)
+    (bag / "metadata.yaml").write_text("rosbag2_bagfile_information: {}\n", encoding="utf-8")
+    backend = OfflineConsoleBackend(
+        {
+            "mapping": {
+                "mode": "MAPPING",
+                "command": ["ros2", "launch", "test", "mapping.launch.py"],
+                "allowed_argument_keys": [],
+            }
+        },
+        runtime_dir=tmp_path,
+    )
+
+    assert backend.mapping_status()["available"] is False
+    backend.start("mapping")
+    assert backend.mapping_status()["available"] is False
+    backend.start_playback("mapping_trial")
+    map_preview = backend.mapping_status()
+    pointcloud_preview = backend.mapping_pointcloud_status()
+    assert map_preview["available"] is True
+    assert map_preview["simulated"] is True
+    assert "不是 bag 中的真实地图" in map_preview["message"]
+    assert pointcloud_preview["available"] is True
+    assert pointcloud_preview["simulated"] is True
+    backend.stop_all()
+    assert backend.mapping_status()["available"] is False
+
+
+def test_ros_mapping_preview_survives_readiness_transition_into_mapping():
+    bridge = object.__new__(RosConsoleBridge)
+    bridge._lock = threading.RLock()
+    bridge._readiness = {}
+    bridge._active_mode = "MAPPING"
+    bridge._mapping_map = {"available": True}
+    bridge._mapping_pointcloud = {"available": True}
+    bridge._pointcloud_voxels = {}
+    bridge._robot_pose = {"available": True}
+    bridge._notify_status = lambda: None
+
+    message = SimpleNamespace(
+        ready=False,
+        active_mode="MAPPING",
+        map_id="",
+        map_version_id="",
+        localization_state="UNKNOWN",
+        health_revision=1,
+        blocker_codes=[],
+        blocker_messages=[],
+        warning_codes=[],
+        warning_messages=[],
+    )
+    RosConsoleBridge._readiness_callback(bridge, message)
+
+    assert bridge._mapping_map["available"] is True
+    assert bridge._mapping_pointcloud["available"] is True
+
+    message.active_mode = "IDLE"
+    RosConsoleBridge._readiness_callback(bridge, message)
+    assert bridge._mapping_map["available"] is False
+    assert bridge._mapping_pointcloud["available"] is False
 
 
 def test_service_can_switch_between_configured_backends(tmp_path):
@@ -94,6 +223,30 @@ def test_service_can_switch_between_configured_backends(tmp_path):
     assert service.set_backend("ros")["offline"] is False
 
 
+def test_service_routes_offline_bag_playback_to_simulator(tmp_path):
+    bag = tmp_path / "rosbag" / "selected_trial"
+    bag.mkdir(parents=True)
+    (bag / "metadata.yaml").write_text("rosbag2_bagfile_information: {}\n", encoding="utf-8")
+    ros = ModeController()
+    offline = OfflineConsoleBackend({}, runtime_dir=tmp_path)
+    experiments = ExperimentManager(tmp_path / "experiments", rosbag_root=tmp_path / "rosbag")
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path)),
+        mode_controller=ros,
+        experiment_manager=experiments,
+        backends={
+            "ros": {"mode_controller": ros},
+            "offline": {"mode_controller": offline, "localization_controller": offline},
+        },
+    )
+
+    service.set_backend("offline")
+    result = service.bag_action("play", {"bag_id": "selected_trial", "rate": 1.25})
+    assert result["simulated"] is True
+    assert service.bags()["playback"]["playing"] is True
+    assert service.bag_action("stop")["playing"] is False
+
+
 def test_console_delegates_only_configured_profile_and_audits_writes(tmp_path):
     controller = ModeController()
     service = WebConsoleService(
@@ -103,9 +256,10 @@ def test_console_delegates_only_configured_profile_and_audits_writes(tmp_path):
         mode_controller=controller,
         experiment_manager=Experiments(),
     )
-    result = service.set_mode("mapping", {"map_name": "greenhouse_01"})
+    session = service.prepare_mapping_session("greenhouse_01")
+    result = service.set_mode("mapping", {"map_name": "greenhouse_01", "mapping_output_dir": session["pcd_output_dir"]})
     assert result["started"]
-    assert controller.calls == [("start", "mapping", {"map_name": "greenhouse_01"})]
+    assert controller.calls == [("start", "mapping", {"map_name": "greenhouse_01", "mapping_output_dir": session["pcd_output_dir"]})]
     assert service.overview()["task_readiness"]["ready"] is False
     service.stop_mode()
     audit = (tmp_path / "logs" / "web_console_audit.jsonl").read_text(encoding="utf-8")
@@ -131,6 +285,7 @@ def test_static_console_is_chinese_and_exposes_ordered_workflow_controls():
     static_root = Path(__file__).parents[1] / "static"
     html = (static_root / "index.html").read_text(encoding="utf-8")
     javascript = (static_root / "app.js").read_text(encoding="utf-8")
+    bridge_source = (Path(__file__).parents[1] / "agt_web_console" / "ros_bridge.py").read_text(encoding="utf-8")
 
     assert '<html lang="zh-CN">' in html
     assert "从系统检查到任务执行" in html
@@ -142,7 +297,242 @@ def test_static_console_is_chinese_and_exposes_ordered_workflow_controls():
     assert '"/api/v1/localization/relocalize"' in javascript
     assert "timeout_s:" in javascript
     assert "timeout_sec:" not in javascript
+    assert "sensor-config" in html
+    assert "mapping-state-badge" in html
+    assert "mapping-map-canvas" in html
+    assert "mapping-pointcloud-canvas" in html
+    assert "mapping-input-source" in html
+    assert "mapping-map-center" in html
+    assert "mapping-pointcloud-center" in html
+    assert "mapping-pointcloud-rotation" in html
+    assert "data-pointcloud-view=\"xz\"" in html
+    assert "data-pointcloud-view=\"yz\"" in html
+    assert "projection" in javascript
+    assert "drawPointcloudCoordinates" in javascript
+    assert "rotationDeg" in javascript
+    assert "chassis-state-badge" in html
+    assert "start-chassis-monitor" in html
+    assert "chassis-backend" in html
+    assert "record-bag-profile" in html
+    assert "bag-list" in html
+    assert "bag-selection" in html
+    assert "play-selected-bag" in html
+    assert "copy-chassis-command" in html
+    assert "task-flow-note" in html
+    assert "start-mapping-profile" in html
+    assert "start-navigation-profile" in html
+    assert "finish-mapping" in html
+    assert "mapping-finish-title" in html
+    assert "mapping-finish-dialog" in html
+    assert "navigation-map-version" in html
+    assert '"/api/v1/mapping/map"' in javascript
+    assert '"/api/v1/mapping/pointcloud"' in javascript
+    assert '"/api/v1/chassis/status"' in javascript
+    assert '"/api/v1/bags/play"' in javascript
+    assert '"/api/v1/bags/stop"' in javascript
+    assert "operation_mode:=monitor" in javascript
+    assert 'args.start_sensor = inputSource === "bag" ? "false" : "true"' in javascript
+    assert "bindPreviewCanvas" in javascript
+    assert "centerOnRobot" in javascript
+    assert "_mapping_active_locked" in bridge_source
+    assert "Do not clear" in bridge_source
+    assert '"active_mode": self._active_mode' in bridge_source
+    assert "未启动建图链，点云地图预览为空" in bridge_source
+    assert "未发现 /agt/system/change_mode Action server" in bridge_source
+    assert "不读取 ROS 消息" in javascript
+    assert "传感器将保持运行" in javascript
+    assert "user_config_path" in javascript
     assert '"/api/v1/runtime/backend"' in javascript
     assert "X-AGT-Token" in javascript
     assert "websocketUrl.searchParams" in javascript
     assert "profileArguments" in javascript
+    assert '"/api/v1/mapping/session/prepare"' in javascript
+    assert '"/api/v1/mapping/finish"' in javascript
+    assert '"/api/v1/mapping/session"' in javascript
+    assert "mapping_output_dir" in javascript
+    assert "map_version_id" in javascript
+    assert "discardableFailedSession" in javascript
+    assert "mapping-finish-confirm" in javascript
+    assert "activeMapping" in javascript
+
+
+def test_offline_mapping_session_can_be_retained_without_writing_files(tmp_path):
+    profiles = {
+        "mapping": {
+            "mode": "MAPPING",
+            "command": ["ros2", "launch", "agt_bringup", "system.launch.py"],
+            "allowed_argument_keys": ["map_name", "use_sim_time"],
+        }
+    }
+    offline = OfflineConsoleBackend(profiles, runtime_dir=tmp_path)
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path)),
+        mode_controller=ModeController(),
+        backends={
+            "ros": {"mode_controller": ModeController()},
+            "offline": {
+                "health_provider": offline.health,
+                "readiness_provider": offline.readiness,
+                "mode_controller": offline,
+                "localization_controller": offline,
+            },
+        },
+    )
+    service.set_backend("offline")
+    service.prepare_mapping_session("offline_map")
+    service.set_mode("mapping", {"map_name": "offline_map"})
+    with pytest.raises(RuntimeError, match="不能创建第二个会话"):
+        service.prepare_mapping_session("second_map")
+    result = service.finish_mapping("retain")
+    assert result["state"] == "SIMULATED_RETAINED"
+    assert result["offline_map_slot"]["occupied"] is True
+    with pytest.raises(RuntimeError, match="最多保留一个"):
+        service.prepare_mapping_session("second_map")
+    assert not (tmp_path / "mapping_sessions").exists()
+
+
+def test_offline_mapping_ignores_unfinished_ros_session(tmp_path):
+    real_root = tmp_path / "mapping_sessions" / "real_map" / "mapping_real"
+    real_root.mkdir(parents=True)
+    (real_root / "session.yaml").write_text(
+        "map_name: real_map\nstate: PREPARED\nroot: %s\npcd_output_dir: %s\nmap_url: %s\n"
+        % (real_root, real_root / "pcd", real_root / "real_map"),
+        encoding="utf-8",
+    )
+    offline = OfflineConsoleBackend({}, runtime_dir=tmp_path)
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path)),
+        backends={
+            "ros": {"mode_controller": ModeController()},
+            "offline": {"mode_controller": offline, "localization_controller": offline},
+        },
+    )
+    service.set_backend("offline")
+    session = service.prepare_mapping_session("offline_map")
+    assert session["offline"] is True
+    assert service.mapping_session_status()["map_name"] == "offline_map"
+    assert (real_root / "session.yaml").is_file()
+
+
+def test_navigation_requires_a_selected_ready_version(tmp_path):
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path)),
+        mode_controller=ModeController(),
+        map_registry=object(),
+    )
+    with pytest.raises(ValueError, match="必须选择一个地图版本"):
+        service.set_mode("navigation", {})
+
+
+def test_online_mapping_retain_waits_for_assets_and_registers_version(tmp_path):
+    controller = MappingController()
+    registry = MapRegistry(tmp_path / "maps")
+
+    def save_map(map_url):
+        root = Path(map_url).parent
+        pgm = b"P5\n1 1\n255\n\x00"
+        (root / "online_map.pgm").write_bytes(pgm)
+        (root / "online_map.yaml").write_text(
+            "image: online_map.pgm\nresolution: 0.1\norigin: [0.0, 0.0, 0.0]\n",
+            encoding="utf-8",
+        )
+        pcd = b"# minimal test PCD\n"
+        (root / "pcd" / "localization_map.pcd").write_bytes(pcd)
+        digest = hashlib.sha256(pcd).hexdigest()
+        (root / "pcd" / "localization_map.processing.yaml").write_text(
+            f"state: ready\npcd_sha256: sha256:{digest}\nmap_file: localization_map.pcd\n",
+            encoding="utf-8",
+        )
+        return {"success": True, "message": "PGM/YAML 保存完成"}
+
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path)),
+        mode_controller=controller,
+        map_registry=registry,
+        mapping_save_provider=save_map,
+    )
+    session = service.prepare_mapping_session("online_map")
+    service.set_mode("mapping", {"mapping_output_dir": session["pcd_output_dir"]})
+    result = service.finish_mapping("retain")
+
+    assert result["state"] == "REGISTERED"
+    assert result["map_version_id"].startswith("map_")
+    rows = registry.list_versions(map_id="online_map")
+    assert rows and rows[0]["state"] == "READY"
+    assert service.mapping_session_status()["version_id"] == result["map_version_id"]
+
+
+def test_online_mapping_retain_finalizes_missing_hash_and_final_map_name(tmp_path):
+    controller = MappingController()
+    registry = MapRegistry(tmp_path / "maps")
+
+    def save_map(map_url):
+        root = Path(map_url).parent
+        (root / "final_map.pgm").write_bytes(b"P5\n1 1\n255\n\\x00")
+        (root / "final_map.yaml").write_text("image: final_map.pgm\nresolution: 0.1\norigin: [0.0, 0.0, 0.0]\n", encoding="utf-8")
+        (root / "pcd" / "localization_map.pcd").write_bytes(b"# test pcd without hash\n")
+        (root / "pcd" / "localization_map.processing.yaml").write_text("state: ready\n", encoding="utf-8")
+        return {"success": True}
+
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path)),
+        mode_controller=controller,
+        map_registry=registry,
+        mapping_save_provider=save_map,
+    )
+    session = service.prepare_mapping_session("temporary_name")
+    service.set_mode("mapping", {"mapping_output_dir": session["pcd_output_dir"]})
+
+    result = service.finish_mapping("retain", "final_map")
+
+    assert result["state"] == "REGISTERED"
+    assert result["map_name"] == "final_map"
+    record = yaml.safe_load((Path(session["root"]) / "pcd" / "localization_map.processing.yaml").read_text(encoding="utf-8"))
+    assert record["pcd_sha256"].startswith("sha256:")
+    rows = registry.list_versions(map_id="final_map")
+    assert rows and rows[0]["state"] == "READY"
+
+
+def test_failed_online_mapping_can_delete_unregistered_assets_after_mode_stops(tmp_path):
+    controller = MappingController()
+
+    class InvalidRegistry:
+        def __init__(self):
+            self.cleaned = []
+
+        def import_legacy(self, **_kwargs):
+            return SimpleNamespace(valid=False, errors=["test registration failure"], map_version_id="invalid_version")
+
+        def soft_delete(self, version_id):
+            self.cleaned.append(("soft_delete", version_id))
+
+        def purge(self, version_id):
+            self.cleaned.append(("purge", version_id))
+
+    def save_map(map_url):
+        root = Path(map_url).parent
+        (root / "failed_map.pgm").write_bytes(b"P5\n1 1\n255\n\\x00")
+        (root / "failed_map.yaml").write_text("image: failed_map.pgm\n", encoding="utf-8")
+        (root / "pcd" / "localization_map.pcd").write_bytes(b"# test pcd\n")
+        (root / "pcd" / "localization_map.processing.yaml").write_text("state: ready\n", encoding="utf-8")
+        return {"success": True}
+
+    registry = InvalidRegistry()
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path)),
+        mode_controller=controller,
+        map_registry=registry,
+        mapping_save_provider=save_map,
+    )
+    session = service.prepare_mapping_session("failed_map")
+    service.set_mode("mapping", {"mapping_output_dir": session["pcd_output_dir"]})
+
+    with pytest.raises(RuntimeError, match="地图版本登记失败"):
+        service.finish_mapping("retain")
+    assert controller.active_mode == "IDLE"
+    assert Path(session["root"]).is_dir()
+
+    result = service.finish_mapping("delete")
+    assert result["state"] == "DISCARDED"
+    assert not Path(session["root"]).exists()
+    assert registry.cleaned == [("soft_delete", "invalid_version"), ("purge", "invalid_version")]

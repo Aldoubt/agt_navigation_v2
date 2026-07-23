@@ -6,8 +6,8 @@ health:
       display_name: MID360 point cloud
       required_in_modes: [SENSOR_ONLY, MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
       required_topics:
-        - name: /agt/sensors/lidar/points
-          expected_message_type: sensor_msgs/msg/PointCloud2
+        - name: /agt/sensors/lidar/custom
+          expected_message_type: livox_ros_driver2/msg/CustomMsg
           min_rate_hz: 5.0
           max_age_sec: 1.0
     - component_id: imu
@@ -35,13 +35,20 @@ health:
           expected_message_type: sensor_msgs/msg/PointCloud2
           min_rate_hz: 1.0
           max_age_sec: 2.0
+    - component_id: mapping_occupancy
+      display_name: Mapping occupancy grid
+      required_in_modes: [MAPPING]
+      required_topics:
+        - name: /agt/map/mapping_occupancy
+          expected_message_type: nav_msgs/msg/OccupancyGrid
+          persistent: true
     - component_id: localization_tf
       display_name: Localization TF chain
       required_in_modes: [LOCALIZATION_DEBUG, NAVIGATION]
       required_frames: [map->odom, odom->base_footprint, base_link->lidar_link]
     - component_id: chassis
       display_name: BUNKER chassis
-      required_in_modes: [MAPPING, NAVIGATION]
+      required_in_modes: [NAVIGATION]
       required_topics:
         - name: /agt/chassis/connected
           expected_message_type: std_msgs/msg/Bool

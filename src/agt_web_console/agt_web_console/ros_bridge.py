@@ -1,16 +1,31 @@
 """ROS interface adapter used by the Web console runtime."""
 
 import math
+import json
+from pathlib import Path
 import threading
+import time
 from typing import Any, Mapping
 
 from agt_interfaces.action import ChangeSystemMode, Relocalize
 from agt_interfaces.msg import LocalizationStatus, SystemHealth, TaskReadiness
+from diagnostic_msgs.msg import DiagnosticArray
 from agt_interfaces.srv import SetLocalizationMode
+from nav_msgs.msg import OccupancyGrid, Odometry
+from nav2_msgs.srv import SaveMap
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs_py import point_cloud2
+from sensor_msgs.msg import BatteryState, PointCloud2
+from std_msgs.msg import Bool
+
+
+_LATCHED_MAP_QOS = QoSProfile(depth=1)
+_LATCHED_MAP_QOS.reliability = ReliabilityPolicy.RELIABLE
+_LATCHED_MAP_QOS.durability = DurabilityPolicy.TRANSIENT_LOCAL
 
 
 class RosConsoleBridge(Node):
@@ -23,21 +38,57 @@ class RosConsoleBridge(Node):
         "localization_rviz": ChangeSystemMode.Goal.MODE_LOCALIZATION_DEBUG,
     }
 
-    def __init__(self) -> None:
+    def __init__(self, runtime_dir: str | Path = "runtime", can_interface: str = "can0") -> None:
         super().__init__("agt_web_console_ros_bridge")
         group = ReentrantCallbackGroup()
         self._lock = threading.RLock()
         self._health = {"overall_state": "UNKNOWN", "components": []}
         self._readiness = {"ready": False, "blocker_codes": ["HEALTH_UNAVAILABLE"]}
         self._localization = LocalizationStatus()
+        self._mapping_map: dict[str, Any] = {"available": False, "message": "尚未收到二维建图地图"}
+        self._mapping_pointcloud: dict[str, Any] = {
+            "available": False,
+            "message": "尚未收到注册点云",
+        }
+        self._robot_pose: dict[str, Any] = {
+            "available": False,
+            "frame_id": "",
+            "x": 0.0,
+            "y": 0.0,
+            "yaw": 0.0,
+            "age_sec": None,
+        }
+        self._pointcloud_voxels: dict[tuple[int, int, int], tuple[float, float, float]] = {}
+        self._pointcloud_voxel_size = 0.10
+        self._pointcloud_max_voxels = 50000
+        self._can_interface = str(can_interface).strip() or "can0"
+        self._chassis = {
+            "available": False,
+            "connected": False,
+            "diagnostics": [],
+            "battery_voltage": None,
+            "battery_percentage": None,
+            "last_status_age_sec": None,
+        }
+        self._chassis_last_status = None
+        self._runtime_dir = Path(runtime_dir).expanduser().resolve()
+        self._status_path = self._runtime_dir / "logs" / "system_manager" / "process_status.json"
         self._managed_processes: list[dict[str, Any]] = []
+        self._active_mode = "IDLE"
         self._status_listeners: list[Any] = []
         self._mode_action = ActionClient(self, ChangeSystemMode, "/agt/system/change_mode", callback_group=group)
         self._relocalize_action = ActionClient(self, Relocalize, "/agt/localization/relocalize", callback_group=group)
         self._localization_mode = self.create_client(SetLocalizationMode, "/agt/localization/set_mode", callback_group=group)
+        self._mapping_save = self.create_client(SaveMap, "/agt_mapping_map_saver/save_map", callback_group=group)
         self.create_subscription(SystemHealth, "/agt/system/health", self._health_callback, 10, callback_group=group)
         self.create_subscription(TaskReadiness, "/agt/system/task_readiness", self._readiness_callback, 10, callback_group=group)
         self.create_subscription(LocalizationStatus, "/agt/localization/status", self._localization_callback, 10, callback_group=group)
+        self.create_subscription(OccupancyGrid, "/agt/map/mapping_occupancy", self._mapping_map_callback, _LATCHED_MAP_QOS, callback_group=group)
+        self.create_subscription(PointCloud2, "/agt/mapping/registered_points", self._mapping_pointcloud_callback, 2, callback_group=group)
+        self.create_subscription(Odometry, "/agt/mapping/odometry", self._mapping_odometry_callback, 10, callback_group=group)
+        self.create_subscription(DiagnosticArray, "/agt/chassis/status", self._chassis_diagnostic_callback, 10, callback_group=group)
+        self.create_subscription(Bool, "/agt/chassis/connected", self._chassis_connected_callback, 10, callback_group=group)
+        self.create_subscription(BatteryState, "/battery", self._battery_callback, 10, callback_group=group)
         self._executor = MultiThreadedExecutor(num_threads=2)
         self._executor.add_node(self)
         self._thread = threading.Thread(target=self._executor.spin, daemon=True)
@@ -51,12 +102,176 @@ class RosConsoleBridge(Node):
     def _readiness_callback(self, message: TaskReadiness) -> None:
         with self._lock:
             self._readiness = {"ready": message.ready, "active_mode": message.active_mode, "map_id": message.map_id, "map_version_id": message.map_version_id, "localization_state": message.localization_state, "health_revision": message.health_revision, "blocker_codes": list(message.blocker_codes), "blocker_messages": list(message.blocker_messages), "warning_codes": list(message.warning_codes), "warning_messages": list(message.warning_messages)}
+            self._active_mode = str(message.active_mode or self._active_mode).upper()
+            # A replay can publish immediately after the managed chain starts,
+            # before the first readiness message reports MAPPING. Do not clear
+            # that valid preview when the readiness transition catches up.
+            if self._active_mode != "MAPPING":
+                self._clear_mapping_previews_locked()
         self._notify_status()
 
     def _localization_callback(self, message: LocalizationStatus) -> None:
         with self._lock:
             self._localization = message
         self._notify_status()
+
+    def _mapping_map_callback(self, message: OccupancyGrid) -> None:
+        with self._lock:
+            if not self._mapping_active_locked():
+                return
+        width = int(message.info.width)
+        height = int(message.info.height)
+        if width <= 0 or height <= 0:
+            return
+        raw = list(message.data)
+        max_cells = 160000
+        stride = max(1, int(math.ceil(math.sqrt((width * height) / max_cells))))
+        sampled_width = (width + stride - 1) // stride
+        sampled_height = (height + stride - 1) // stride
+        sampled = []
+        for output_y in range(sampled_height):
+            source_y = output_y * stride
+            for output_x in range(sampled_width):
+                source_x = output_x * stride
+                values = []
+                for cell_y in range(source_y, min(source_y + stride, height)):
+                    start = cell_y * width + source_x
+                    values.extend(raw[start:min(start + stride, cell_y * width + width)])
+                if 100 in values:
+                    sampled.append(100)
+                elif -1 in values:
+                    sampled.append(-1)
+                else:
+                    sampled.append(max(values) if values else -1)
+        with self._lock:
+            if not self._mapping_active_locked():
+                return
+            self._mapping_map = {
+                "available": True,
+                "frame_id": message.header.frame_id,
+                "width": sampled_width,
+                "height": sampled_height,
+                "resolution": float(message.info.resolution) * stride,
+                "origin": {"x": float(message.info.origin.position.x), "y": float(message.info.origin.position.y)},
+                "data": sampled,
+                "downsample_factor": stride,
+            }
+
+    def _mapping_pointcloud_callback(self, message: PointCloud2) -> None:
+        try:
+            points = point_cloud2.read_points(
+                message,
+                field_names=("x", "y", "z"),
+                skip_nans=True,
+            )
+            with self._lock:
+                if not self._mapping_active_locked():
+                    return
+                for x, y, z in points:
+                    x = float(x)
+                    y = float(y)
+                    z = float(z)
+                    if not all(math.isfinite(value) for value in (x, y, z)):
+                        continue
+                    key = (
+                        math.floor(x / self._pointcloud_voxel_size),
+                        math.floor(y / self._pointcloud_voxel_size),
+                        math.floor(z / self._pointcloud_voxel_size),
+                    )
+                    self._pointcloud_voxels[key] = (x, y, z)
+                if len(self._pointcloud_voxels) > self._pointcloud_max_voxels:
+                    keep = int(self._pointcloud_max_voxels * 0.85)
+                    for key in list(self._pointcloud_voxels)[: len(self._pointcloud_voxels) - keep]:
+                        del self._pointcloud_voxels[key]
+                values = list(self._pointcloud_voxels.values())
+                self._mapping_pointcloud = {
+                    "available": bool(values),
+                    "frame_id": message.header.frame_id,
+                    "point_count": len(values),
+                    "voxel_size": self._pointcloud_voxel_size,
+                    "points": values,
+                }
+        except (AttributeError, TypeError, ValueError, RuntimeError) as error:
+            self.get_logger().warning(f"point cloud preview skipped: {error}")
+
+    def _mapping_odometry_callback(self, message: Odometry) -> None:
+        with self._lock:
+            if not self._mapping_active_locked():
+                return
+            orientation = message.pose.pose.orientation
+            yaw = math.atan2(
+                2.0 * (orientation.w * orientation.z + orientation.x * orientation.y),
+                1.0 - 2.0 * (orientation.y * orientation.y + orientation.z * orientation.z),
+            )
+            self._robot_pose = {
+                "available": True,
+                "frame_id": message.header.frame_id,
+                "x": float(message.pose.pose.position.x),
+                "y": float(message.pose.pose.position.y),
+                "yaw": float(yaw),
+                "age_sec": 0.0,
+            }
+
+    def _mapping_active_locked(self) -> bool:
+        readiness_mode = str(self._readiness.get("active_mode", "")).upper()
+        return self._active_mode == "MAPPING" or readiness_mode == "MAPPING"
+
+    def _clear_mapping_previews_locked(self) -> None:
+        self._pointcloud_voxels.clear()
+        self._robot_pose = {
+            "available": False,
+            "frame_id": "",
+            "x": 0.0,
+            "y": 0.0,
+            "yaw": 0.0,
+            "age_sec": None,
+        }
+        self._mapping_map = {"available": False, "message": "未启动建图链，二维栅格地图预览为空"}
+        self._mapping_pointcloud = {"available": False, "message": "未启动建图链，点云地图预览为空"}
+
+    def _chassis_diagnostic_callback(self, message: DiagnosticArray) -> None:
+        diagnostics = []
+        for status in message.status:
+            diagnostics.append(
+                {
+                    "name": status.name,
+                    "level": int(status.level),
+                    "message": status.message,
+                    "values": {item.key: item.value for item in status.values},
+                }
+            )
+        with self._lock:
+            self._chassis["available"] = True
+            self._chassis["diagnostics"] = diagnostics
+            self._chassis_last_status = time.monotonic()
+
+    def _chassis_connected_callback(self, message: Bool) -> None:
+        with self._lock:
+            self._chassis["available"] = True
+            self._chassis["connected"] = bool(message.data)
+
+    def _battery_callback(self, message: BatteryState) -> None:
+        with self._lock:
+            self._chassis["battery_voltage"] = self._json_number(float(message.voltage))
+            self._chassis["battery_percentage"] = self._json_number(float(message.percentage))
+
+    def _can_interface_status(self) -> dict[str, Any]:
+        interface_path = Path("/sys/class/net") / self._can_interface
+        if not interface_path.is_dir():
+            return {
+                "interface": self._can_interface,
+                "present": False,
+                "operstate": "missing",
+            }
+        try:
+            operstate = (interface_path / "operstate").read_text(encoding="ascii").strip()
+        except OSError:
+            operstate = "unknown"
+        return {
+            "interface": self._can_interface,
+            "present": True,
+            "operstate": operstate,
+        }
 
     def add_status_listener(self, callback) -> None:
         with self._lock:
@@ -89,6 +304,33 @@ class RosConsoleBridge(Node):
         with self._lock:
             return dict(self._health)
 
+    def mapping_status(self) -> dict[str, Any]:
+        with self._lock:
+            if not self._mapping_active_locked():
+                return {"available": False, "active_mode": self._active_mode, "message": "未启动建图链，二维栅格地图预览为空"}
+            status = dict(self._mapping_map)
+            status["active_mode"] = self._active_mode
+            status["robot_pose"] = dict(self._robot_pose)
+            return status
+
+    def mapping_pointcloud_status(self) -> dict[str, Any]:
+        with self._lock:
+            if not self._mapping_active_locked():
+                return {"available": False, "active_mode": self._active_mode, "message": "未启动建图链，点云地图预览为空"}
+            status = dict(self._mapping_pointcloud)
+            status["active_mode"] = self._active_mode
+            status["robot_pose"] = dict(self._robot_pose)
+            return status
+
+    def chassis_status(self) -> dict[str, Any]:
+        with self._lock:
+            status = dict(self._chassis)
+            status["diagnostics"] = list(self._chassis["diagnostics"])
+            last_status = self._chassis_last_status
+        status["last_status_age_sec"] = None if last_status is None else max(0.0, time.monotonic() - last_status)
+        status["can"] = self._can_interface_status()
+        return status
+
     def readiness(self) -> dict[str, Any]:
         with self._lock:
             return dict(self._readiness)
@@ -110,32 +352,44 @@ class RosConsoleBridge(Node):
     def start(self, profile: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if profile not in self._PROFILE_MODES:
             raise ValueError(f"unknown configured profile: {profile}")
-        if not self._mode_action.wait_for_server(timeout_sec=2.0):
-            raise RuntimeError("system mode Action is unavailable")
+        if not self._mode_action.wait_for_server(timeout_sec=5.0):
+            raise RuntimeError(
+                "系统管理器未运行：未发现 /agt/system/change_mode Action server；"
+                "请先启动 agt_system_manager，再检查 ros2 action info /agt/system/change_mode"
+            )
         goal = ChangeSystemMode.Goal()
         goal.mode = self._PROFILE_MODES[profile]
         goal.profile = profile
         goal.argument_keys = [str(key) for key in arguments]
         goal.argument_values = [str(arguments[key]) for key in arguments]
-        goal.wait_for_health = False
-        goal.startup_timeout_s = 30.0
+        # Sensor-only startup is the hardware probe. Report failed driver
+        # initialization instead of treating a launch parent as success.
+        goal.wait_for_health = profile == "sensor_only"
+        goal.startup_timeout_s = 20.0 if profile == "sensor_only" else 30.0
         handle = self._wait(self._mode_action.send_goal_async(goal), timeout=5.0)
         if not handle.accepted:
             raise RuntimeError("system mode Action rejected the profile")
-        wrapped = self._wait(handle.get_result_async(), timeout=35.0)
+        wrapped = self._wait(handle.get_result_async(), timeout=25.0 if profile == "sensor_only" else 35.0)
         result = wrapped.result
         if not result.success:
-            raise RuntimeError(result.message)
+            log_hint = f"；日志：{result.log_paths[0]}" if result.log_paths else ""
+            raise RuntimeError(f"{result.message}{log_hint}")
         with self._lock:
+            self._active_mode = str(result.active_mode or "UNKNOWN").upper()
+            if self._active_mode != "MAPPING":
+                self._clear_mapping_previews_locked()
             self._managed_processes = [
-                {"pid": pid, "profile": result.profile, "log_path": path}
+                {"pid": pid, "profile": Path(path).stem or result.profile, "log_path": path}
                 for pid, path in zip(result.process_ids, result.log_paths)
             ]
         return {"success": result.success, "active_mode": result.active_mode, "profile": result.profile, "process_ids": list(result.process_ids), "log_paths": list(result.log_paths), "message": result.message}
 
     def stop_all(self) -> list[dict[str, Any]]:
-        if not self._mode_action.wait_for_server(timeout_sec=2.0):
-            raise RuntimeError("system mode Action is unavailable")
+        if not self._mode_action.wait_for_server(timeout_sec=5.0):
+            raise RuntimeError(
+                "系统管理器未运行：未发现 /agt/system/change_mode Action server；"
+                "请先启动 agt_system_manager，再检查 ros2 action info /agt/system/change_mode"
+            )
         goal = ChangeSystemMode.Goal()
         goal.mode = ChangeSystemMode.Goal.MODE_IDLE
         handle = self._wait(self._mode_action.send_goal_async(goal), timeout=5.0)
@@ -146,11 +400,22 @@ class RosConsoleBridge(Node):
             raise RuntimeError(wrapped.result.message)
         with self._lock:
             self._managed_processes = []
+            self._active_mode = "IDLE"
+            self._clear_mapping_previews_locked()
         return [{"pid": pid, "profile": wrapped.result.profile} for pid in wrapped.result.process_ids]
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            return {"active_mode": self._readiness.get("active_mode", "UNKNOWN"), "processes": list(self._managed_processes)}
+            active_mode = self._readiness.get("active_mode") or self._active_mode or "UNKNOWN"
+            processes = list(self._managed_processes)
+        try:
+            with open(self._status_path, "r", encoding="utf-8") as stream:
+                manager_status = json.load(stream)
+            if isinstance(manager_status, list):
+                processes = manager_status
+        except (OSError, TypeError, ValueError, json.JSONDecodeError):
+            pass
+        return {"active_mode": active_mode, "processes": processes}
 
     def set_mode(self, mode: str) -> dict[str, Any]:
         if not self._localization_mode.wait_for_service(timeout_sec=2.0):
@@ -223,3 +488,24 @@ class RosConsoleBridge(Node):
     def close(self) -> None:
         self._executor.shutdown()
         self._thread.join(timeout=2.0)
+
+    def save_mapping_map(self, map_url: str) -> dict[str, Any]:
+        target = Path(str(map_url)).expanduser().resolve()
+        staging_root = (self._runtime_dir / "mapping_sessions").resolve()
+        try:
+            target.parent.relative_to(staging_root)
+        except ValueError as error:
+            raise ValueError("建图地图输出路径必须位于受管 mapping_sessions 目录") from error
+        if not target.parent.is_dir():
+            raise ValueError("建图会话输出目录不存在")
+        if not self._mapping_save.wait_for_service(timeout_sec=3.0):
+            raise RuntimeError("/agt_mapping_map_saver/save_map 服务不可用，请确认建图模式已启动")
+        request = SaveMap.Request()
+        request.map_topic = "/agt/map/mapping_occupancy"
+        request.map_url = str(target)
+        request.image_format = "pgm"
+        request.map_mode = "trinary"
+        request.free_thresh = 0.25
+        request.occupied_thresh = 0.65
+        response = self._wait(self._mapping_save.call_async(request), timeout=75.0)
+        return {"success": bool(response.result), "map_url": str(target), "message": "PGM/YAML 保存完成" if response.result else "map_saver 返回失败"}

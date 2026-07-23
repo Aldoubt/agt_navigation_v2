@@ -17,9 +17,13 @@ ros2 launch agt_bringup system.launch.py mode:=navigation \
 [`docs/workflows/relocalization_usage.md`](../../docs/workflows/relocalization_usage.md)。自动启动默认关闭；
 开启 `auto_relocalize_on_start:=true` 只会发送一次有界 Action，不代表无先验全地图搜索。
 
-`mapping` 启动 BUNKER TF、传感器、FAST-LIVO2 PCD 保存、二维投影、底盘和 RViz；可用
+`mapping` 启动传感器、FAST-LIVO2 PCD 保存、二维投影和 RViz；底盘控制默认关闭。可选
+`start_chassis_monitor:=true` 只接收 BUNKER CAN 状态，不启动安全/控制链。实车建图若确需
+轮速状态输入，使用该监测选项；不要把监测话题当作速度输出。可用
 `start_mapping_gui:=true` 额外启动只监视/编辑、禁止导航任务执行的 mapping Qt profile。
-`navigation` 关闭 PCD 保存，启动 LIO 里程计、重定位、Nav2、安全层、底盘和 Qt5。
+`navigation` 关闭 PCD 保存，启动 LIO 里程计、重定位、Nav2 和 Qt5；真实底盘控制必须显式
+设置 `start_chassis:=true`，并经过 `agt_safety`。两种模式均支持 `chassis_backend:=bunker_can|none`
+和 `can_interface:=<interface>`，为未来底盘/通讯协议替换保留配置边界。
 两个模式均可设置 `record_bag:=true`，输出到 `runtime/rosbag/`。
 
 录包入口兼容原调用，并支持版本化 `bag_profile:=minimal|mapping|localization|navigation|full_experiment`。

@@ -21,9 +21,35 @@ def generate_launch_description():
                 "cloud_topic", default_value="/agt/mapping/registered_points_lidar"
             ),
             DeclareLaunchArgument(
+                "throttled_cloud_topic", default_value="/agt/mapping/octomap_points"
+            ),
+            DeclareLaunchArgument(
+                "input_rate_hz",
+                default_value="0.2",
+                description="Maximum registered-cloud rate delivered to the full-map OctoMap projection",
+            ),
+            DeclareLaunchArgument(
                 "map_topic", default_value="/agt/map/mapping_occupancy"
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            Node(
+                package="agt_map_processing",
+                executable="octomap_cloud_throttle.py",
+                name="agt_map_processing_octomap_cloud_throttle",
+                output="screen",
+                parameters=[
+                    {
+                        "use_sim_time": ParameterValue(
+                            LaunchConfiguration("use_sim_time"), value_type=bool
+                        ),
+                        "input_topic": LaunchConfiguration("cloud_topic"),
+                        "output_topic": LaunchConfiguration("throttled_cloud_topic"),
+                        "max_rate_hz": ParameterValue(
+                            LaunchConfiguration("input_rate_hz"), value_type=float
+                        ),
+                    }
+                ],
+            ),
             Node(
                 package="octomap_server",
                 executable="octomap_server_node",
@@ -40,7 +66,7 @@ def generate_launch_description():
                     },
                 ],
                 remappings=[
-                    ("cloud_in", LaunchConfiguration("cloud_topic")),
+                    ("cloud_in", LaunchConfiguration("throttled_cloud_topic")),
                     ("projected_map", LaunchConfiguration("map_topic")),
                 ],
             ),

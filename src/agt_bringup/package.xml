@@ -23,6 +23,8 @@
   <exec_depend>agt_system_manager</exec_depend>
   <exec_depend>agt_ui_bridge</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
+  <exec_depend>nav2_map_server</exec_depend>
+  <exec_depend>nav2_lifecycle_manager</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>ros2bag</exec_depend>

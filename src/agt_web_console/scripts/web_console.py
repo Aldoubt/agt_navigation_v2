@@ -9,6 +9,7 @@ import yaml
 from agt_experiment_manager.manager import ExperimentManager
 from agt_map_manager.registry import MapRegistry
 from agt_web_console.app import create_app
+from agt_web_console.instance_lock import WebConsoleInstanceLock
 from agt_web_console.offline_backend import OfflineConsoleBackend
 from agt_web_console.ros_bridge import RosConsoleBridge
 from agt_web_console.service import WebConsoleConfig, WebConsoleService
@@ -28,10 +29,19 @@ def main(args=None) -> None:
         token=str(config_data.get("token", "")),
         runtime_dir=str(config_data.get("runtime_dir", "runtime")),
         backend=str(parsed.backend or config_data.get("backend", "ros")),
+        can_interface=str(config_data.get("can_interface", "can0")),
     )
     config.validate()
+    instance_lock = WebConsoleInstanceLock(config.runtime_dir)
+    try:
+        instance_lock.acquire()
+    except RuntimeError as error:
+        parser.error(str(error))
     map_registry = MapRegistry(Path(config.runtime_dir) / "maps")
-    experiment_manager = ExperimentManager(Path(config.runtime_dir) / "experiments")
+    experiment_manager = ExperimentManager(
+        Path(config.runtime_dir) / "experiments",
+        rosbag_root=Path(config.runtime_dir) / "rosbag",
+    )
     bag_profiles_value = str(config_data.get("bag_profiles_file", "")).strip()
     bag_profiles_path = Path(bag_profiles_value).expanduser() if bag_profiles_value else Path(get_package_share_directory("agt_experiment_manager")) / "config" / "bag_profiles.yaml"
     with open(bag_profiles_path, "r", encoding="utf-8") as stream:
@@ -39,7 +49,7 @@ def main(args=None) -> None:
     profiles_file = Path(parsed.profiles_file).expanduser() if parsed.profiles_file else Path(get_package_share_directory("agt_system_manager")) / "config" / "mode_profiles.yaml"
     import rclpy
     rclpy.init()
-    ros_controller = RosConsoleBridge()
+    ros_controller = RosConsoleBridge(runtime_dir=config.runtime_dir, can_interface=config.can_interface)
     with open(profiles_file, "r", encoding="utf-8") as stream:
         profiles = (yaml.safe_load(stream) or {}).get("profiles", {})
     offline_controller = OfflineConsoleBackend(profiles, runtime_dir=config.runtime_dir)
@@ -47,6 +57,10 @@ def main(args=None) -> None:
         config,
         health_provider=ros_controller.health,
         readiness_provider=ros_controller.readiness,
+        mapping_provider=ros_controller.mapping_status,
+        mapping_pointcloud_provider=ros_controller.mapping_pointcloud_status,
+        chassis_provider=ros_controller.chassis_status,
+        mapping_save_provider=ros_controller.save_mapping_map,
         mode_controller=ros_controller,
         map_registry=map_registry,
         experiment_manager=experiment_manager,
@@ -56,6 +70,10 @@ def main(args=None) -> None:
             "ros": {
                 "health_provider": ros_controller.health,
                 "readiness_provider": ros_controller.readiness,
+                "mapping_provider": ros_controller.mapping_status,
+                "mapping_pointcloud_provider": ros_controller.mapping_pointcloud_status,
+                "chassis_provider": ros_controller.chassis_status,
+                "mapping_save_provider": ros_controller.save_mapping_map,
                 "mode_controller": ros_controller,
                 "localization_controller": ros_controller,
             },
@@ -64,6 +82,10 @@ def main(args=None) -> None:
                 "readiness_provider": offline_controller.readiness,
                 "mode_controller": offline_controller,
                 "localization_controller": offline_controller,
+                "mapping_provider": offline_controller.mapping_status,
+                "mapping_pointcloud_provider": offline_controller.mapping_pointcloud_status,
+                "chassis_provider": lambda: {"available": False, "message": "离线模式不连接 CAN 或底盘"},
+                "mapping_save_provider": lambda _map_url: {"success": False, "message": "离线模式不写入真实地图"},
             },
         },
     )
@@ -99,10 +121,12 @@ def main(args=None) -> None:
     try:
         uvicorn.run(app, host=config.host, port=config.port)
     finally:
+        experiment_manager.close()
         offline_controller.close()
         ros_controller.close()
         if rclpy.ok():
             rclpy.shutdown()
+        instance_lock.release()
 
 
 if __name__ == "__main__":

@@ -10,6 +10,10 @@
 - 建图输出：`/agt/map/mapping_occupancy` (`nav_msgs/msg/OccupancyGrid`)。
 - 默认分辨率：`0.05 m`。
 - 默认仅把 `0.10 m <= z <= 1.00 m` 的点作为投影障碍候选。
+- 全图投影输入默认节流到 `0.2 Hz`，通过 `/agt/mapping/octomap_points` 送入 OctoMap；
+  FAST-LIVO2 原始注册点云仍以其正常频率发布，局部障碍链不经过该节流器。该限制用于避免
+  大型 OctoMap 序列化速度低于 10 Hz 输入而造成 Message Filter 积压，实际频率应在独立 bag
+  上根据地图更新延迟和峰值内存重新验证。
 
 建图工作图与导航静态图分开：OctoMap 只发布 `/agt/map/mapping_occupancy`，导航模式的
 `map_server` 才发布 `/agt/map/global_occupancy`。这样建图 RViz 不会误显示仍在运行的旧导航地图。

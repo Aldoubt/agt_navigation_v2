@@ -4,3 +4,4 @@ port: 8081
 token: ""
 runtime_dir: runtime
 backend: offline
+can_interface: can0

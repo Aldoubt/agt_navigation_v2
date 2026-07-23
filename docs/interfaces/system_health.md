@@ -12,10 +12,21 @@ component error contributes a blocker. Optional frontend, Web, and rosbag
 components can warn without becoming a motion authorization.
 
 The versioned contract is
-`src/agt_system_manager/config/health_contracts.yaml`. It covers MID360 cloud,
-IMU, FAST-LIVO2 odometry, registered cloud, the three TF edges, BUNKER status and
+`src/agt_system_manager/config/health_contracts.yaml`. The MID360 raw sensor
+check consumes `/agt/sensors/lidar/custom` (`livox_ros_driver2/msg/CustomMsg`),
+which is the point-timed input used by the current FAST-LIVO2 adapter. It covers
+MID360 cloud,
+IMU, FAST-LIVO2 odometry, registered cloud, mapping occupancy grid, the three TF edges, BUNKER status and
 odometry, `agt_safety`, structured localization, Nav2 lifecycle, map/costmap,
 disk space, and optional process health.
+
+`/agt/map/mapping_occupancy` is a durable map snapshot, not a periodic telemetry
+stream. Its publisher uses `RELIABLE + TRANSIENT_LOCAL + KEEP_LAST(1)` and the
+health node and Web bridge use the matching transient-local subscription. The
+contract marks this topic `persistent: true`: receipt proves that a valid map
+snapshot exists, so its age is reported for observability but does not expire
+the mapping component after three seconds. Cloud, odometry, sensor, and other
+live topics retain their configured freshness limits.
 
 ## Readiness matrix
 
@@ -35,3 +46,12 @@ matrix. The Action server repeats runtime prerequisites and its existing task
 validator protects against malformed or out-of-map waypoints. The health node's
 `task_valid` default means no task-specific request is currently pending; it is
 not permission to skip Action validation.
+
+For `MAPPING`, BUNKER chassis telemetry is optional because mapping can be tested
+with MID360 and FAST-LIVO2 while the vehicle is disconnected. The Web console
+reports the mapping phase from the three required mapping topics and exposes a
+read-only, bounded preview of the occupancy grid and registered point cloud.
+`start_chassis_monitor:=true` adds only read-only BUNKER CAN/status evidence;
+it never satisfies navigation readiness and never enables motion. A CAN interface
+being present or `operstate=up` is advisory and is not proof that status frames,
+odometry, safety, or a connected vehicle are healthy.

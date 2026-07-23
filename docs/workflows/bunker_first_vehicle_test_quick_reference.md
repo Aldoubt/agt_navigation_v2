@@ -116,16 +116,20 @@ timeout 5s candump "$CAN_IF"
 通过条件：接口为 `UP`，车辆上电后能持续收到 CAN 帧。无报文时检查车辆上电、终端电阻、
 线序和 CAN-USB；不要通过发送运动命令诊断总线。
 
+建图阶段底盘控制默认关闭；如需轮速或状态证据，使用
+`start_chassis_monitor:=true` 的只读监测模式，它不启动 `agt_safety`、命令 guard，也不发布
+可执行速度。只有进入真实导航并完成现场安全检查后，才显式使用 `start_chassis:=true`。
+
 ## 6. MID360 网络门禁
 
-默认配置为主机 `192.168.1.5/24`、MID360 `192.168.1.12`。选择实际雷达网卡：
+默认配置为主机 `192.168.1.5/24`、MID360 `192.168.1.157`。选择实际雷达网卡：
 
 ```bash
 ip -br link
 LIDAR_NIC=<实际有线网卡>
 sudo ip link set "$LIDAR_NIC" up
 sudo ip addr replace 192.168.1.5/24 dev "$LIDAR_NIC"
-ping -c 4 192.168.1.12
+ping -c 4 192.168.1.157
 ```
 
 如现场地址不同，复制网络模板到 runtime 后编辑，不提交现场 IP：

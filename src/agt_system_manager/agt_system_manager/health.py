@@ -161,7 +161,10 @@ class HealthEvaluator:
                     if spec.get("expected_message_type") and observation.message_type:
                         if observation.message_type != str(spec["expected_message_type"]):
                             checks.append(("ERROR", name, "message_type_mismatch"))
-                    if age > float(spec.get("max_age_sec", contract.get("max_age_sec", float("inf")))):
+                    if (
+                        age > float(spec.get("max_age_sec", contract.get("max_age_sec", float("inf"))))
+                        and not bool(spec.get("persistent", contract.get("persistent", False)))
+                    ):
                         checks.append(("ERROR", name, "message_expired"))
                     min_rate = spec.get("min_rate_hz", contract.get("min_rate_hz"))
                     if min_rate is not None and rate < float(min_rate):

@@ -86,3 +86,22 @@ def test_components_not_required_in_current_mode_do_not_make_health_unknown():
     result = evaluator.evaluate("SENSOR_ONLY")
     assert result.overall_state == OK
     assert result.components[1].state == "UNKNOWN"
+
+
+def test_persistent_topic_does_not_expire_after_latched_delivery():
+    evaluator = HealthEvaluator({
+        "health": {
+            "components": [{
+                "component_id": "latched_map",
+                "display_name": "Latched map",
+                "required_in_modes": ["MAPPING"],
+                "required_topics": [{
+                    "name": "/map",
+                    "max_age_sec": 3.0,
+                    "persistent": True,
+                }],
+            }]
+        }
+    })
+    result = evaluator.evaluate("MAPPING", {"/map": TopicObservation(1, 0.0, 1.0)}, now=30.0)
+    assert result.overall_state == OK

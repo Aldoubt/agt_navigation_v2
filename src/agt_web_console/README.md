@@ -5,6 +5,11 @@ task-readiness, localization, map-registry, experiment, and process-manager
 services. It does not publish `cmd_vel`, publish TF, run localization or mapping
 algorithms, or accept arbitrary shell commands.
 
+In `MAPPING`, its ROS bag playback path is input-only: the manager replays the
+raw MID360/IMU topic allowlist and excludes recorded FAST-LIVO2 outputs and
+recorded `/tf`. This keeps one publisher for each mapping output and lets the
+live FAST-LIVO2 chain own those outputs.
+
 FastAPI, Starlette, and Uvicorn are optional runtime dependencies because the
 base ROS Humble image does not provide them. The service layer and offline tests
 remain usable without those packages. The default listener is `127.0.0.1`; a

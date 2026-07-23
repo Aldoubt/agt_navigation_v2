@@ -204,6 +204,9 @@
 - For each module, document inputs, outputs, TF responsibility, and non-goals.
 
 ## Web Experiment and Operations Console Contract
+- Real MID360 health checks consume the adapter's `/agt/sensors/lidar/custom`
+  `livox_ros_driver2/msg/CustomMsg` input. A running driver process is not
+  considered healthy until this topic and `/agt/sensors/imu/data` are fresh.
 - `agt_system_manager`, `agt_map_manager`, `agt_experiment_manager`, and
   `agt_web_console` remain separate ownership boundaries; do not move their
   health, process, map, or experiment logic into `agt_ui_bridge`.
@@ -234,7 +237,80 @@
   `map -> odom` owner.
 - The Web default listener is `127.0.0.1`; a non-loopback listener requires a
   token. Log browsing is limited to manager-owned runtime roots.
+- A configured Web `runtime_dir` admits only one Web process; duplicate startup
+  must fail before creating another `agt_web_console_ros_bridge` node.
 - Web `offline` mode is an explicit UI-test backend only. It may simulate
   configured profile state and bounded relocalization feedback, but must never
   start ROS processes, record bags, publish TF/velocity, or mark task readiness
-  executable. Backend switching requires all managed modules to be stopped.
+  executable. It may show a bounded, clearly marked simulated occupancy and
+  point-cloud preview after the simulated bag workflow enters mapping, but it
+  must never read bag messages or export PGM/YAML/PCD. The simulator has at most
+  one in-memory retained map slot. Backend switching requires all managed
+  modules to be stopped.
+- The Web console's mapping state is evidence-based: `MAPPING` requires fresh
+  `/agt/mapping/odometry` and `/agt/mapping/registered_points_lidar`; the
+  `/agt/map/mapping_occupancy` snapshot uses matching `RELIABLE +
+  TRANSIENT_LOCAL` QoS and is persistent rather than a three-second periodic
+  observation. Its occupancy preview is bounded,
+  read-only UI data and cannot feed navigation.
+- Full-map OctoMap projection consumes an explicit bounded-rate copy of the
+  registered cloud; the immediate local obstacle chain must continue consuming
+  the unthrottled registered cloud.
+- Web mapping bag playback is forced to the configured raw-input allowlist
+  (`/clock`, `/tf_static`, MID360 CustomMsg, and IMU), excluding recorded
+  FAST-LIVO2 outputs and `/tf`; navigation mode refuses bag playback.
+- MID360 sensor startup is owned by a reusable manager `sensor_only` process
+  group. Mapping/navigation transitions reuse that group and stop only the
+  previous main chain; switching to `SENSOR_ONLY` stops mapping/navigation.
+  Mapping and navigation chassis startup is explicit and defaults off for
+  disconnected-vehicle tests.
+- The Web sensor-start control is evidence-locked: an active managed sensor
+  process, healthy MID360 evidence, or an active mapping/navigation chain
+  disables repeat startup. Mapping and navigation have separate primary
+  controls; a running primary chain disables the other.
+- The ROS Web backend requires a live `/agt/system/change_mode` Action server
+  owned by `agt_system_mode_manager`; Web must report the missing server and
+  its diagnostic command instead of treating an unavailable manager as a
+  mapping launch failure.
+- Web mapping completion is an explicit retain/delete decision. Retain saves
+  PGM/YAML through the configured map-saver service, waits for the ready
+  FAST-LIVO2 PCD processing record, and only then delegates immutable version
+  registration to `agt_map_manager`; the finish UI must confirm acquisition is
+  complete and allow a validated final map name before saving. For a managed
+  Web session, a ready record without `pcd_sha256` is finalized from the stopped
+  PCD before registration; an existing mismatched hash remains fail-closed.
+  Delete removes only the managed temporary mapping session. Offline
+  retain/delete is simulation-only and writes no real assets.
+- Web navigation startup requires an active `READY` map version and derives
+  `map`, localization PCD, and processing-record arguments from its manifest.
+  Browser-supplied asset paths must match the selected version or the service
+  rejects the request.
+- `agt_chassis` currently exposes the `bunker_can` backend. `operation_mode:=monitor`
+  starts only the BUNKER CAN/status path, remaps the driver's command input to the
+  deliberately unowned `/agt/chassis/monitor_cmd_vel`, and must not start
+  `agt_safety` or the command guard. Mapping may use this mode for telemetry only;
+  navigation control requires explicit `start_chassis:=true` and remains
+  `Nav2 -> agt_safety -> agt_chassis`.
+- CAN interface provisioning is a host privilege boundary. Web may read the
+  configured interface's `/sys/class/net/<iface>/operstate` and show diagnostics,
+  but it must never run `sudo`, `ip link`, `modprobe`, or an arbitrary CAN setup
+  command. Provision CAN once through an administrator-owned system service or
+  equivalent host configuration, then let the ROS node consume the ready interface.
+- The Web point-cloud preview is a bounded, downsampled UI cache of registered
+  mapping points. It is read-only, must not be treated as the persisted PCD or
+  OccupancyGrid, and must not feed localization, planning, validation, or control.
+- ROS Web bag replay is limited to complete bundles under the configured
+  `runtime/rosbag` root and uses the fixed `ros2 bag play --clock` command. The
+  offline backend may simulate the selected bundle state for UI testing, but it
+  never reads ROS messages, starts `ros2 bag play`, records bags, publishes
+  topics, or changes task readiness; real replayed nodes must explicitly use
+  simulated time and normal readiness/safety gates still apply.
+- Mapping algorithm startup is independent of sensor startup. A mapping profile
+  may explicitly use `start_sensor:=false` for historical bag input; FAST-LIVO2
+  and map processing then wait for their configured input topics. The Web
+  mapping input selector must force `use_sim_time` for historical replay.
+- Web mapping previews are mode-gated: `/agt/mapping/registered_points` and
+  `/agt/map/mapping_occupancy` may populate the UI only while the managed main
+  mode is `MAPPING`; stopping or never starting that mode clears both previews.
+  Preview pan/robot-centering is view-only and cannot alter map coordinates or
+  feed navigation.

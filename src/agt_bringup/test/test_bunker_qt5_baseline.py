@@ -16,7 +16,12 @@ def test_mapping_mode_offers_non_executing_gui_but_keeps_it_off_by_default():
     assert '"profile": "mapping"' in source
     assert '"source_map_topic": "/agt/map/mapping_occupancy"' in source
     assert '"map_frame_id": "odom"' in source
-    assert "map_saver" not in source
+    assert 'executable="map_saver_server"' in source
+    assert 'name="agt_mapping_map_saver"' in source
+    assert 'name="agt_mapping_map_saver_lifecycle"' in source
+    assert 'DeclareLaunchArgument(\n                "mapping_output_dir"' in source
+    assert '"start_chassis",\n                default_value="false"' in source
+    assert '"start_chassis_monitor", default_value="false"' in source
 
 
 def test_navigation_mode_starts_navigation_gui_and_defaults_optional_features_off():
@@ -28,12 +33,15 @@ def test_navigation_mode_starts_navigation_gui_and_defaults_optional_features_of
     assert 'DeclareLaunchArgument("start_coverage_planning", default_value="false")' in source
     assert '"global_map_processing_record"' in source
     assert 'DeclareLaunchArgument("map_id", default_value="")' in source
+    assert '"map_version_id"' in read("src/agt_bringup/launch/system.launch.py")
     assert "OpaqueFunction(function=validate_navigation_arguments)" in source
     nav_source = read("src/agt_navigation/launch/navigation.launch.py")
     assert 'DeclareLaunchArgument("autostart", default_value="false")' in nav_source
     assert 'DeclareLaunchArgument("enable_localization_gate", default_value="true")' in nav_source
     assert '"auto_relocalize_on_start"' in source
     assert 'executable="automatic_relocalization.py"' in source
+    assert '"start_chassis",\n                default_value="false"' in source
+    assert 'DeclareLaunchArgument("start_chassis_monitor", default_value="false")' in source
     assert 'auto_relocalize_on_start": LaunchConfiguration(' in read(
         "src/agt_bringup/launch/system.launch.py"
     )
@@ -48,6 +56,11 @@ def test_system_passes_gui_to_both_modes_and_keeps_optional_features_off():
     assert 'DeclareLaunchArgument("start_coverage_planning", default_value="false")' in source
     assert 'DeclareLaunchArgument("global_map_processing_record", default_value="")' in source
     assert '"global_map_processing_record": LaunchConfiguration(' in source
+    assert '"user_config_path": LaunchConfiguration("user_config_path")' in source
+    assert 'DeclareLaunchArgument(\n                "start_chassis",\n                default_value="false"' in source
+    assert '"start_chassis_monitor",\n                default_value="false"' in source
+    assert 'DeclareLaunchArgument("chassis_backend", default_value="bunker_can")' in source
+    assert 'DeclareLaunchArgument("can_interface", default_value="can0")' in source
 
 
 def test_nav_velocity_passes_collision_monitor_and_safety():
@@ -64,7 +77,13 @@ def test_nav_velocity_passes_collision_monitor_and_safety():
     assert 'Twist, "/agt/cmd_vel_manual"' in safety
     assert "input_topic: /agt/safety/cmd_vel" in guard_config
     assert "output_topic: /agt/chassis/cmd_vel" in guard_config
-    assert '("/cmd_vel", "/agt/chassis/cmd_vel")' in chassis_launch
+    assert '("/cmd_vel", LaunchConfiguration("command_topic"))' in chassis_launch
+    assert '"operation_mode",\n                default_value="control"' in chassis_launch
+    assert 'LaunchConfiguration("operation_mode")' in chassis_launch
+    assert 'LaunchConfiguration("command_topic")' in chassis_launch
+    assert '"command_topic": "/agt/chassis/monitor_cmd_vel"' in read(
+        "src/agt_bringup/launch/mapping_mode.launch.py"
+    )
 
 
 def test_bunker_driver_does_not_publish_duplicate_odom_tf_by_default():

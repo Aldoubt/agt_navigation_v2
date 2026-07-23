@@ -28,8 +28,7 @@ def default_runtime_dir():
 
 def prepare_runtime(context):
     runtime_dir = Path(LaunchConfiguration("runtime_dir").perform(context))
-    map_name = LaunchConfiguration("map_name").perform(context)
-    runtime_dir.joinpath("maps", map_name, "pcd").mkdir(parents=True, exist_ok=True)
+    Path(LaunchConfiguration("mapping_output_dir").perform(context)).mkdir(parents=True, exist_ok=True)
     runtime_dir.joinpath("rosbag").mkdir(parents=True, exist_ok=True)
     return []
 
@@ -38,7 +37,7 @@ def generate_launch_description():
     use_sim_time = LaunchConfiguration("use_sim_time")
     runtime_dir = LaunchConfiguration("runtime_dir")
     map_name = LaunchConfiguration("map_name")
-    pcd_dir = PathJoinSubstitution([runtime_dir, "maps", map_name, "pcd"])
+    pcd_dir = LaunchConfiguration("mapping_output_dir")
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     bag_name = PythonExpression(["'", map_name, f"_mapping_{timestamp}'"])
 
@@ -46,9 +45,26 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("runtime_dir", default_value=default_runtime_dir()),
             DeclareLaunchArgument("map_name", default_value="mid360_map"),
+            DeclareLaunchArgument(
+                "mapping_output_dir",
+                default_value=PathJoinSubstitution([runtime_dir, "maps", map_name, "pcd"]),
+                description="Managed temporary PCD directory for this mapping session",
+            ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
+            DeclareLaunchArgument(
+                "user_config_path",
+                default_value=str(share("agt_sensor_adapters") / "config" / "mid360_network.json"),
+                description="Livox MID360 network configuration JSON",
+            ),
             DeclareLaunchArgument("start_sensor", default_value="true"),
-            DeclareLaunchArgument("start_chassis", default_value="true"),
+            DeclareLaunchArgument(
+                "start_chassis",
+                default_value="false",
+                description="Mapping does not start chassis control unless explicitly enabled",
+            ),
+            DeclareLaunchArgument("start_chassis_monitor", default_value="false"),
+            DeclareLaunchArgument("chassis_backend", default_value="bunker_can"),
+            DeclareLaunchArgument("can_interface", default_value="can0"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument(
                 "start_gui",
@@ -59,6 +75,7 @@ def generate_launch_description():
                 ),
             ),
             DeclareLaunchArgument("record_bag", default_value="false"),
+            DeclareLaunchArgument("bag_profile", default_value="full_experiment"),
             OpaqueFunction(function=prepare_runtime),
             include(
                 "agt_description",
@@ -68,6 +85,10 @@ def generate_launch_description():
             include(
                 "agt_sensor_adapters",
                 "mid360.launch.py",
+                {
+                    "user_config_path": LaunchConfiguration("user_config_path"),
+                    "use_sim_time": use_sim_time,
+                },
                 condition=IfCondition(LaunchConfiguration("start_sensor")),
             ),
             include(
@@ -95,11 +116,58 @@ def generate_launch_description():
                     "use_sim_time": use_sim_time,
                 },
             ),
+            Node(
+                package="nav2_map_server",
+                executable="map_saver_server",
+                name="agt_mapping_map_saver",
+                output="screen",
+                parameters=[
+                    {
+                        "use_sim_time": use_sim_time,
+                        "save_map_timeout": 60.0,
+                        "free_thresh_default": 0.25,
+                        "occupied_thresh_default": 0.65,
+                    }
+                ],
+            ),
+            Node(
+                package="nav2_lifecycle_manager",
+                executable="lifecycle_manager",
+                name="agt_mapping_map_saver_lifecycle",
+                output="screen",
+                parameters=[
+                    {
+                        "use_sim_time": use_sim_time,
+                        "autostart": True,
+                        "node_names": ["agt_mapping_map_saver"],
+                    }
+                ],
+            ),
             include(
                 "agt_chassis",
                 "bunker.launch.py",
-                {"use_sim_time": use_sim_time},
+                {
+                    "use_sim_time": use_sim_time,
+                    "chassis_backend": LaunchConfiguration("chassis_backend"),
+                    "can_interface": LaunchConfiguration("can_interface"),
+                    "operation_mode": "control",
+                    "start_safety": "true",
+                },
                 IfCondition(LaunchConfiguration("start_chassis")),
+            ),
+            include(
+                "agt_chassis",
+                "bunker.launch.py",
+                {
+                    "use_sim_time": use_sim_time,
+                    "chassis_backend": LaunchConfiguration("chassis_backend"),
+                    "can_interface": LaunchConfiguration("can_interface"),
+                    "operation_mode": "monitor",
+                    "start_driver": "true",
+                    "start_safety": "false",
+                    "command_topic": "/agt/chassis/monitor_cmd_vel",
+                },
+                IfCondition(LaunchConfiguration("start_chassis_monitor")),
             ),
             Node(
                 package="rviz2",
@@ -127,7 +195,11 @@ def generate_launch_description():
             include(
                 "agt_bringup",
                 "bag_record.launch.py",
-                {"runtime_dir": runtime_dir, "bag_name": bag_name},
+                {
+                    "runtime_dir": runtime_dir,
+                    "bag_name": bag_name,
+                    "bag_profile": LaunchConfiguration("bag_profile"),
+                },
                 IfCondition(LaunchConfiguration("record_bag")),
             ),
         ]

@@ -6,6 +6,7 @@ import rclpy
 from agt_interfaces.msg import LocalizationStatus
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import TransformStamped
+from livox_ros_driver2.msg import CustomMsg
 from lifecycle_msgs.msg import State
 from lifecycle_msgs.srv import GetState
 from nav_msgs.msg import OccupancyGrid, Odometry
@@ -24,7 +25,7 @@ class HealthSmokePublisher(Node):
         self._drop_topic = str(self.declare_parameter("drop_topic", "").value)
         self.add_on_set_parameters_callback(self._on_parameters)
         self._topic_publishers = {
-            "/agt/sensors/lidar/points": self.create_publisher(PointCloud2, "/agt/sensors/lidar/points", 10),
+            "/agt/sensors/lidar/custom": self.create_publisher(CustomMsg, "/agt/sensors/lidar/custom", 10),
             "/agt/sensors/imu/data": self.create_publisher(Imu, "/agt/sensors/imu/data", 10),
             "/agt/mapping/odometry": self.create_publisher(Odometry, "/agt/mapping/odometry", 10),
             "/agt/mapping/registered_points_lidar": self.create_publisher(PointCloud2, "/agt/mapping/registered_points_lidar", 10),
@@ -85,6 +86,8 @@ class HealthSmokePublisher(Node):
     def _tick(self) -> None:
         stamp = self.get_clock().now().to_msg()
         cloud = self._cloud(stamp, "lidar_link")
+        custom_cloud = CustomMsg()
+        custom_cloud.header = cloud.header
         odom = self._odom(stamp)
         imu = Imu()
         imu.header.stamp = stamp
@@ -110,7 +113,7 @@ class HealthSmokePublisher(Node):
         grid.info.origin.orientation.w = 1.0
         grid.data = [0]
         messages = {
-            "/agt/sensors/lidar/points": cloud,
+            "/agt/sensors/lidar/custom": custom_cloud,
             "/agt/sensors/imu/data": imu,
             "/agt/mapping/odometry": odom,
             "/agt/mapping/registered_points_lidar": cloud,
