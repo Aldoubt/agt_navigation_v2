@@ -40,7 +40,7 @@ def load_occupancy_map(yaml_path: Path, frame_id: str) -> OccupancyGrid:
     negate = bool(metadata.get("negate", 0))
     probability = pixels / 255.0 if negate else (255.0 - pixels) / 255.0
     occupied_thresh = float(metadata.get("occupied_thresh", 0.65))
-    free_thresh = float(metadata.get("free_thresh", 0.25))
+    free_thresh = float(metadata.get("free_thresh", 0.196))
     values = np.full(probability.shape, -1, dtype=np.int8)
     values[probability >= occupied_thresh] = 100
     values[probability <= free_thresh] = 0
@@ -160,7 +160,7 @@ class MapIoBridge(Node):
             response.result = False
             return response
         try:
-            free_thresh = request.free_thresh if request.free_thresh > 0.0 else 0.25
+            free_thresh = request.free_thresh if request.free_thresh > 0.0 else 0.196
             occupied_thresh = (
                 request.occupied_thresh if request.occupied_thresh > 0.0 else 0.65
             )

@@ -10,6 +10,15 @@ health:
           expected_message_type: livox_ros_driver2/msg/CustomMsg
           min_rate_hz: 5.0
           max_age_sec: 1.0
+    - component_id: livox_self_filter
+      display_name: Livox CustomMsg self filter
+      required_in_modes: [MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
+      required_topics:
+        - name: /agt/sensors/lidar/custom_filtered
+          expected_message_type: livox_ros_driver2/msg/CustomMsg
+          min_rate_hz: 5.0
+          max_age_sec: 1.0
+      required_nodes: [agt_livox_self_filter]
     - component_id: imu
       display_name: MID360 IMU
       required_in_modes: [SENSOR_ONLY, MAPPING, LOCALIZATION_DEBUG, NAVIGATION]

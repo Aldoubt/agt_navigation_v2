@@ -311,7 +311,7 @@ class MapEditorWindow(QMainWindow):
         request.map_url = str(Path(path).resolve())
         request.image_format = "pgm"
         request.map_mode = "trinary"
-        request.free_thresh = 0.25
+        request.free_thresh = 0.196
         request.occupied_thresh = 0.65
         self.pending = ("save", self.node.save_client.call_async(request))
 

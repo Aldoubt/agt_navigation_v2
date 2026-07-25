@@ -505,7 +505,7 @@ class RosConsoleBridge(Node):
         request.map_url = str(target)
         request.image_format = "pgm"
         request.map_mode = "trinary"
-        request.free_thresh = 0.25
+        request.free_thresh = 0.196
         request.occupied_thresh = 0.65
         response = self._wait(self._mapping_save.call_async(request), timeout=75.0)
         return {"success": bool(response.result), "map_url": str(target), "message": "PGM/YAML 保存完成" if response.result else "map_saver 返回失败"}

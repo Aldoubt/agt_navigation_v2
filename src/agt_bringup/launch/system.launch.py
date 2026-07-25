@@ -110,12 +110,17 @@ def generate_launch_description():
         "use_sim_time": LaunchConfiguration("use_sim_time"),
         "user_config_path": LaunchConfiguration("user_config_path"),
         "start_sensor": LaunchConfiguration("start_sensor"),
+        "start_lidar_self_filter": LaunchConfiguration("start_lidar_self_filter"),
+        "lidar_self_filter_params_file": LaunchConfiguration(
+            "lidar_self_filter_params_file"
+        ),
         "start_chassis": LaunchConfiguration("start_chassis"),
         "start_chassis_monitor": LaunchConfiguration("start_chassis_monitor"),
         "chassis_backend": LaunchConfiguration("chassis_backend"),
         "can_interface": LaunchConfiguration("can_interface"),
         "record_bag": LaunchConfiguration("record_bag"),
         "bag_profile": LaunchConfiguration("bag_profile"),
+        "platform_profile": LaunchConfiguration("platform_profile"),
     }
     return LaunchDescription(
         [
@@ -145,6 +150,15 @@ def generate_launch_description():
             DeclareLaunchArgument("health_contract", default_value=str(Path(get_package_share_directory("agt_system_manager")) / "config" / "health_contracts.yaml")),
             DeclareLaunchArgument("active_map_pointer", default_value=""),
             DeclareLaunchArgument("start_sensor", default_value="true"),
+            DeclareLaunchArgument("start_lidar_self_filter", default_value="true"),
+            DeclareLaunchArgument(
+                "lidar_self_filter_params_file",
+                default_value=str(
+                    Path(get_package_share_directory("agt_sensor_adapters"))
+                    / "config"
+                    / "livox_self_filter.yaml"
+                ),
+            ),
             DeclareLaunchArgument(
                 "start_chassis",
                 default_value="false",

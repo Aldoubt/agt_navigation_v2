@@ -2,6 +2,11 @@
 
 ## Topics
 - `/agt/sensors/lidar/custom`：`livox_ros_driver2/msg/CustomMsg`，MID360 原始输入。
+- `/agt/sensors/lidar/custom_filtered`：`livox_ros_driver2/msg/CustomMsg`，由
+  `agt_livox_self_filter` 在 FAST-LIVO2 之前发布；保留通过点的完整字段和原始顺序。
+- `/agt/sensors/lidar/self_filter/boxes`：`visualization_msgs/msg/MarkerArray`，可选的
+  `base_footprint` 自滤除盒可视化。
+- `/diagnostics` 中的 `agt_livox_self_filter`：profile、帧、计数、无效点、TF 失败和耗时诊断。
 - `/agt/sensors/lidar/points`：通用 `sensor_msgs/msg/PointCloud2` 输出，不是当前 MID360 原始驱动输入。
 - `/agt/sensors/imu/data`
 - `/agt/mapping/odometry`

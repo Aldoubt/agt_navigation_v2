@@ -56,7 +56,20 @@ def generate_launch_description():
                 default_value=str(share("agt_sensor_adapters") / "config" / "mid360_network.json"),
                 description="Livox MID360 network configuration JSON",
             ),
+            DeclareLaunchArgument(
+                "platform_profile",
+                default_value=str(
+                    share("agt_bringup").parents[3] / "profiles" / "platforms" / "bunker.yaml"
+                ),
+            ),
             DeclareLaunchArgument("start_sensor", default_value="true"),
+            DeclareLaunchArgument("start_lidar_self_filter", default_value="true"),
+            DeclareLaunchArgument(
+                "lidar_self_filter_params_file",
+                default_value=str(
+                    share("agt_sensor_adapters") / "config" / "livox_self_filter.yaml"
+                ),
+            ),
             DeclareLaunchArgument(
                 "start_chassis",
                 default_value="false",
@@ -66,6 +79,14 @@ def generate_launch_description():
             DeclareLaunchArgument("chassis_backend", default_value="bunker_can"),
             DeclareLaunchArgument("can_interface", default_value="can0"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
+            DeclareLaunchArgument(
+                "start_octomap_projection",
+                default_value="true",
+                description="Start the bounded-rate full-map OctoMap projection",
+            ),
+            DeclareLaunchArgument("octomap_input_rate_hz", default_value="0.2"),
+            DeclareLaunchArgument("octomap_cloud_voxel_leaf_size", default_value="0.10"),
+            DeclareLaunchArgument("octomap_cloud_max_points", default_value="8000"),
             DeclareLaunchArgument(
                 "start_gui",
                 default_value="false",
@@ -103,6 +124,11 @@ def generate_launch_description():
                     "save_pcd": "true",
                     "pcd_save_interval": "-1",
                     "pcd_output_dir": pcd_dir,
+                    "platform_profile": LaunchConfiguration("platform_profile"),
+                    "start_lidar_self_filter": LaunchConfiguration("start_lidar_self_filter"),
+                    "lidar_self_filter_params_file": LaunchConfiguration(
+                        "lidar_self_filter_params_file"
+                    ),
                 },
             ),
             include(
@@ -114,7 +140,13 @@ def generate_launch_description():
                     ),
                     "map_topic": "/agt/map/mapping_occupancy",
                     "use_sim_time": use_sim_time,
+                    "input_rate_hz": LaunchConfiguration("octomap_input_rate_hz"),
+                    "cloud_voxel_leaf_size": LaunchConfiguration(
+                        "octomap_cloud_voxel_leaf_size"
+                    ),
+                    "cloud_max_points": LaunchConfiguration("octomap_cloud_max_points"),
                 },
+                IfCondition(LaunchConfiguration("start_octomap_projection")),
             ),
             Node(
                 package="nav2_map_server",
@@ -125,7 +157,9 @@ def generate_launch_description():
                     {
                         "use_sim_time": use_sim_time,
                         "save_map_timeout": 60.0,
-                        "free_thresh_default": 0.25,
+                        # Keep the canonical PGM unknown value (205) unknown when
+                        # Nav2 reloads the saved trinary map.
+                        "free_thresh_default": 0.196,
                         "occupied_thresh_default": 0.65,
                     }
                 ],

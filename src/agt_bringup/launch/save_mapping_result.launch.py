@@ -49,6 +49,8 @@ def generate_launch_description():
                     "-p",
                     "map_subscribe_transient_local:=true",
                     "-p",
+                    "free_thresh_default:=0.196",
+                    "-p",
                     "save_map_timeout:=60.0",
                 ],
                 output="screen",

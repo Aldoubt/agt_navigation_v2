@@ -29,6 +29,16 @@ def generate_launch_description():
                 description="Maximum registered-cloud rate delivered to the full-map OctoMap projection",
             ),
             DeclareLaunchArgument(
+                "cloud_voxel_leaf_size",
+                default_value="0.10",
+                description="Voxel leaf used before the cloud reaches OctoMap",
+            ),
+            DeclareLaunchArgument(
+                "cloud_max_points",
+                default_value="8000",
+                description="Maximum XYZ points sent per throttled OctoMap cloud; zero disables the cap",
+            ),
+            DeclareLaunchArgument(
                 "map_topic", default_value="/agt/map/mapping_occupancy"
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
@@ -46,6 +56,12 @@ def generate_launch_description():
                         "output_topic": LaunchConfiguration("throttled_cloud_topic"),
                         "max_rate_hz": ParameterValue(
                             LaunchConfiguration("input_rate_hz"), value_type=float
+                        ),
+                        "voxel_leaf_size": ParameterValue(
+                            LaunchConfiguration("cloud_voxel_leaf_size"), value_type=float
+                        ),
+                        "max_points": ParameterValue(
+                            LaunchConfiguration("cloud_max_points"), value_type=int
                         ),
                     }
                 ],

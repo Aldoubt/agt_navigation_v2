@@ -10,6 +10,9 @@ NAV2_CONFIG_PATH = ROOT / "src/agt_navigation/config/nav2_bunker.yaml"
 OBSTACLE_CONFIG_PATH = (
     ROOT / "src/agt_perception/config/local_obstacle_filter.yaml"
 )
+SELF_FILTER_CONFIG_PATH = (
+    ROOT / "src/agt_sensor_adapters/config/livox_self_filter.yaml"
+)
 
 
 def _load_yaml(path):
@@ -68,3 +71,31 @@ def test_obstacle_filter_crop_matches_the_platform_navigation_footprint():
     assert parameters["robot_max_x"] == pytest.approx(expected["max_x"])
     assert parameters["robot_min_y"] == pytest.approx(expected["min_y"])
     assert parameters["robot_max_y"] == pytest.approx(expected["max_y"])
+
+
+def test_self_filter_geometry_uses_physical_dimensions_and_explicit_boxes():
+    profile = _load_yaml(PROFILE_PATH)["platform"]
+    geometry = profile["geometry"]
+    self_filter = geometry["self_filter"]
+
+    assert self_filter["enabled"] is True
+    assert self_filter["frame"] == profile["footprint_frame"]
+    assert self_filter["include_chassis_body"] is True
+    assert self_filter["padding"] >= 0.0
+    assert self_filter["boxes"][0]["verified"] is False
+    assert self_filter["boxes"][0]["min"][2] < self_filter["boxes"][0]["max"][2]
+    assert SELF_FILTER_CONFIG_PATH.exists()
+
+
+def test_self_filter_does_not_reuse_navigation_footprint_as_box_source():
+    profile = _load_yaml(PROFILE_PATH)["platform"]["geometry"]
+    self_filter = profile["self_filter"]
+    body = {
+        "min_x": -profile["length"] / 2.0,
+        "max_x": profile["length"] / 2.0,
+        "min_y": -profile["width"] / 2.0,
+        "max_y": profile["width"] / 2.0,
+    }
+    navigation = _bounds(profile["navigation_footprint"])
+    assert body["max_x"] < navigation["max_x"]
+    assert self_filter["padding"] != pytest.approx(0.08)

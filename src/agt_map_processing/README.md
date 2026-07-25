@@ -10,10 +10,36 @@
 - 建图输出：`/agt/map/mapping_occupancy` (`nav_msgs/msg/OccupancyGrid`)。
 - 默认分辨率：`0.05 m`。
 - 默认仅把 `0.10 m <= z <= 1.00 m` 的点作为投影障碍候选。
-- 全图投影输入默认节流到 `0.2 Hz`，通过 `/agt/mapping/octomap_points` 送入 OctoMap；
+- 全图投影输入默认节流到 `0.2 Hz`，先以 `0.10 m` 体素和每帧 `8000` 点上限压缩，再通过
+  `/agt/mapping/octomap_points` 送入 OctoMap；
   FAST-LIVO2 原始注册点云仍以其正常频率发布，局部障碍链不经过该节流器。该限制用于避免
   大型 OctoMap 序列化速度低于 10 Hz 输入而造成 Message Filter 积压，实际频率应在独立 bag
   上根据地图更新延迟和峰值内存重新验证。
+
+OctoMap 是持久 3D 八叉树，会同时保存射线经过的 free 节点和终点 occupied 节点；`0.05 m`
+分辨率、`40 m` 最大射线和 MID360 原始点数的组合会让节点数随覆盖区域持续增长。在线 baseline
+已将最大射线改为 `15 m`，启用增量二维投影和压缩发布。`Message Filter queue is full` 或
+`timestamp is earlier than all the data in the transform cache` 表示投影处理/TF 时间轴已经落后，
+不是可以通过增大队列解决的内存泄漏；增大队列只会保留更多待处理点云。
+
+只需要 FAST-LIVO2 PCD 时关闭全图 3D 投影，避免在长 bag 回放中建立持久 OctoMap：
+
+```bash
+ros2 launch agt_bringup mapping_mode.launch.py \
+  use_sim_time:=true start_sensor:=false start_chassis:=false \
+  start_octomap_projection:=false start_rviz:=false start_gui:=false
+```
+
+需要在线 2D 预览时保留投影，但可以进一步降低输入负载：
+
+```bash
+ros2 launch agt_map_processing octomap_projection.launch.py \
+  use_sim_time:=true input_rate_hz:=0.1 \
+  cloud_voxel_leaf_size:=0.15 cloud_max_points:=5000
+```
+
+最终全局 PGM 不应依赖这个无限增长的在线 3D 树；应使用离线“射线基图 + 重复点云证据”链，
+并检查队列丢弃、位姿匹配和资源报告。
 
 建图工作图与导航静态图分开：OctoMap 只发布 `/agt/map/mapping_occupancy`，导航模式的
 `map_server` 才发布 `/agt/map/global_occupancy`。这样建图 RViz 不会误显示仍在运行的旧导航地图。
@@ -42,6 +68,8 @@ ros2 launch agt_map_processing save_occupancy_map.launch.py \
 会生成 `mid360_map.pgm` 和 `mid360_map.yaml`。保存节点使用 transient-local 订阅，投影节点
 也保留最后一帧，因此可在回放结束后启动保存命令。该二维图是全局静态地图候选，不包含
 Nav2 local costmap 的瞬时局部障碍。
+保存默认使用 `free_thresh=0.196`、`occupied_thresh=0.65`，以保持 PGM 的 `205` unknown
+像素在 Nav2 重新加载时不被解释为空闲空间。
 
 OctoMap 使用当前帧 `lidar_link` 点云和 `odom -> lidar_link` TF，因此射线原点会随机器人
 运动。车辆 `base_link -> lidar_link` 外参完成标定和高度阈值调优前，输出地图只用于链路

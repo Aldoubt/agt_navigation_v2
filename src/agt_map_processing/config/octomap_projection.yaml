@@ -3,11 +3,15 @@
     resolution: 0.05
     frame_id: odom
     base_frame_id: base_footprint
-    sensor_model.max_range: 40.0
+    # A 40 m ray at 5 cm resolution creates a large number of free OctoMap
+    # nodes for every scan. Final static maps use the bounded offline pipeline.
+    sensor_model.max_range: 15.0
     pointcloud_min_z: 0.10
     pointcloud_max_z: 1.00
     occupancy_min_z: 0.10
     occupancy_max_z: 1.00
     filter_speckles: true
     filter_ground: false
+    incremental_2D_projection: true
+    compress_map: true
     latch: true

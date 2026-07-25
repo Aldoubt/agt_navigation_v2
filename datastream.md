@@ -52,6 +52,7 @@ ros2 launch agt_bringup system.launch.py \
   user_config_path:="$AGT_WS/src/agt_sensor_adapters/config/mid360_network.json" \
   map_name:=mid360_map \
   start_sensor:=true \
+  start_lidar_self_filter:=true \
   start_chassis:=false \
   start_chassis_monitor:=false \
   use_sim_time:=false \
@@ -66,6 +67,7 @@ ros2 launch agt_bringup system.launch.py \
   runtime_dir:="$AGT_WS/runtime" \
   map_name:=mid360_map \
   start_sensor:=false \
+  start_lidar_self_filter:=true \
   start_chassis:=false \
   start_chassis_monitor:=false \
   use_sim_time:=true \
@@ -84,13 +86,16 @@ ros2 bag play --clock --rate 1.0 \
   /agt/sensors/imu/data
 ```
 
-建图模式不能把 bag 中已有的 FAST-LIVO2 输出、注册点云、二维地图或 `/tf` 再回放一遍，否则会产生重复数据和 TF 竞争。
+建图模式不能把 bag 中已有的 FAST-LIVO2 输出、注册点云、二维地图或 `/tf` 再回放一遍，否则会产生重复数据和 TF 竞争。原始
+`/agt/sensors/lidar/custom` 保留为 bag 输入；`agt_livox_self_filter` 默认独立于
+`start_sensor` 启动并发布 `/agt/sensors/lidar/custom_filtered`，随后才进入 FAST-LIVO2。
+`start_lidar_self_filter:=false` 仅用于显式 A/B 基线，此时 FAST-LIVO2 回退到原始 topic。
 
 `system.launch.py` 是总分流入口；`mode:=mapping` 实际包含 [mapping_mode.launch.py](/home/yangxuan/agt_navigation_v2/src/agt_bringup/launch/mapping_mode.launch.py:36) 的以下节点：
 
 1. `agt_description/bunker_description.launch.py`：机器人和传感器静态描述。
 2. `agt_sensor_adapters/mid360.launch.py`：MID360 驱动，原始输入为 `/agt/sensors/lidar/custom` 和 `/agt/sensors/imu/data`。
-3. `agt_mapping/fast_livo2_mapping.launch.py`：FAST-LIVO2 后端和 `fast_livo2_adapter.py`。
+3. `agt_mapping/fast_livo2_mapping.launch.py`：前置 `agt_livox_self_filter`、FAST-LIVO2 后端和 `fast_livo2_adapter.py`。
 4. `agt_map_processing/octomap_projection.launch.py`：注册点云经过独立节流器后进入全局 OctoMap 投影。
 5. `nav2_map_server/map_saver_server` 和 lifecycle manager：提供二维地图保存服务。
 6. 可选的 BUNKER 控制链、只读 CAN 监测、RViz、建图 Qt 前端和录包进程。
@@ -101,7 +106,10 @@ ros2 bag play --clock --rate 1.0 \
 MID360 CustomMsg + IMU
         |
         v
-FAST-LIVO2
+agt_livox_self_filter
+        |
+        v
+FAST-LIVO2 (custom_filtered)
         |-- /agt/mapping/backend/registered_points
         |       |
         |       +--> fast_livo2_adapter --> /agt/mapping/registered_points
@@ -301,3 +309,6 @@ curl http://127.0.0.1:8080/api/v1/mapping/session
 如果 Web 返回“未发现 `/agt/system/change_mode` Action server”，先检查系统管理器，而不是重复启动 Web。若系统模式已经是 `MAPPING` 或 `NAVIGATION`，不要再次启动相同 profile；由系统管理器的受管进程组负责停止和切换。
 
 正常停止优先使用 Web 的停止/完成动作或 `ChangeSystemMode` 的 IDLE 请求。不要用 `kill -9` 作为普通关闭流程，也不要手工停止不属于当前系统管理器的进程组。
+
+
+https://open.cherryin.ai/?utm_source=chatgpt.com

@@ -21,6 +21,11 @@
 - Semantic-map and coverage-planning launch arguments must default to `false`.
 - Do not modify validated parameters or datasets from the legacy repository without explicit approval.
 - Every change that affects architecture or interfaces must update `docs/`, this file, and `docs/migration/migration_matrix.md`.
+- The raw MID360 `/agt/sensors/lidar/custom` topic is preserved. In the normal baseline FAST-LIVO2
+  consumes only the profile-driven `/agt/sensors/lidar/custom_filtered` output from
+  `agt_livox_self_filter`; an explicit A/B baseline may disable the filter and fall back to raw input.
+  Zero placeholder points are rejected before TF geometry checks. The filter does not publish TF or
+  replace the post-registration `agt_perception/local_obstacle_filter`.
 
 ## Vehicle Geometry Contract
 - `profiles/platforms/<platform>.yaml` is the canonical source for vehicle geometry.
@@ -97,6 +102,7 @@
 - Offline obstacle completion must preserve a ray-traced free/unknown baseline and add only repeatable registered-cloud obstacle evidence; a raw point projection must not silently turn unknown space into free space.
 - Registered-cloud height filtering is relative to a timestamp-matched/interpolated recorded base pose, and must reject non-finite points and canonical polygon-footprint self returns before grid accumulation. Callback-time latest pose is forbidden for offline evidence.
 - Evidence thresholds and any grid padding must be explicit and recorded. Nav2 inflation and the robot footprint remain runtime costmap products and must not be baked into the source PGM.
+- Trinary PGM/YAML saves must use `free_thresh: 0.196` and `occupied_thresh: 0.65` so the canonical `205` unknown pixel round-trips as unknown when Nav2 reloads the map.
 - Static-map self-return cleanup may mark only the complete recorded canonical polygon-footprint sweep plus explicit clearance as free. It must consume every bag odometry pose directly, report the count, avoid DDS replay gaps, and never use a circular corridor to erase nearby obstacles.
 - Ground/temporal/height-layer variants are offline comparison products. Ground fitting must report failures and model statistics; temporal rejection must require both distinct observations and elapsed span. A height layer may be treated as traversable only when the complete vehicle-plus-sensor clearance is physically verified; provisional layered maps must report `eligible_for_execution=false`.
 - Offline planner visualization may display the static map, inflated global costmap, and canonical platform polygon together, but it remains non-executable and must not start the motion chain.
@@ -253,9 +259,10 @@
   TRANSIENT_LOCAL` QoS and is persistent rather than a three-second periodic
   observation. Its occupancy preview is bounded,
   read-only UI data and cannot feed navigation.
-- Full-map OctoMap projection consumes an explicit bounded-rate copy of the
-  registered cloud; the immediate local obstacle chain must continue consuming
-  the unthrottled registered cloud.
+- Full-map OctoMap projection consumes an explicit bounded-rate, voxel-capped
+  copy of the registered cloud; the immediate local obstacle chain must continue
+  consuming the unthrottled registered cloud. Mapping-only PCD replay may disable
+  the full-map projection explicitly.
 - Web mapping bag playback is forced to the configured raw-input allowlist
   (`/clock`, `/tf_static`, MID360 CustomMsg, and IMU), excluding recorded
   FAST-LIVO2 outputs and `/tf`; navigation mode refuses bag playback.

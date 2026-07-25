@@ -15,10 +15,15 @@ The versioned contract is
 `src/agt_system_manager/config/health_contracts.yaml`. The MID360 raw sensor
 check consumes `/agt/sensors/lidar/custom` (`livox_ros_driver2/msg/CustomMsg`),
 which is the point-timed input used by the current FAST-LIVO2 adapter. It covers
-MID360 cloud,
+the raw MID360 cloud, the pre-FAST-LIVO2 filtered CustomMsg stream,
 IMU, FAST-LIVO2 odometry, registered cloud, mapping occupancy grid, the three TF edges, BUNKER status and
 odometry, `agt_safety`, structured localization, Nav2 lifecycle, map/costmap,
 disk space, and optional process health.
+
+The filtered stream is produced by `agt_livox_self_filter` from the canonical
+BUNKER platform profile. Mapping, localization debug, and navigation health
+require both the raw stream and `/agt/sensors/lidar/custom_filtered`; the raw
+stream remains the preserved bag/replay input.
 
 `/agt/map/mapping_occupancy` is a durable map snapshot, not a periodic telemetry
 stream. Its publisher uses `RELIABLE + TRANSIENT_LOCAL + KEEP_LAST(1)` and the

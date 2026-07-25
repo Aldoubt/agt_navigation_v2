@@ -107,7 +107,7 @@ def _write_map_yaml(tmp_path, image_name):
                 "origin: [1.0, 2.0, 0.1]",
                 "negate: 0",
                 "occupied_thresh: 0.65",
-                "free_thresh: 0.25",
+                "free_thresh: 0.196",
             )
         ),
         encoding="utf-8",

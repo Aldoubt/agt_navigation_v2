@@ -20,6 +20,8 @@ def test_octomap_consumes_lidar_frame_cloud_for_dynamic_sensor_origin():
     assert 'default_value="/agt/map/mapping_occupancy"' in launch_source
     assert 'default_value="/agt/mapping/octomap_points"' in launch_source
     assert 'default_value="0.2"' in launch_source
+    assert 'default_value="0.10"' in launch_source
+    assert 'default_value="8000"' in launch_source
     assert 'executable="octomap_cloud_throttle.py"' in launch_source
 
 
@@ -35,6 +37,15 @@ def test_octomap_projection_uses_v2_frame_contract():
     assert parameters["resolution"] > 0.0
     assert parameters["pointcloud_min_z"] < parameters["pointcloud_max_z"]
     assert parameters["occupancy_min_z"] < parameters["occupancy_max_z"]
+    assert parameters["sensor_model.max_range"] <= 15.0
+    assert parameters["incremental_2D_projection"] is True
+
+
+def test_map_saver_preserves_pgm_unknown_on_nav2_reload():
+    launch_source = (
+        PACKAGE_ROOT / "launch" / "save_occupancy_map.launch.py"
+    ).read_text(encoding="utf-8")
+    assert "free_thresh_default:=0.196" in launch_source
 
 
 def test_mapping_adapter_output_frame_matches_octomap_frame():

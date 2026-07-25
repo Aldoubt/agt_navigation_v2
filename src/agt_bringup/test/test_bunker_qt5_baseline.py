@@ -19,9 +19,16 @@ def test_mapping_mode_offers_non_executing_gui_but_keeps_it_off_by_default():
     assert 'executable="map_saver_server"' in source
     assert 'name="agt_mapping_map_saver"' in source
     assert 'name="agt_mapping_map_saver_lifecycle"' in source
+    assert '"free_thresh_default": 0.196' in source
+    assert 'free_thresh_default:=0.196' in read(
+        "src/agt_bringup/launch/save_mapping_result.launch.py"
+    )
     assert 'DeclareLaunchArgument(\n                "mapping_output_dir"' in source
     assert '"start_chassis",\n                default_value="false"' in source
     assert '"start_chassis_monitor", default_value="false"' in source
+    assert '"start_octomap_projection",' in source
+    assert 'DeclareLaunchArgument("octomap_input_rate_hz", default_value="0.2")' in source
+    assert 'DeclareLaunchArgument("octomap_cloud_max_points", default_value="8000")' in source
 
 
 def test_navigation_mode_starts_navigation_gui_and_defaults_optional_features_off():
@@ -91,3 +98,18 @@ def test_bunker_driver_does_not_publish_duplicate_odom_tf_by_default():
     mapping_launch = read("src/agt_mapping/launch/fast_livo2_mapping.launch.py")
     assert 'DeclareLaunchArgument("publish_driver_odom_tf", default_value="false")' in chassis_launch
     assert '"common.publish_tf": False' in mapping_launch
+
+
+def test_bunker_fast_livo_chain_starts_custommsg_self_filter_for_bag_replay():
+    mapping = read("src/agt_mapping/launch/fast_livo2_mapping.launch.py")
+    sensor = read("src/agt_sensor_adapters/launch/lidar_self_filter.launch.py")
+    fast_livo_config = read("src/agt_mapping/config/mid360_lio_only.yaml")
+    assert "lidar_self_filter.launch.py" in mapping
+    assert "custom_filtered" in fast_livo_config
+    assert 'DeclareLaunchArgument("start_lidar_self_filter", default_value="true")' in mapping
+    assert 'UnlessCondition(LaunchConfiguration("start_lidar_self_filter"))' in mapping
+    assert 'DeclareLaunchArgument("platform_profile"' in sensor
+    assert '"filter_params_file"' in sensor
+    assert '"filter_params_file": LaunchConfiguration("lidar_self_filter_params_file")' in mapping
+    assert '"fail_open_on_tf_error", default_value="false"' in sensor
+    assert '"zero_point_epsilon", default_value="0.000001"' in sensor

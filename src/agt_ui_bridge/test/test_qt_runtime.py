@@ -29,7 +29,7 @@ def _map(tmp_path):
                 "origin": [-2.0, -1.0, 0.0],
                 "negate": 0,
                 "occupied_thresh": 0.65,
-                "free_thresh": 0.25,
+                "free_thresh": 0.196,
                 "mode": "trinary",
             }
         ),

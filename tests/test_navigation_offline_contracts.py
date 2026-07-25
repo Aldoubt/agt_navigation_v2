@@ -124,6 +124,42 @@ def test_local_obstacle_filter_uses_base_frame_and_robot_crop():
     assert config["robot_min_y"] < 0.0 < config["robot_max_y"]
 
 
+def test_fast_livo_consumes_filtered_custommsg_and_mapping_always_starts_filter():
+    mapping_config = yaml.safe_load(
+        (ROOT / "src/agt_mapping/config/mid360_lio_only.yaml").read_text()
+    )
+    common = mapping_config["/**"]["ros__parameters"]["common"]
+    assert common["lid_topic"] == "/agt/sensors/lidar/custom_filtered"
+    mapping_launch = (
+        ROOT / "src/agt_mapping/launch/fast_livo2_mapping.launch.py"
+    ).read_text()
+    assert "lidar_self_filter.launch.py" in mapping_launch
+    assert "IncludeLaunchDescription" in mapping_launch
+    assert '"platform_profile": LaunchConfiguration("platform_profile")' in mapping_launch
+    assert 'DeclareLaunchArgument("start_lidar_self_filter", default_value="true")' in mapping_launch
+    assert '"lidar_self_filter_params_file"' in mapping_launch
+    assert 'UnlessCondition(LaunchConfiguration("start_lidar_self_filter"))' in mapping_launch
+
+
+def test_self_filter_preserves_raw_topic_and_fails_closed_by_default():
+    config = yaml.safe_load(
+        (ROOT / "src/agt_sensor_adapters/config/livox_self_filter.yaml").read_text()
+    )["agt_livox_self_filter"]["ros__parameters"]
+    assert config["input_topic"] == "/agt/sensors/lidar/custom"
+    assert config["output_topic"] == "/agt/sensors/lidar/custom_filtered"
+    assert config["fail_open_on_tf_error"] is False
+    node = (ROOT / "src/agt_sensor_adapters/src/livox_custom_self_filter.cpp").read_text()
+    assert "filtered.point_num" in node
+    assert "tf_failure_count" in node
+    assert "timebase" not in node
+    assert 'DeclareLaunchArgument("start_lidar_self_filter", default_value="true")' in (
+        ROOT / "src/agt_bringup/launch/mapping_mode.launch.py"
+    ).read_text()
+    assert 'DeclareLaunchArgument("start_lidar_self_filter", default_value="true")' in (
+        ROOT / "src/agt_bringup/launch/navigation_system.launch.py"
+    ).read_text()
+
+
 def test_system_bringup_separates_mapping_and_navigation_modes():
     system = (ROOT / "src/agt_bringup/launch/system.launch.py").read_text()
     mapping = (ROOT / "src/agt_bringup/launch/mapping_mode.launch.py").read_text()

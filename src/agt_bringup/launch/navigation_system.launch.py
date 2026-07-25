@@ -173,6 +173,15 @@ def generate_launch_description():
             DeclareLaunchArgument("auto_relocalize_publish_debug", default_value="false"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("start_sensor", default_value="true"),
+            DeclareLaunchArgument("start_lidar_self_filter", default_value="true"),
+            DeclareLaunchArgument(
+                "lidar_self_filter_params_file",
+                default_value=str(
+                    Path(get_package_share_directory("agt_sensor_adapters"))
+                    / "config"
+                    / "livox_self_filter.yaml"
+                ),
+            ),
             DeclareLaunchArgument(
                 "start_chassis",
                 default_value="false",
@@ -221,6 +230,11 @@ def generate_launch_description():
                     ),
                     "use_sim_time": use_sim_time,
                     "save_pcd": "false",
+                    "platform_profile": LaunchConfiguration("platform_profile"),
+                    "start_lidar_self_filter": LaunchConfiguration("start_lidar_self_filter"),
+                    "lidar_self_filter_params_file": LaunchConfiguration(
+                        "lidar_self_filter_params_file"
+                    ),
                 },
             ),
             include(

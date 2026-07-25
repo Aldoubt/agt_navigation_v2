@@ -63,8 +63,9 @@ ros2 launch agt_description description.launch.py \
 - ROS package 统一以 `agt_` 开头；节点名使用 `agt_<模块>_<功能>`。
 - 标准 frame 不带前导 `/`：`map`、`odom`、`base_footprint`、`base_link`、`lidar_link`、`imu_link`。
 - `livox_frame` 仅作为旧驱动兼容 frame；V2 模块接口统一使用 `lidar_link`。
-- MID360 到 FAST-LIVO2 的后端输入使用 `/agt/sensors/lidar/custom`；跨模块点云统一使用
-  PointCloud2。不要把 Livox `CustomMsg` 扩散到地图处理、感知和导航模块。
+- `/agt/sensors/lidar/custom` 是保留的原始 MID360 `CustomMsg`，由 bag 记录并作为自滤除
+  输入；FAST-LIVO2 的正常输入是 `/agt/sensors/lidar/custom_filtered`。跨模块点云继续
+  使用 PointCloud2，不把 Livox `CustomMsg` 扩散到地图处理、感知和导航模块。
 - V2 topic 放在 `/agt/<领域>/<名称>` 下，例如 `/agt/sensors/lidar/points`。
 - launch 参数和 YAML key 使用相同名称；长度用米，角度用弧度。
 - TF 发布责任固定：全局定位发布 `map -> odom`，连续里程计发布
@@ -636,6 +637,24 @@ ros2 launch agt_bringup system.launch.py \
 `record_bag:=true` 会同时记录传感器、TF、
 里程计、地图、导航、安全和底盘诊断话题到 `runtime/rosbag/mapping_<时间>/`。
 
+建图链在 FAST-LIVO2 前默认启动 `agt_livox_self_filter`：
+
+```text
+/agt/sensors/lidar/custom
+    -> agt_livox_self_filter
+/agt/sensors/lidar/custom_filtered
+    -> FAST-LIVO2
+/agt/mapping/registered_points_lidar
+    -> agt_perception/local_obstacle_filter
+    -> /agt/perception/obstacle_cloud
+```
+
+过滤器由 `start_lidar_self_filter:=true` 控制，独立于 `start_sensor`；历史 bag 建图因此
+无需 remap。需要 A/B 基线时显式设置 `start_lidar_self_filter:=false`，FAST-LIVO2 会回退
+消费原始 CustomMsg。底盘盒和高台盒只来自
+`profiles/platforms/bunker.yaml:platform.geometry.self_filter`，不改变 URDF 或 Nav2
+footprint；高台尺寸完成实测前保持 `verified: false`。
+
 结束建图时，先保持总控运行，在另一个终端保存二维地图：
 
 ```bash
@@ -664,7 +683,8 @@ runtime/maps/greenhouse_01/pcd/localization_map.processing.yaml
 # 终端 1：总控，不启动真实雷达、CAN 和 RViz
 ros2 launch agt_bringup system.launch.py \
   mode:=mapping map_name:=mid360_bag_test use_sim_time:=true \
-  start_sensor:=false start_chassis:=false start_rviz:=false
+  start_sensor:=false start_lidar_self_filter:=true \
+  start_chassis:=false start_rviz:=false
 
 # 终端 2：回放转换后的 CustomMsg + IMU
 ros2 bag play runtime/rosbag/mid360_mapping_custom_full --clock

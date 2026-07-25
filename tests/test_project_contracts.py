@@ -146,7 +146,7 @@ def test_mid360_fast_livo_uses_native_message_path():
     config = yaml.safe_load(
         (ROOT / "src/agt_mapping/config/mid360_lio_only.yaml").read_text()
     )["/**"]["ros__parameters"]
-    assert config["common"]["lid_topic"] == "/agt/sensors/lidar/custom"
+    assert config["common"]["lid_topic"] == "/agt/sensors/lidar/custom_filtered"
     assert config["preprocess"]["lidar_type"] == 1
 
 
