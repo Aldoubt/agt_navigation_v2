@@ -86,12 +86,13 @@ def _setup(context):
             parameters=[common, {"costmap_topic": "/agt/map/global_occupancy"}],
         ),
         Node(
-            package="rviz2",
-            executable="rviz2",
+            package="agt_teach_repeat",
+            executable="start_teach_preview_rviz.sh",
             name="agt_teach_preview_rviz",
             output="screen",
             condition=IfCondition(LaunchConfiguration("start_rviz")),
             parameters=[{"use_sim_time": LaunchConfiguration("use_sim_time")}],
+            arguments=["-d", LaunchConfiguration("rviz_config")],
         ),
     ]
 
@@ -102,6 +103,14 @@ def generate_launch_description():
             DeclareLaunchArgument("manifest"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
             DeclareLaunchArgument("start_qt", default_value="false"),
+            DeclareLaunchArgument(
+                "rviz_config",
+                default_value=str(
+                    Path(get_package_share_directory("agt_teach_repeat"))
+                    / "rviz"
+                    / "teach_preview.rviz"
+                ),
+            ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             OpaqueFunction(function=_setup),
         ]

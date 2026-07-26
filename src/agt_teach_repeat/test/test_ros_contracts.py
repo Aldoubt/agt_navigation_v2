@@ -337,3 +337,31 @@ def test_preview_and_dense_path_contracts_are_static_and_motion_free():
     assert "motion_enable" not in preview
     assert "FollowWaypoints" not in executor
     assert "FollowPath" in executor
+
+
+def test_preview_rviz_uses_latched_topics_and_snap_safe_launcher():
+    preview = (
+        ROOT / "src/agt_teach_repeat/launch/teach_preview.launch.py"
+    ).read_text(encoding="utf-8")
+    config = (
+        ROOT / "src/agt_teach_repeat/rviz/teach_preview.rviz"
+    ).read_text(encoding="utf-8")
+    launcher = (
+        ROOT / "src/agt_teach_repeat/scripts/start_teach_preview_rviz.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'executable="start_teach_preview_rviz.sh"' in preview
+    assert '"rviz_config"' in preview
+    for topic in (
+        "/agt/map/global_occupancy",
+        "/agt/teach/reference_path",
+        "/agt/teach/route_annotations",
+        "/agt/teach/collision_poses",
+        "/agt/teach/footprint_markers",
+        "/agt/teach/corridor_markers",
+    ):
+        assert topic in config
+    assert config.count("Durability Policy: Transient Local") >= 6
+    assert "SNAP SNAP_ARCH" in launcher
+    assert "GDK_PIXBUF_MODULEDIR" in launcher
+    assert 'exec ros2 run rviz2 rviz2 "$@"' in launcher

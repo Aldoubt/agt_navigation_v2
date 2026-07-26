@@ -36,9 +36,14 @@ ros2 launch agt_teach_repeat teach_extract.launch.py \
 ```bash
 ros2 launch agt_teach_repeat teach_preview.launch.py \
   manifest:=/absolute/path/to/runtime/teach_repeat/greenhouse_route_001/manifest.yaml \
-  start_rviz:=false \
-  start_qt:=true
+  start_rviz:=true \
+  start_qt:=false
 ```
+
+RViz 默认加载 Teach Preview 专用配置，以 `map` 为固定坐标系，并用 transient-local QoS 显示
+静态地图、参考路线、方向/转弯标注、冲突姿态、无效完整足迹和扫掠走廊。RViz 启动包装器会清理
+VS Code Snap 注入的 ABI 不兼容 GTK/库路径。需要 Qt 路线视图时改为
+`start_rviz:=false start_qt:=true`。
 
 该 launch 只启动 map server、publisher、validator、corridor auditor，以及可选 RViz 或只读 Qt
 `teach` profile。Qt 显示蓝色参考路线、方向箭头和转弯/掉头标签，并关闭任务库、规划预览和执行。

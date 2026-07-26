@@ -1,0 +1,118 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 1
+      Class: rviz_default_plugins/Map
+      Color Scheme: map
+      Draw Behind: true
+      Enabled: true
+      Name: 静态地图
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/map/global_occupancy
+      Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz_default_plugins/Path
+      Color: 32; 112; 224
+      Enabled: true
+      Line Style: Lines
+      Line Width: 0.07
+      Name: 示教参考路线
+      Pose Style: None
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/teach/reference_path
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: 方向与转弯标注
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/teach/route_annotations
+      Value: true
+    - Class: rviz_default_plugins/PoseArray
+      Color: 255; 64; 32
+      Enabled: true
+      Name: 碰撞姿态
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/teach/collision_poses
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: 无效完整足迹
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/teach/footprint_markers
+      Value: true
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: 足迹扫掠走廊
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/teach/corridor_markers
+      Value: true
+    - Class: rviz_default_plugins/PoseArray
+      Color: 255; 160; 32
+      Enabled: false
+      Name: 走廊冲突姿态
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/teach/corridor_conflicts
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 28; 31; 35
+    Fixed Frame: map
+    Frame Rate: 20
+  Name: AGT Teach Preview
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Angle: 0
+      Class: rviz_default_plugins/TopDownOrtho
+      Name: 俯视
+      Near Clip Distance: 0.01
+      Scale: 11
+      Target Frame: <Fixed Frame>
+      X: 2
+      Y: -34
+Window Geometry:
+  Height: 900
+  Width: 1500
