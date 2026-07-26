@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import secrets
 import time
 
 from agt_interfaces.msg import LocalizationStatus
@@ -29,7 +30,8 @@ PROFILE = ROOT / "profiles/platforms/bunker.yaml"
 
 @pytest.fixture(scope="module", autouse=True)
 def ros_context():
-    rclpy.init()
+    # Keep synthetic contract topics off any live robot or preview graph.
+    rclpy.init(domain_id=20 + secrets.randbelow(180))
     yield
     rclpy.shutdown()
 
