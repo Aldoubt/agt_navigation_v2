@@ -34,6 +34,7 @@
 #include "tf2_ros/transform_listener.h"
 #include "virtual_channel_node.h"
 #include "topology_msgs/msg/topology_map.hpp"
+#include "visualization_msgs/msg/marker_array.hpp"
 #include "agt_interfaces/action/execute_waypoint_task.hpp"
 #include "config/task_chain.h"
 #include "core/framework/framework.h"
@@ -60,6 +61,8 @@ class rclcomm : public VirtualChannelNode {
   void local_path_callback(const nav_msgs::msg::Path::SharedPtr msg);
   void robotFootprintCallback(const geometry_msgs::msg::PolygonStamped::SharedPtr msg);
   void topologyMapCallback(const topology_msgs::msg::TopologyMap::SharedPtr msg);
+  void routeAnnotationsCallback(
+      const visualization_msgs::msg::MarkerArray::SharedPtr msg);
 
  public:
   bool Start() override;
@@ -102,6 +105,8 @@ class rclcomm : public VirtualChannelNode {
       robot_footprint_subscriber_;
   rclcpp::Subscription<topology_msgs::msg::TopologyMap>::SharedPtr
       topology_map_subscriber_;
+  rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr
+      route_annotations_subscriber_;
   rclcpp::Publisher<topology_msgs::msg::TopologyMap>::SharedPtr
       topology_map_update_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr

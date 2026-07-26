@@ -54,7 +54,10 @@ void DisplayPath::drawPath(QPainter *painter) {
 
   painter->setRenderHints(QPainter::Antialiasing |
                           QPainter::SmoothPixmapTransform);
-  painter->setPen(QPen(color_, 1, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+  QPen pen(color_, GetDisplayType() == DISPLAY_GLOBAL_PATH ? 2.0 : 1.0,
+           Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+  pen.setCosmetic(true);
+  painter->setPen(pen);
   painter->setBrush(QBrush(color_));
   for (int i = 1; i < path_points_.size(); i++) {
     painter->drawLine(path_points_[i - 1], path_points_[i]);

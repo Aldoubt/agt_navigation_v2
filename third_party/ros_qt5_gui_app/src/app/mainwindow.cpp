@@ -64,6 +64,14 @@ MainWindow::MainWindow(QWidget *parent)
   QTimer::singleShot(30, this, [this]() { openChannel(); });
   QTimer::singleShot(50, [=]() { 
     RestoreState();
+    if (dashboard_dock_) {
+      dashboard_dock_->toggleView(
+          GET_CONFIG_VALUE("ShowDashboard", "true") == "true");
+    }
+    if (settings_dock_) {
+      settings_dock_->toggleView(
+          GET_CONFIG_VALUE("ShowSettingsOnStartup", "true") == "true");
+    }
     std::string map_path = Config::ConfigManager::Instance()->GetRootConfig().map_config.path;
     if (!map_path.empty()) {
       std::string yaml_path = map_path;
@@ -725,29 +733,32 @@ void MainWindow::setupUi() {
   center_docker_area_->setAllowedAreas(DockWidgetArea::OuterDockAreas);
 
   //////////////////////////////////////////////////////////速度仪表盘
-  ads::CDockWidget *DashBoardDockWidget =
+  dashboard_dock_ =
       new ads::CDockWidget(UiLanguage::Text("仪表盘", "Dashboard"));
   QWidget *speed_dashboard_widget = new QWidget();
-  DashBoardDockWidget->setWidget(speed_dashboard_widget);
+  dashboard_dock_->setWidget(speed_dashboard_widget);
   speed_dash_board_ = new DashBoard(speed_dashboard_widget);
   auto dashboard_area =
       dock_manager_->addDockWidget(ads::DockWidgetArea::RightDockWidgetArea,
-                                   DashBoardDockWidget, center_docker_area_);
-  ui->menuView->addAction(DashBoardDockWidget->toggleViewAction());
+                                   dashboard_dock_, center_docker_area_);
+  ui->menuView->addAction(dashboard_dock_->toggleViewAction());
+  dashboard_dock_->toggleView(
+      GET_CONFIG_VALUE("ShowDashboard", "true") == "true");
 
   ////////////////////////////////////////////////////////速度控制
-  speed_ctrl_widget_ = new SpeedCtrlWidget();
-  connect(speed_ctrl_widget_, &SpeedCtrlWidget::signalControlSpeed,
-          [this](const RobotSpeed &speed) {
-            PUBLISH(MSG_ID_SET_ROBOT_SPEED, speed);
-          });
-  ads::CDockWidget *SpeedCtrlDockWidget =
-      new ads::CDockWidget(UiLanguage::Text("手动控制", "Manual control"));
-  SpeedCtrlDockWidget->setWidget(speed_ctrl_widget_);
-  auto speed_ctrl_area =
-      dock_manager_->addDockWidget(ads::DockWidgetArea::BottomDockWidgetArea,
-                                   SpeedCtrlDockWidget, dashboard_area);
-  ui->menuView->addAction(SpeedCtrlDockWidget->toggleViewAction());
+  if (GET_CONFIG_VALUE("EnableManualControl", "true") == "true") {
+    speed_ctrl_widget_ = new SpeedCtrlWidget();
+    connect(speed_ctrl_widget_, &SpeedCtrlWidget::signalControlSpeed,
+            [this](const RobotSpeed &speed) {
+              PUBLISH(MSG_ID_SET_ROBOT_SPEED, speed);
+            });
+    ads::CDockWidget *SpeedCtrlDockWidget =
+        new ads::CDockWidget(UiLanguage::Text("手动控制", "Manual control"));
+    SpeedCtrlDockWidget->setWidget(speed_ctrl_widget_);
+    dock_manager_->addDockWidget(ads::DockWidgetArea::BottomDockWidgetArea,
+                                 SpeedCtrlDockWidget, dashboard_area);
+    ui->menuView->addAction(SpeedCtrlDockWidget->toggleViewAction());
+  }
 
   ////////////////////////////////////////////////////////图层配置管理
   display_config_widget_ = new DisplayConfigWidget();
@@ -762,7 +773,8 @@ void MainWindow::setupUi() {
   auto display_config_area =
       dock_manager_->addDockWidget(ads::DockWidgetArea::LeftDockWidgetArea,
                                    settings_dock_, center_docker_area_);
-  settings_dock_->toggleView(true);
+  settings_dock_->toggleView(
+      GET_CONFIG_VALUE("ShowSettingsOnStartup", "true") == "true");
   ui->menuView->addAction(settings_dock_->toggleViewAction());
 
   diagnostic_dock_widget_ = new DiagnosticDockWidget();

@@ -35,16 +35,20 @@ ros2 launch agt_teach_repeat teach_extract.launch.py \
 
 ```bash
 ros2 launch agt_teach_repeat teach_preview.launch.py \
-  manifest:=/absolute/path/to/runtime/teach_repeat/greenhouse_route_001/manifest.yaml
+  manifest:=/absolute/path/to/runtime/teach_repeat/greenhouse_route_001/manifest.yaml \
+  start_rviz:=false \
+  start_qt:=true
 ```
 
-该 launch 只启动 map server、publisher、validator、corridor auditor 和可选 RViz。它不启动
-controller、定位、safety enable、底盘或任何速度发布者。检查：
+该 launch 只启动 map server、publisher、validator、corridor auditor，以及可选 RViz 或只读 Qt
+`teach` profile。Qt 显示蓝色参考路线、方向箭头和转弯/掉头标签，并关闭任务库、规划预览和执行。
+该 launch 不启动 controller、定位、safety enable、底盘或任何速度发布者。检查：
 
 ```bash
 ros2 topic echo --once /agt/teach/status
 ros2 topic echo --once /agt/teach/validation_report
 ros2 topic echo --once /agt/teach/corridor_report
+ros2 topic echo --once /agt/teach/route_annotations
 ```
 
 hash 不匹配时仍可看预览，但 `eligible_for_execution=false`。必须解决 mismatch 并重新验证，不能用
@@ -79,6 +83,12 @@ ros2 service call /agt/teach/cancel std_srvs/srv/Trigger '{}'
 7. 首次把有效速度限制在 0.15-0.20 m/s。
 8. 人员不得站在预计运动区域，现场必须有人可立即急停。
 9. 历史上曾通过不代表当前无障碍，实时障碍链不得关闭。
+
+首次 Teach Mapping 复扫不要直接使用这里的通用入口；使用
+`agt_bringup teach_mapping_rescan.launch.py`。该组合入口固定 `auto_start=false`，默认
+`rescan_max_speed_mps=0.10`，且要求操作者分别使能 motion 和调用 start。任务结束、失败或取消
+后执行器会清除该次 Nav2 SpeedLimit。完整命令见
+[`docs/testing/teach_mapping_mvp_field_test.md`](../testing/teach_mapping_mvp_field_test.md)。
 
 ## 5. 录包和结果
 

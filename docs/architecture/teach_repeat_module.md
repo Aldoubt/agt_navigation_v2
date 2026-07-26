@@ -34,7 +34,7 @@ runtime/teach_repeat/<demo_id>/
 ├── manifest.yaml
 ├── raw/{raw_path.csv,source_bag.yaml}
 ├── processed/{reference_path.yaml,reference_path.json,reference_path.csv,
-│              task_control_points.json,processing_report.json}
+│              route_annotations.json,task_control_points.json,processing_report.json}
 ├── audit/{path_validation.json,corridor_conflicts.json,corridor_markers.json}
 └── runs/<run_id>/{executed_path.csv,localization_samples.csv,mapping_odometry.csv,
                   chassis_odometry.csv,safety_samples.csv,metrics.json,report.md}
@@ -81,6 +81,8 @@ execution:
 assets:
   reference_path: processed/reference_path.yaml
   reference_path_sha256: "sha256:<64 lowercase hex>"
+  route_annotations: processed/route_annotations.json
+  route_annotations_sha256: "sha256:<64 lowercase hex>"
   task_control_points: processed/task_control_points.json
   task_control_points_sha256: "sha256:<64 lowercase hex>"
   processing_report: processed/processing_report.json
@@ -92,7 +94,16 @@ lifecycle: {session_id: "", growth_stage: "", parent_map_id: ""}
 
 ## 预览与验证
 
-publisher 以 reliable + transient-local 发布 map-frame Path、控制点 MarkerArray 和诊断。validator
+publisher 以 reliable + transient-local 发布 map-frame Path、控制点 MarkerArray、路线标注 MarkerArray
+和诊断。`route_annotations.json` 与 reference path 哈希绑定，并记录方向箭头间距、普通转弯与宽掉头的
+独立累计距离观察窗、普通转弯/掉头角阈值和事件最小间隔。分类器使用 reference path 的完整姿态生成
+`TURN_LEFT/RIGHT`、`U_TURN_LEFT/RIGHT` 和 `IN_PLACE_LEFT/RIGHT`；Qt 不重新推断语义。
+
+Qt `teach` profile 订阅 reference path 和 `/agt/teach/route_annotations`，只绘制路线、方向箭头及
+中文/英文事件标签，并在首次收到完整标注时自动适配路线视野；操作员手动平移或缩放后不再自动
+抢回视角。该 profile 关闭任务库、规划预览和任务执行；可见覆盖层不等于路径验证通过。
+它还隐藏手动控制和仪表盘，并且不创建手动速度 publisher。
+validator
 复用 `agt_coverage_planning.path_validator.validate_path()` 的完整 footprint、距离/角度插值、未知/
 越界、占据阈值和曲率检查，车辆几何只从 profile 加载。失败或输入不完整时 validated path 为空。
 
@@ -125,7 +136,7 @@ hash、执行结果和失败上下文；没有建立第二套实验目录管理�
 | 类型 | 名称 |
 | --- | --- |
 | Path | `/agt/teach/reference_path`, `/agt/teach/path_validated`, `/agt/teach/executed_path` |
-| Marker/poses | `/agt/teach/control_points`, `/agt/teach/collision_poses`, `/agt/teach/footprint_markers`, `/agt/teach/corridor_markers`, `/agt/teach/corridor_conflicts` |
+| Marker/poses | `/agt/teach/control_points`, `/agt/teach/route_annotations`, `/agt/teach/collision_poses`, `/agt/teach/footprint_markers`, `/agt/teach/corridor_markers`, `/agt/teach/corridor_conflicts` |
 | JSON/diagnostic | `/agt/teach/status`, `/agt/teach/validation_report`, `/agt/teach/corridor_report`, `/agt/teach/execution_status`, `/agt/teach/current_error`, `/agt/teach/metrics` |
 | Service | `/agt/teach/start`, `/agt/teach/cancel` (`std_srvs/Trigger`) |
 | Child Action | `/follow_path` (`nav2_msgs/action/FollowPath`) |
@@ -137,4 +148,4 @@ hash、执行结果和失败上下文；没有建立第二套实验目录管理�
 ## 明确未实现
 
 多会话/多生长周期融合、stable voxel/lifelong/delta map、语义植被过滤、自动 PGM 清理、PCD 合并、
-独立真值、Qt 新任务页和 Web 实车一键执行均未实现。
+独立真值、Qt 示教任务执行页和 Web 实车一键执行均未实现；当前 Qt 仅实现只读路线标注层。

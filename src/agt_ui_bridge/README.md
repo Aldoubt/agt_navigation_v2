@@ -39,6 +39,8 @@ source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=mapping
 ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=navigation
+ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=teach \
+  map:=/absolute/path/to/map.yaml start_map_io_bridge:=false
 ```
 
 以上是 GUI/地图 I/O 的独立启动入口，不会启动 Nav2、定位、安全或
@@ -46,8 +48,7 @@ ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=navigation
 断车默认见任务库工作流文档。
 
 首次启动会把对应模板复制到 profile 独立目录：
-`runtime/gui/ros_qt5_gui_app/mapping/config.json` 或
-`runtime/gui/ros_qt5_gui_app/navigation/config.json`。GUI 修改只保存在各自 runtime，互不覆盖，
+`runtime/gui/ros_qt5_gui_app/<profile>/config.json`。GUI 修改只保存在各自 runtime，互不覆盖，
 也不会污染 vendor 源码。启动预检会从新版 profile 补齐缺失的能力键，但不覆盖已保存的用户值。
 需要恢复仓库默认配置时执行：
 
@@ -73,6 +74,8 @@ Qt5 主窗口将它内嵌在右侧 `任务中心 / Task Center`，并与原有�
 - 多点任务：`/agt/navigation/execute_waypoint_task` Action
 - 手动速度：`/agt/cmd_vel_manual`
 - 全局/局部路径：`/plan`、`/local_plan`
+- 示教只读 profile：`/agt/teach/reference_path` 与 transient-local
+  `/agt/teach/route_annotations`；显示方向、左/右转、掉头和原地转向，任务库、规划预览和执行均关闭
 - 全局/局部代价地图：`/global_costmap/costmap`、`/local_costmap/costmap`；大地图
   profile 默认 `EnableCostmapDisplay=false`，需要调试时显式改为 true，常规查看使用 RViz
 - 机器人 frame：`base_footprint`

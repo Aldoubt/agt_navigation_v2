@@ -8,6 +8,9 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
   <exec_depend>agt_interfaces</exec_depend>
+  <exec_depend>agt_coverage_planning</exec_depend>
+  <exec_depend>agt_teach_repeat</exec_depend>
+  <exec_depend>agt_ui_bridge</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>lifecycle_msgs</exec_depend>
   <exec_depend>livox_ros_driver2</exec_depend>
@@ -20,6 +23,8 @@
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-pil</exec_depend>
+  <exec_depend>python3-shapely</exec_depend>
   <test_depend>ament_cmake_pytest</test_depend>
   <test_depend>python3-pytest</test_depend>
   <export>

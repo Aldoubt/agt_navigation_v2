@@ -338,6 +338,7 @@ QWidget *DisplayConfigWidget::CreateLayersPage() {
       {"感知", "Perception", {{DISPLAY_LASER, "激光扫描", "Laser scan"}}},
       {"规划", "Planning",
        {{DISPLAY_GLOBAL_PATH, "全局路径", "Global path"},
+        {DISPLAY_TEACH_ROUTE_ANNOTATIONS, "示教路线标注", "Teach route annotations"},
         {DISPLAY_LOCAL_PATH, "局部路径", "Local path"}}},
       {"代价地图", "Costmaps",
        {{DISPLAY_GLOBAL_COST_MAP, "全局代价地图", "Global costmap"},

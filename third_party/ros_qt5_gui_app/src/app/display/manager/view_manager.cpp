@@ -284,12 +284,12 @@ void ViewManager::SetRobotFocus(bool enabled) {
 }
 
 void ViewManager::ZoomAt(const QPoint &viewport_pos, qreal factor) {
-  const qreal next_scale = view_scale_ * factor;
+  const qreal next_scale = transform().m11() * factor;
   if (next_scale < 0.1 || next_scale > 20.0) return;
   SetRobotFocus(false);
   const QPointF scene_before = mapToScene(viewport_pos);
   scale(factor, factor);
-  view_scale_ = next_scale;
+  view_scale_ = transform().m11();
   const QPointF scene_after = mapToScene(viewport_pos);
   const QPointF delta = scene_after - scene_before;
   translate(delta.x(), delta.y());

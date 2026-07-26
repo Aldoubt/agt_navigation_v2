@@ -10,11 +10,20 @@
 #ifndef POINT_TYPE_H
 #define POINT_TYPE_H
 #include <Eigen/Dense>
+#include <string>
+#include <vector>
 #include "point.h"
 namespace basic {
 typedef OrientedPoint RobotPose;
 typedef std::vector<Point> RobotPath;
 typedef Eigen::Vector3d Color;
+struct RouteAnnotation {
+  double x{0};
+  double y{0};
+  double theta{0};
+  std::string kind;
+};
+typedef std::vector<RouteAnnotation> RouteAnnotations;
 struct RobotSpeed {
   double vx{0};
   double vy{0};

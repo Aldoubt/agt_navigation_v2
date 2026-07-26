@@ -17,6 +17,10 @@ from .path_io import (
     verify_manifest_bindings,
 )
 from .ros_utils import latched_qos, path_message
+from .route_annotations import (
+    load_route_annotations,
+    route_annotation_document,
+)
 
 
 class TeachPathPublisher(Node):
@@ -31,6 +35,21 @@ class TeachPathPublisher(Node):
             expected_demo_id=self.manifest["demo_id"],
         )
         self.binding = verify_manifest_bindings(self.manifest_path, self.manifest)
+        annotation_value = self.manifest["assets"].get("route_annotations")
+        if annotation_value:
+            self.annotations = load_route_annotations(
+                resolve_asset(self.manifest_path, annotation_value),
+                expected_demo_id=self.manifest["demo_id"],
+                expected_reference_path_sha256=self.manifest["assets"][
+                    "reference_path_sha256"
+                ],
+            )
+        else:
+            self.annotations = route_annotation_document(
+                self.manifest["demo_id"],
+                self.reference,
+                self.manifest["assets"]["reference_path_sha256"],
+            )
         self.path_publisher = self.create_publisher(
             type(path_message(self.reference, self.get_clock().now().to_msg())),
             "/agt/teach/reference_path",
@@ -38,6 +57,9 @@ class TeachPathPublisher(Node):
         )
         self.control_publisher = self.create_publisher(
             MarkerArray, "/agt/teach/control_points", latched_qos()
+        )
+        self.annotation_publisher = self.create_publisher(
+            MarkerArray, "/agt/teach/route_annotations", latched_qos()
         )
         self.status_publisher = self.create_publisher(
             DiagnosticArray, "/agt/teach/status", latched_qos()
@@ -48,6 +70,7 @@ class TeachPathPublisher(Node):
         stamp = self.get_clock().now().to_msg()
         self.path_publisher.publish(path_message(self.reference, stamp))
         self.control_publisher.publish(self._control_markers(stamp))
+        self.annotation_publisher.publish(self._annotation_markers(stamp))
         diagnostics = DiagnosticArray()
         diagnostics.header.stamp = stamp
         status = DiagnosticStatus()
@@ -67,6 +90,91 @@ class TeachPathPublisher(Node):
         ]
         diagnostics.status.append(status)
         self.status_publisher.publish(diagnostics)
+
+    @staticmethod
+    def _marker_color(marker, event_type):
+        colors = {
+            "START": (0.00, 0.55, 0.48),
+            "END": (0.84, 0.18, 0.18),
+            "TURN_LEFT": (0.16, 0.62, 0.35),
+            "TURN_RIGHT": (0.96, 0.55, 0.10),
+            "U_TURN_LEFT": (0.58, 0.25, 0.78),
+            "U_TURN_RIGHT": (0.58, 0.25, 0.78),
+            "IN_PLACE_LEFT": (0.86, 0.22, 0.36),
+            "IN_PLACE_RIGHT": (0.86, 0.22, 0.36),
+        }
+        red, green, blue = colors[event_type]
+        marker.color.r = red
+        marker.color.g = green
+        marker.color.b = blue
+        marker.color.a = 0.95
+
+    def _annotation_markers(self, stamp):
+        output = MarkerArray()
+        clear = Marker()
+        clear.header.frame_id = "map"
+        clear.header.stamp = stamp
+        clear.action = Marker.DELETEALL
+        output.markers.append(clear)
+
+        for index, direction in enumerate(self.annotations["directions"]):
+            marker = Marker()
+            marker.header.frame_id = "map"
+            marker.header.stamp = stamp
+            marker.ns = "teach_route_direction"
+            marker.id = index + 1
+            marker.type = Marker.ARROW
+            marker.action = Marker.ADD
+            marker.pose.position.x = float(direction["x"])
+            marker.pose.position.y = float(direction["y"])
+            marker.pose.orientation.z = math.sin(float(direction["yaw"]) * 0.5)
+            marker.pose.orientation.w = math.cos(float(direction["yaw"]) * 0.5)
+            marker.scale.x = 0.45
+            marker.scale.y = 0.10
+            marker.scale.z = 0.10
+            marker.color.r = 0.10
+            marker.color.g = 0.42
+            marker.color.b = 0.90
+            marker.color.a = 0.82
+            output.markers.append(marker)
+
+        for index, event in enumerate(self.annotations["events"]):
+            event_type = str(event["type"])
+            marker = Marker()
+            marker.header.frame_id = "map"
+            marker.header.stamp = stamp
+            marker.ns = "teach_route_event"
+            marker.id = index + 1
+            marker.type = (
+                Marker.SPHERE if event_type in {"START", "END"} else Marker.ARROW
+            )
+            marker.action = Marker.ADD
+            marker.text = event_type
+            marker.pose.position.x = float(event["x"])
+            marker.pose.position.y = float(event["y"])
+            marker.pose.orientation.z = math.sin(float(event["yaw"]) * 0.5)
+            marker.pose.orientation.w = math.cos(float(event["yaw"]) * 0.5)
+            marker.scale.x = 0.65
+            marker.scale.y = 0.18
+            marker.scale.z = 0.18
+            self._marker_color(marker, event_type)
+            output.markers.append(marker)
+
+            label = Marker()
+            label.header = marker.header
+            label.ns = "teach_route_event_label"
+            label.id = index + 1
+            label.type = Marker.TEXT_VIEW_FACING
+            label.action = Marker.ADD
+            label.text = event_type
+            label.pose.position.x = float(event["x"])
+            label.pose.position.y = float(event["y"])
+            label.pose.position.z = 0.45
+            label.pose.orientation.w = 1.0
+            label.scale.z = 0.30
+            self._marker_color(label, event_type)
+            output.markers.append(label)
+        return output
 
     def _control_markers(self, stamp):
         path = resolve_asset(

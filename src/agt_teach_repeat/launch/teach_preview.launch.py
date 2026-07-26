@@ -1,8 +1,10 @@
 from pathlib import Path
 
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
 from launch.conditions import IfCondition
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 import yaml
@@ -26,6 +28,7 @@ def _setup(context):
         "platform_profile": platform_profile,
         "use_sim_time": LaunchConfiguration("use_sim_time"),
     }
+    qt_launch = Path(get_package_share_directory("agt_ui_bridge")) / "launch" / "ros_qt5_gui.launch.py"
     return [
         Node(
             package="nav2_map_server",
@@ -66,6 +69,16 @@ def _setup(context):
             output="screen",
             parameters=[common, {"costmap_topic": "/agt/map/global_occupancy"}],
         ),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(str(qt_launch)),
+            condition=IfCondition(LaunchConfiguration("start_qt")),
+            launch_arguments={
+                "profile": "teach",
+                "map": map_yaml,
+                "start_map_io_bridge": "false",
+                "use_sim_time": LaunchConfiguration("use_sim_time"),
+            }.items(),
+        ),
         Node(
             package="agt_teach_repeat",
             executable="corridor_auditor",
@@ -88,6 +101,7 @@ def generate_launch_description():
         [
             DeclareLaunchArgument("manifest"),
             DeclareLaunchArgument("start_rviz", default_value="true"),
+            DeclareLaunchArgument("start_qt", default_value="false"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             OpaqueFunction(function=_setup),
         ]

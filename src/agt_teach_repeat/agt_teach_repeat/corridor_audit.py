@@ -17,7 +17,7 @@ def audit_corridor(poses, grid, footprint, min_turning_radius, config=None, demo
         config or ValidatorConfig(),
     )
     conflict = int(result.report.collision_pose_count)
-    occupied_cells, unknown_cells = _audited_cells(
+    occupied_cells, unknown_cells, audited_cells = _audited_cells(
         result.samples, grid, footprint, config or ValidatorConfig()
     )
     report = {
@@ -30,6 +30,14 @@ def audit_corridor(poses, grid, footprint, min_turning_radius, config=None, demo
         ),
         "occupied_cell_count": len(occupied_cells),
         "unknown_cell_count": len(unknown_cells),
+        "audited_cell_count": len(audited_cells),
+        "free_cell_count": len(audited_cells - occupied_cells - unknown_cells),
+        "occupied_cell_ratio": (
+            len(occupied_cells) / len(audited_cells) if audited_cells else 0.0
+        ),
+        "unknown_cell_ratio": (
+            len(unknown_cells) / len(audited_cells) if audited_cells else 0.0
+        ),
         "eligible_for_automatic_map_edit": False,
     }
     return result, report
@@ -38,6 +46,7 @@ def audit_corridor(poses, grid, footprint, min_turning_radius, config=None, demo
 def _audited_cells(samples, grid, footprint, config):
     occupied = set()
     unknown = set()
+    audited = set()
     origin_cosine = math.cos(grid.origin_yaw)
     origin_sine = math.sin(grid.origin_yaw)
     for sample in samples:
@@ -72,9 +81,10 @@ def _audited_cells(samples, grid, footprint, config):
                 )
                 if not polygon.intersects(cell):
                     continue
+                audited.add((column, row))
                 value = int(grid.data[row * grid.width + column])
                 if value < 0:
                     unknown.add((column, row))
                 elif value >= config.occupied_cost_threshold:
                     occupied.add((column, row))
-    return occupied, unknown
+    return occupied, unknown, audited

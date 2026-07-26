@@ -20,6 +20,7 @@ from .path_io import (
 )
 from .path_processing import process_path
 from .path_types import PathPose, ProcessingConfig, TeachRepeatError, TransformSE2
+from .route_annotations import route_annotation_document
 
 
 ODOMETRY_TYPE = "nav_msgs/msg/Odometry"
@@ -235,6 +236,7 @@ def extract_demo(
         },
     )
     references = write_reference_paths(processed_dir, demo_id, processed.poses)
+    reference_hash = sha256_file(references["yaml"])
     atomic_write_json(
         processed_dir / "task_control_points.json",
         {
@@ -244,6 +246,15 @@ def extract_demo(
         },
     )
     atomic_write_json(processed_dir / "processing_report.json", processed.report.to_dict())
+    annotations_path = processed_dir / "route_annotations.json"
+    atomic_write_json(
+        annotations_path,
+        route_annotation_document(
+            demo_id,
+            processed.poses,
+            reference_hash,
+        ),
+    )
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
@@ -294,9 +305,11 @@ def extract_demo(
         },
         "assets": {
             "reference_path": "processed/reference_path.yaml",
-            "reference_path_sha256": sha256_file(references["yaml"]),
+            "reference_path_sha256": reference_hash,
             "task_control_points": "processed/task_control_points.json",
             "task_control_points_sha256": sha256_file(processed_dir / "task_control_points.json"),
+            "route_annotations": "processed/route_annotations.json",
+            "route_annotations_sha256": sha256_file(annotations_path),
             "processing_report": "processed/processing_report.json",
         },
         "lifecycle": {"session_id": "", "growth_stage": "", "parent_map_id": ""},

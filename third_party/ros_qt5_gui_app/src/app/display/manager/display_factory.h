@@ -37,6 +37,11 @@ class FactoryDisplay : public QObject {
   void CenterOnScene(QPointF pose){
     viewer_ptr_->centerOn(pose);
   }
+  void FitInView(const QRectF &scene_rect) {
+    if (viewer_ptr_ && scene_rect.isValid() && !scene_rect.isEmpty()) {
+      viewer_ptr_->fitInView(scene_rect, Qt::KeepAspectRatio);
+    }
+  }
   // 安全地更新显示对象名称
   bool UpdateDisplayName(const std::string &old_name, const std::string &new_name);
  private slots:

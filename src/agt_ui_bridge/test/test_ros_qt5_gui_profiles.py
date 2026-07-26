@@ -84,6 +84,25 @@ def test_offline_profile_is_preview_only():
     assert task_library_keys().items() <= config["key_value"].items()
 
 
+def test_teach_profile_is_read_only_and_latched():
+    config = load_profile("teach")
+    assert topics(config)["kOccupancyMap"] == "/agt/map/global_occupancy"
+    assert topics(config)["kGlobalPath"] == "/agt/teach/reference_path"
+    assert (
+        topics(config)["kTeachRouteAnnotations"]
+        == "/agt/teach/route_annotations"
+    )
+    assert visibility(config)["kTeachRouteAnnotations"] is True
+    assert config["key_value"]["GlobalPathTransientLocal"] == "true"
+    assert config["key_value"]["AutoFitTeachRoute"] == "true"
+    assert config["key_value"]["EnableTaskExecution"] == "false"
+    assert config["key_value"]["EnableOfflinePlanningPreview"] == "false"
+    assert config["key_value"]["EnableManualControl"] == "false"
+    assert config["key_value"]["ShowDashboard"] == "false"
+    assert config["key_value"]["ShowSettingsOnStartup"] == "false"
+    assert config["key_value"]["TaskLibraryEnabled"] == "false"
+
+
 def test_profiles_have_isolated_runtime_configs():
     script = (PACKAGE_ROOT / "scripts/start_ros_qt5_gui_app.sh").read_text(
         encoding="utf-8"
@@ -100,5 +119,6 @@ def test_gui_never_targets_chassis_command_topic():
         load_profile("mapping"),
         load_profile("navigation"),
         load_profile("offline"),
+        load_profile("teach"),
     ):
         assert "/agt/chassis/cmd_vel" not in topics(profile).values()

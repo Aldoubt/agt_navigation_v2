@@ -24,6 +24,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_automatic_relocalization test/test_automatic_relocalization.py
   )
+  ament_add_pytest_test(
+    test_teach_mapping_rescan test/test_teach_mapping_rescan.py
+  )
 endif()
 
 ament_package()

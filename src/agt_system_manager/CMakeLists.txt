@@ -11,6 +11,7 @@ install(PROGRAMS
   scripts/system_mode_manager.py
   scripts/relocalization_mode_controller.py
   scripts/health_smoke.py
+  scripts/teach_mapping_workflow.py
   DESTINATION lib/${PROJECT_NAME}
 )
 install(DIRECTORY config
@@ -24,6 +25,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_task_readiness test/test_task_readiness.py)
   ament_add_pytest_test(test_process_manager test/test_process_manager.py)
   ament_add_pytest_test(test_localization_mode test/test_localization_mode.py)
+  ament_add_pytest_test(test_teach_mapping test/test_teach_mapping.py)
 endif()
 
 ament_package()

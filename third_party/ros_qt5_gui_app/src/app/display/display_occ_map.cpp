@@ -10,6 +10,7 @@
 #include <QtConcurrent>
 #include <algorithm>
 #include <iostream>
+#include "config/config_manager.h"
 #include "core/framework/framework.h"
 #include "msg/msg_info.h"
 #include "display/manager/display_factory.h"
@@ -85,7 +86,9 @@ void DisplayOccMap::ParseOccupyMap() {
     double x, y;
     map_data_.xy2ScenePose(0, 0, x, y);
     if (!init_flag_) {
-      CenterOnScene(mapToScene(x, y));
+      if (GET_CONFIG_VALUE("AutoFitTeachRoute", "false") != "true") {
+        CenterOnScene(mapToScene(x, y));
+      }
       init_flag_ = true;
     }
   });

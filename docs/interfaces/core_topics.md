@@ -49,6 +49,9 @@ TF used for that attempt is queried at the same stamp.
 - `/agt/map/octomap_occupancy`: 离线静态障碍补全使用的射线/free-space 基图（内部 topic）
 - `/agt/map/static_obstacle_evidence_status`: 离线重复观测障碍补全统计 JSON，仅用于审计
 - `/agt/map/global_occupancy`: 导航模式下由 Nav2 map server 发布的已保存静态地图
+- `/agt/teach/reference_path`: `nav_msgs/msg/Path`，绑定示教资产的 transient-local 只读参考线
+- `/agt/teach/route_annotations`: `visualization_msgs/msg/MarkerArray`，由项目后端根据版本化阈值生成的
+  方向、转弯、掉头和原地转向标注；Qt 仅显示，不作为验证或执行批准
 
 建图健康证据同时检查 `/agt/mapping/odometry`、`/agt/mapping/registered_points_lidar` 和
 `/agt/map/mapping_occupancy` 的消息类型和持久快照可用性；该话题不使用三秒新鲜度门限。Web 只读预览会对二维栅格做有界降采样，

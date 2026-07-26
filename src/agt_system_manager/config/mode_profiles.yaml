@@ -36,3 +36,8 @@ profiles:
     description: Preview and validate a recorded teach path without motion nodes
     command: [ros2, launch, agt_teach_repeat, teach_preview.launch.py]
     allowed_argument_keys: [manifest, start_rviz, use_sim_time]
+  teach_rescan:
+    mode: TEACH_RESCAN
+    description: Low-speed teach-route rescan using an immutable bootstrap map
+    command: [ros2, launch, agt_bringup, teach_mapping_rescan.launch.py]
+    allowed_argument_keys: [session, start_chassis, start_gui, can_interface, execution_enabled, record_bag, runtime_dir, rescan_max_speed_mps]

@@ -319,6 +319,16 @@ def verify_manifest_bindings(manifest_path, manifest, *, require_source=False):
             else resolve_asset(manifest_path, section.get(path_key, ""))
         )
         checks.append((name, path, section.get(hash_key, "")))
+    if manifest["assets"].get("route_annotations"):
+        checks.append(
+            (
+                "route_annotations",
+                resolve_asset(
+                    manifest_path, manifest["assets"]["route_annotations"]
+                ),
+                manifest["assets"].get("route_annotations_sha256", ""),
+            )
+        )
     if require_source:
         checks.append(
             (

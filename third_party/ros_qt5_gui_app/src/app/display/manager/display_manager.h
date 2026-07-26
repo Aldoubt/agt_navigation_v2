@@ -27,6 +27,7 @@
 #include "display/manager/display_factory.h"
 #include "display/display_occ_map.h"
 #include "display/display_path.h"
+#include "display/display_route_annotations.h"
 #include "display/laser_points.h"
 #include "display/point_shape.h"
 #include "display/robot_shape.h"

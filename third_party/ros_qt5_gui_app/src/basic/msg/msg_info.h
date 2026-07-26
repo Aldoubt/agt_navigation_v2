@@ -11,7 +11,8 @@
                   OneValue(kDiagnostic, ) OneValue(kTopologyMapUpdate, ) \
                   OneValue(kExecuteTaskChain, ) OneValue(kCancelTaskChain, ) \
                   OneValue(kPreviewTaskChain, ) \
-                  OneValue(kTaskChainStatus, )
+                  OneValue(kTaskChainStatus, ) \
+                  OneValue(kTeachRouteAnnotations, )
 
 DECLARE_ENUM(MsgId, SOME_ENUM)
 DEFINE_ENUM(MsgId, SOME_ENUM)
@@ -38,6 +39,7 @@ DEFINE_ENUM(MsgId, SOME_ENUM)
 #define MSG_ID_CANCEL_TASK_CHAIN ToString(MsgId::kCancelTaskChain)
 #define MSG_ID_PREVIEW_TASK_CHAIN ToString(MsgId::kPreviewTaskChain)
 #define MSG_ID_TASK_CHAIN_STATUS ToString(MsgId::kTaskChainStatus)
+#define MSG_ID_TEACH_ROUTE_ANNOTATIONS ToString(MsgId::kTeachRouteAnnotations)
 
 #define DISPLAY_ROBOT ToString(MsgId::kRobotPose)
 #define DISPLAY_MAP ToString(MsgId::kOccupancyMap)
@@ -53,3 +55,5 @@ DEFINE_ENUM(MsgId, SOME_ENUM)
 #define DISPLAY_TOPOLINE "TopologyLine"
 #define DISPLAY_ROBOT_FOOTPRINT ToString(MsgId::kRobotFootprint)
 #define DISPLAY_TOPOLOGY_MAP ToString(MsgId::kTopologyMap)
+#define DISPLAY_TEACH_ROUTE_ANNOTATIONS \
+  ToString(MsgId::kTeachRouteAnnotations)

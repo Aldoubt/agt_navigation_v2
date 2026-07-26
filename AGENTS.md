@@ -146,6 +146,12 @@
   preview adapter, lifecycle managers, and GUI. It publishes advisory `/plan`
   from explicit task points and must not start control, BT navigation, safety
   enablement, velocity publishers, localization, or chassis nodes.
+- Teach-route annotation semantics are project-owned data products. The backend
+  records deterministic direction spacing and turn/U-turn window thresholds in the
+  route asset and publishes `/agt/teach/route_annotations`; Qt may only render
+  that read-only MarkerArray. The `teach` Qt profile must keep task authoring,
+  planning preview, manual velocity publication, and execution disabled, and
+  the overlay is never execution approval.
 - Versioned waypoint task groups live only under
   `runtime/maps/<map_id>/versions/<map_version_id>/tasks/`; `task_index.json`
   is a rebuildable index and task files store map-version-relative asset paths.
@@ -386,3 +392,25 @@
   mode is `MAPPING`; stopping or never starting that mode clears both previews.
   Preview pan/robot-centering is view-only and cannot alter map coordinates or
   feed navigation.
+
+## Teach Mapping MVP Contract
+- Teach-mapping sessions bind one immutable bootstrap map, teach bag, platform
+  profile, extracted route, rescan bag, and candidate output by SHA-256. Large
+  source assets are referenced rather than copied, and session updates are
+  atomic.
+- The rescan launch uses only the session bootstrap map for navigation. It
+  defaults chassis and execution off, fixes teach auto-start off, does not
+  enable motion, and limits first-pass speed to `0.10 m/s` by default.
+- Rescan evidence must retain raw MID360 CustomMsg, IMU, mapping odometry,
+  localization, executed path, safety, and chassis status. Empty or wrong-type
+  required topics fail registration.
+- Candidate maps are generated only by bounded offline replay of raw MID360,
+  IMU, and clock through the existing mapping chain. They remain separate from
+  bootstrap and active maps, are never automatically published, and require a
+  ready PGM/YAML/PCD/processing-record bundle.
+- Candidate-process cleanup uses process-group `SIGINT` and may escalate to
+  `SIGTERM`, but never `SIGKILL`, so FAST-LIVO2 can finalize its PCD. Failures
+  preserve assets and the last successful session stage.
+- Map comparison is advisory and deterministic. It uses canonical full-footprint
+  geometry, supports differing map geometry and origin yaw, and must never
+  choose or activate a winner.

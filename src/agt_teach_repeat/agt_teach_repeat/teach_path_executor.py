@@ -90,6 +90,11 @@ class TeachPathExecutor(Node):
                 self.manifest["execution"].get("max_speed_mps", 0.20),
             )
         )
+        if not all(
+            math.isfinite(value) and value > 0.0
+            for value in (profile_limit, asset_limit)
+        ):
+            raise RuntimeError("profile and manifest speed limits must be positive")
         self.speed_limit = min(self.maximum_linear_speed, asset_limit, profile_limit)
         if self.speed_limit <= 0.0:
             raise RuntimeError("effective speed limit must be positive")
@@ -468,7 +473,14 @@ class TeachPathExecutor(Node):
     def _finish(self, state, reason):
         self._active = False
         self._child_goal = None
+        self._clear_speed_limit()
         self._publish_status(state, reason)
+
+    def _clear_speed_limit(self):
+        speed = SpeedLimit()
+        speed.percentage = False
+        speed.speed_limit = 0.0
+        self._speed_publisher.publish(speed)
 
     def _publish_status(self, state, reason=""):
         current = self._current_error or {}
@@ -515,6 +527,7 @@ def main(args=None):
         pass
     finally:
         executor.shutdown()
+        node._clear_speed_limit()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

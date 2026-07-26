@@ -81,6 +81,8 @@ def test_direct_rosbag_extraction_builds_bound_asset(tmp_path):
     assert reference[0].y == pytest.approx(2.0)
     assert loaded["map"]["localization_pcd_sha256"] == manifest["map"]["localization_pcd_sha256"]
     assert (output / "processed/task_control_points.json").is_file()
+    assert (output / "processed/route_annotations.json").is_file()
+    assert loaded["assets"]["route_annotations_sha256"].startswith("sha256:")
 
 
 def test_missing_mapping_odometry_has_actionable_error(tmp_path):

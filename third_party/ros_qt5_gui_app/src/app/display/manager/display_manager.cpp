@@ -50,6 +50,7 @@ DisplayManager::DisplayManager() {
   new LaserPoints(DISPLAY_LASER, 2, DISPLAY_MAP);
   new DisplayPath(DISPLAY_GLOBAL_PATH, 6, DISPLAY_MAP);
   new DisplayPath(DISPLAY_LOCAL_PATH, 6, DISPLAY_MAP);
+  new DisplayRouteAnnotations(DISPLAY_TEACH_ROUTE_ANNOTATIONS, 10, DISPLAY_MAP);
   new RobotShape(DISPLAY_ROBOT_FOOTPRINT, 8, DISPLAY_MAP);
   const bool enable_costmap_display =
       GET_CONFIG_VALUE("EnableCostmapDisplay", "false") == "true";

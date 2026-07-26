@@ -140,6 +140,12 @@ def test_reference_publisher_is_transient_local(tmp_path):
     try:
         qos = node.get_publishers_info_by_topic("/agt/teach/reference_path")[0].qos_profile
         assert qos.durability == rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL
+        annotation_qos = node.get_publishers_info_by_topic(
+            "/agt/teach/route_annotations"
+        )[0].qos_profile
+        assert annotation_qos.durability == rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL
+        markers = node._annotation_markers(node.get_clock().now().to_msg())
+        assert any(marker.text == "START" for marker in markers.markers)
     finally:
         node.destroy_node()
 
@@ -180,6 +186,31 @@ def test_executor_rejects_missing_readiness_and_never_publishes_velocity(tmp_pat
         topics = dict(node.get_topic_names_and_types())
         assert "/cmd_vel" not in topics
         assert not any(name.startswith("/agt/teach") and "cmd_vel" in name for name in topics)
+    finally:
+        node.destroy_node()
+
+
+def test_executor_clears_speed_limit_on_terminal_state(tmp_path):
+    node = TeachPathExecutor(
+        parameter_overrides=parameters(
+            make_asset(tmp_path), execution_enabled=True, auto_start=False
+        )
+    )
+
+    class Publisher:
+        def __init__(self):
+            self.messages = []
+
+        def publish(self, message):
+            self.messages.append(message)
+
+    try:
+        publisher = Publisher()
+        node._speed_publisher = publisher
+        node._finish("CANCELED", "USER_CANCELED")
+        assert len(publisher.messages) == 1
+        assert publisher.messages[0].percentage is False
+        assert publisher.messages[0].speed_limit == 0.0
     finally:
         node.destroy_node()
 

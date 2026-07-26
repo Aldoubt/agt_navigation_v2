@@ -79,7 +79,7 @@ class MainWindow : public QMainWindow {
   Display::DisplayManager *display_manager_;
 
   QThread message_thread_;
-  SpeedCtrlWidget *speed_ctrl_widget_;
+  SpeedCtrlWidget *speed_ctrl_widget_{nullptr};
   NavGoalTableView *nav_goal_table_view_;
   TaskLibraryDock *task_library_dock_{nullptr};
   QProgressBar *battery_bar_;
@@ -92,6 +92,7 @@ class MainWindow : public QMainWindow {
   std::string map_path_{"./map"};
   DisplayConfigWidget *display_config_widget_{nullptr};
   ads::CDockWidget *settings_dock_{nullptr};
+  ads::CDockWidget *dashboard_dock_{nullptr};
   DiagnosticDockWidget *diagnostic_dock_widget_{nullptr};
   ads::CDockWidget *diagnostic_dock_{nullptr};
   

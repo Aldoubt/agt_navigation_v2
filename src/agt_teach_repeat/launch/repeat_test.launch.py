@@ -51,6 +51,10 @@ def _setup(context):
                     "auto_start": ParameterValue(
                         LaunchConfiguration("auto_start"), value_type=bool
                     ),
+                    "maximum_linear_speed_mps": ParameterValue(
+                        LaunchConfiguration("maximum_linear_speed_mps"),
+                        value_type=float,
+                    ),
                 },
             ],
         ),
@@ -75,6 +79,7 @@ def generate_launch_description():
             DeclareLaunchArgument("manifest"),
             DeclareLaunchArgument("execution_enabled", default_value="false"),
             DeclareLaunchArgument("auto_start", default_value="true"),
+            DeclareLaunchArgument("maximum_linear_speed_mps", default_value="0.20"),
             DeclareLaunchArgument("costmap_topic", default_value="/global_costmap/costmap"),
             DeclareLaunchArgument("experiment_root", default_value=""),
             DeclareLaunchArgument("experiment_id", default_value=""),

@@ -31,6 +31,8 @@ rclcomm::rclcomm() {
   SET_DEFAULT_TOPIC_NAME(MSG_ID_DIAGNOSTIC, "/diagnostics")
   SET_DEFAULT_TOPIC_NAME(DISPLAY_ROBOT_FOOTPRINT, "/local_costmap/published_footprint")
   SET_DEFAULT_TOPIC_NAME(DISPLAY_TOPOLOGY_MAP, "/map/topology")
+  SET_DEFAULT_TOPIC_NAME(DISPLAY_TEACH_ROUTE_ANNOTATIONS,
+                         "/agt/teach/route_annotations")
   SET_DEFAULT_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE, "/map/topology/update")
   SET_DEFAULT_KEY_VALUE("BaseFrameId", "base_link")
   SET_DEFAULT_KEY_VALUE("FixedFrameId", "map")
@@ -66,8 +68,12 @@ bool rclcomm::Start() {
   reloc_pose_publisher_ =
       node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
           GET_TOPIC_NAME(MSG_ID_SET_RELOC_POSE), 10);
-  speed_publisher_ = node->create_publisher<geometry_msgs::msg::Twist>(
-      GET_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED), 10);
+  const bool enable_manual_control =
+      GET_CONFIG_VALUE("EnableManualControl", "true") == "true";
+  if (enable_manual_control) {
+    speed_publisher_ = node->create_publisher<geometry_msgs::msg::Twist>(
+        GET_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED), 10);
+  }
   map_subscriber_ = node->create_subscription<nav_msgs::msg::OccupancyGrid>(
       GET_TOPIC_NAME(DISPLAY_MAP),
       rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
@@ -106,8 +112,12 @@ bool rclcomm::Start() {
           GET_TOPIC_NAME(MSG_ID_DIAGNOSTIC), 10,
           std::bind(&rclcomm::diagnostic_callback, this, std::placeholders::_1),
           sub1_obt);
+  auto global_path_qos = rclcpp::QoS(rclcpp::KeepLast(20)).reliable();
+  if (GET_CONFIG_VALUE("GlobalPathTransientLocal", "false") == "true") {
+    global_path_qos.transient_local();
+  }
   global_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
-      GET_TOPIC_NAME(DISPLAY_GLOBAL_PATH), 20,
+      GET_TOPIC_NAME(DISPLAY_GLOBAL_PATH), global_path_qos,
       std::bind(&rclcomm::path_callback, this, std::placeholders::_1),
       sub1_obt);
   local_path_subscriber_ = node->create_subscription<nav_msgs::msg::Path>(
@@ -127,6 +137,13 @@ bool rclcomm::Start() {
       rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
       std::bind(&rclcomm::topologyMapCallback, this, std::placeholders::_1),
       sub1_obt);
+  route_annotations_subscriber_ =
+      node->create_subscription<visualization_msgs::msg::MarkerArray>(
+          GET_TOPIC_NAME(DISPLAY_TEACH_ROUTE_ANNOTATIONS),
+          rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local(),
+          std::bind(&rclcomm::routeAnnotationsCallback, this,
+                    std::placeholders::_1),
+          sub1_obt);
   topology_map_update_publisher_ = node->create_publisher<topology_msgs::msg::TopologyMap>(
       GET_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE), 
       rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
@@ -200,10 +217,12 @@ bool rclcomm::Start() {
     std::cout << "recv reloc pose:" << pose << std::endl;
     PubRelocPose(pose);
   });
-  SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
-    std::cout << "recv robot speed:" << speed << std::endl;
-    PubRobotSpeed(speed);
-  });
+  if (enable_manual_control) {
+    SUBSCRIBE(MSG_ID_SET_ROBOT_SPEED, [this](const basic::RobotSpeed& speed) {
+      std::cout << "recv robot speed:" << speed << std::endl;
+      PubRobotSpeed(speed);
+    });
+  }
   SUBSCRIBE(MSG_ID_TOPOLOGY_MAP_UPDATE, [this](const TopologyMap& topology_map) {
     std::cout << "recv topology map update:" << topology_map.map_name << std::endl;
     topology_msgs::msg::TopologyMap ros_msg = ConvertToRosMsg(topology_map);
@@ -577,6 +596,48 @@ void rclcomm::path_callback(const nav_msgs::msg::Path::SharedPtr msg) {
   }
 }
 
+void rclcomm::routeAnnotationsCallback(
+    const visualization_msgs::msg::MarkerArray::SharedPtr msg) {
+  basic::RouteAnnotations annotations;
+  const std::string fixed_frame =
+      Config::ConfigManager::Instance()->GetConfigValue("FixedFrameId", "map");
+  for (const auto &marker : msg->markers) {
+    const bool is_direction = marker.ns == "teach_route_direction";
+    const bool is_event = marker.ns == "teach_route_event";
+    if (marker.action != visualization_msgs::msg::Marker::ADD ||
+        (!is_direction && !is_event) || marker.header.frame_id.empty()) {
+      continue;
+    }
+    try {
+      geometry_msgs::msg::PoseStamped source;
+      source.header = marker.header;
+      source.pose = marker.pose;
+      geometry_msgs::msg::PoseStamped transformed;
+      if (source.header.frame_id == fixed_frame) {
+        transformed = source;
+      } else {
+        transformed = tf_buffer_->transform(
+            source, fixed_frame, std::chrono::milliseconds(100));
+      }
+      tf2::Quaternion quaternion;
+      tf2::fromMsg(transformed.pose.orientation, quaternion);
+      double roll = 0.0;
+      double pitch = 0.0;
+      double yaw = 0.0;
+      tf2::Matrix3x3(quaternion).getRPY(roll, pitch, yaw);
+      basic::RouteAnnotation annotation;
+      annotation.x = transformed.pose.position.x;
+      annotation.y = transformed.pose.position.y;
+      annotation.theta = yaw;
+      annotation.kind = is_direction ? "DIRECTION" : marker.text;
+      annotations.push_back(annotation);
+    } catch (const tf2::TransformException &) {
+      continue;
+    }
+  }
+  PUBLISH(MSG_ID_TEACH_ROUTE_ANNOTATIONS, annotations);
+}
+
 void rclcomm::laser_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg) {
   // qDebug()<<"订阅到激光话题";
   // std::cout<<"recv laser"<<std::endl;
@@ -736,6 +797,7 @@ void rclcomm::PubNavGoal(const basic::RobotPose &pose) {
   nav_goal_publisher_->publish(geo_pose);
 }
 void rclcomm::PubRobotSpeed(const basic::RobotSpeed &speed) {
+  if (!speed_publisher_) return;
   geometry_msgs::msg::Twist twist;
   twist.linear.x = speed.vx;
   twist.linear.y = speed.vy;

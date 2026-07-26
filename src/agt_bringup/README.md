@@ -26,8 +26,13 @@ ros2 launch agt_bringup system.launch.py mode:=navigation \
 和 `can_interface:=<interface>`，为未来底盘/通讯协议替换保留配置边界。
 两个模式均可设置 `record_bag:=true`，输出到 `runtime/rosbag/`。
 
-录包入口兼容原调用，并支持版本化 `bag_profile:=minimal|mapping|localization|navigation|full_experiment`。
+录包入口兼容原调用，并支持版本化 `bag_profile:=minimal|mapping|localization|navigation|teach_repeat|full_experiment`。
 profile 只包含显式 topic 名称，不接受任意 rosbag 参数或 `record -a`。
+
+低速示教路线复扫使用 `teach_mapping_rescan.launch.py`。该入口只用 Session 绑定的 Bootstrap
+Map 启动一套 navigation，并组合 `repeat_test.launch.py`；默认底盘关闭、执行关闭、录包开启，
+`auto_start` 固定关闭且速度上限为 `0.10 m/s`。完整现场步骤见
+[`docs/testing/teach_mapping_mvp_field_test.md`](../../docs/testing/teach_mapping_mvp_field_test.md)。
 
 原导航默认保持语义与覆盖模块关闭。启动完整覆盖作业链前，先 source TASK-08 的外部依赖工作区：
 
