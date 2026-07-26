@@ -13,6 +13,67 @@ class QtRuntimeError(ValueError):
     pass
 
 
+def task_library_runtime_keys(path):
+    try:
+        document = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise QtRuntimeError(f"cannot parse task library config: {exc}") from exc
+    settings = document.get("task_library") if isinstance(document, dict) else None
+    if not isinstance(settings, dict):
+        raise QtRuntimeError("task library config must contain task_library settings")
+    required = {
+        "enabled",
+        "maximum_points",
+        "maximum_loops",
+        "unknown_cell_policy",
+        "line_check_step_ratio",
+        "autosave_enabled",
+        "autosave_interval_s",
+        "backup_count",
+    }
+    missing = sorted(required - settings.keys())
+    if missing:
+        raise QtRuntimeError(f"task library config is missing {missing[0]}")
+    if not isinstance(settings["enabled"], bool) or not isinstance(
+        settings["autosave_enabled"], bool
+    ):
+        raise QtRuntimeError("task library enabled settings must be boolean")
+    integers = ("maximum_points", "maximum_loops", "autosave_interval_s")
+    if any(
+        isinstance(settings[key], bool)
+        or not isinstance(settings[key], int)
+        or settings[key] <= 0
+        for key in integers
+    ):
+        raise QtRuntimeError("task library limits and autosave interval must be positive integers")
+    backup_count = settings["backup_count"]
+    if isinstance(backup_count, bool) or not isinstance(backup_count, int) or backup_count < 0:
+        raise QtRuntimeError("task library backup_count must be a non-negative integer")
+    step_ratio = settings["line_check_step_ratio"]
+    if (
+        isinstance(step_ratio, bool)
+        or not isinstance(step_ratio, (int, float))
+        or not math.isfinite(step_ratio)
+        or step_ratio <= 0.0
+    ):
+        raise QtRuntimeError("task library line_check_step_ratio must be positive")
+    policy = settings["unknown_cell_policy"]
+    if policy not in {"reject", "warn", "allow"}:
+        raise QtRuntimeError("task library unknown_cell_policy is invalid")
+    def boolean_text(value):
+        return "true" if value else "false"
+    return {
+        "TaskLibraryEnabled": boolean_text(settings["enabled"]),
+        "TaskMaximumPoints": str(settings["maximum_points"]),
+        "TaskMaximumLoops": str(settings["maximum_loops"]),
+        "TaskUnknownCellPolicy": policy,
+        "TaskLineCheckStepRatio": str(step_ratio),
+        "TaskAutosaveEnabled": boolean_text(settings["autosave_enabled"]),
+        "TaskAutosaveIntervalS": str(settings["autosave_interval_s"]),
+        "TaskBackupCount": str(backup_count),
+    }
+
+
 def validate_nav2_map(path):
     yaml_path = Path(path).expanduser()
     if not yaml_path.suffix:
@@ -107,7 +168,13 @@ def validate_topology_for_map(map_yaml, geometry):
     return warnings
 
 
-def prepare_runtime_config(config_path, template_path, requested_map=None):
+def prepare_runtime_config(
+    config_path,
+    template_path,
+    requested_map=None,
+    runtime_maps_root=None,
+    task_library_config=None,
+):
     config_path = Path(config_path)
     template_path = Path(template_path)
     template = json.loads(template_path.read_text(encoding="utf-8"))
@@ -119,8 +186,13 @@ def prepare_runtime_config(config_path, template_path, requested_map=None):
     # Capability and frame keys are versioned profile contract. Add newly
     # introduced keys without overwriting operator-persisted values.
     runtime_keys = config.setdefault("key_value", {})
-    for key, value in template.get("key_value", {}).items():
+    defaults = dict(template.get("key_value", {}))
+    if task_library_config:
+        defaults.update(task_library_runtime_keys(task_library_config))
+    for key, value in defaults.items():
         runtime_keys.setdefault(key, value)
+    if runtime_maps_root:
+        runtime_keys["TaskLibraryRoot"] = str(Path(runtime_maps_root).expanduser().resolve())
     if runtime_keys.get("EnableCostmapDisplay", "false") != "true":
         for display in config.get("display_config", []):
             if display.get("display_name") in {

@@ -12,6 +12,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(TaskChain, points);
 struct TaskExecutionRequest {
   std::vector<TopologyMap::PointInfo> points;
   uint32_t loop_count{1};
+  // A saved task group is preferred so the project Action server can repeat
+  // its map-binding and content-hash checks at execution time.
+  std::string task_file;
 };
 
 struct TaskExecutionStatus {
@@ -21,4 +24,5 @@ struct TaskExecutionStatus {
   std::string message;
   bool terminal{false};
   bool success{false};
+  std::vector<int32_t> missed_waypoints;
 };

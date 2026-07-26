@@ -27,6 +27,10 @@
 `sha256:<64 lowercase hexadecimal characters>` form. It is recomputed at map readiness time and is
 used to bind configured candidates and last-pose records; a processing record `pcd_sha256` is checked
 when present.
+
+`LocalizationStatus.ERROR_STALE_SCAN` and `ERROR_INVALID_SCAN_TIMESTAMP` are fail-closed errors for
+the latest registered cloud. The localization node reports the cloud stamp and computed age; dynamic
+TF used for that attempt is queried at the same stamp.
 - `/agt/navigation/cmd_vel`
 - `/agt/navigation/cmd_vel_raw`
 - `/agt/navigation/status`

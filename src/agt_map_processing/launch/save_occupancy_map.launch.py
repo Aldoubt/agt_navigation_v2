@@ -1,6 +1,22 @@
+from pathlib import Path
+
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, OpaqueFunction
 from launch.substitutions import LaunchConfiguration
+
+
+def validate_output(context):
+    prefix = Path(LaunchConfiguration("map_prefix").perform(context)).expanduser()
+    image_format = LaunchConfiguration("image_format").perform(context).lstrip(".")
+    outputs = (Path(f"{prefix}.{image_format}"), Path(f"{prefix}.yaml"))
+    existing = [path for path in outputs if path.exists()]
+    if existing:
+        names = ", ".join(str(path) for path in existing)
+        raise RuntimeError(
+            f"refusing to overwrite existing map output: {names}; "
+            "choose a new map_prefix"
+        )
+    return []
 
 
 def generate_launch_description():
@@ -14,6 +30,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("image_format", default_value="pgm"),
             DeclareLaunchArgument("save_map_timeout", default_value="60.0"),
+            OpaqueFunction(function=validate_output),
             ExecuteProcess(
                 cmd=[
                     "ros2",
@@ -31,6 +48,8 @@ def generate_launch_description():
                     "map_subscribe_transient_local:=true",
                     "-p",
                     "free_thresh_default:=0.196",
+                    "-p",
+                    "occupied_thresh_default:=0.65",
                     "-p",
                     ["save_map_timeout:=", LaunchConfiguration("save_map_timeout")],
                 ],

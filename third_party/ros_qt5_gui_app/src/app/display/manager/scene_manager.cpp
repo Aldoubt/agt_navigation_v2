@@ -129,7 +129,11 @@ void SceneManager::SetToolRange(double range) {
 
 void SceneManager::SetEditMapMode(MapEditMode mode) {
   CancelPendingNavGoalPlacement();
+  CancelPendingTaskWaypointPlacement();
   current_mode_ = mode;
+  for (auto *item : task_waypoint_items_) {
+    item->setEditing(mode == kEditTaskWaypoints);
+  }
   
   // 清理拓扑连接状态
   first_selected_point_.clear();
@@ -198,6 +202,13 @@ void SceneManager::SetEditMapMode(MapEditMode mode) {
       is_linking_mode_ = true;
       LOG_INFO("进入拓扑连接模式，点击两个点位进行连接，拖拽可实时预览");
     } break;
+    case kEditTaskWaypoints: {
+      SetPointMoveEnable(false);
+      FactoryDisplay::Instance()->GetDisplay(DISPLAY_MAP)->SetMoveEnable(false);
+      view_ptr_->setCursor(Qt::CrossCursor);
+      view_ptr_->setToolTip(
+          "两次点击添加任务点：第一次确定位置，第二次确定朝向；拖动点或朝向手柄可编辑");
+    } break;
     default:
       break;
   }
@@ -227,6 +238,99 @@ void SceneManager::CancelPendingNavGoalPlacement() {
     removeItem(nav_goal_direction_preview_);
     delete nav_goal_direction_preview_;
     nav_goal_direction_preview_ = nullptr;
+  }
+}
+
+void SceneManager::CancelPendingTaskWaypointPlacement() {
+  task_waypoint_position_pending_ = false;
+  if (task_waypoint_direction_preview_) {
+    removeItem(task_waypoint_direction_preview_);
+    delete task_waypoint_direction_preview_;
+    task_waypoint_direction_preview_ = nullptr;
+  }
+}
+
+void SceneManager::CompleteTaskWaypointPlacement(
+    const QPointF &direction_scene) {
+  const RobotPose position_world = display_manager_->scenePoseToWord(RobotPose(
+      task_waypoint_position_scene_.x(), task_waypoint_position_scene_.y(), 0.0));
+  const RobotPose direction_world = display_manager_->scenePoseToWord(
+      RobotPose(direction_scene.x(), direction_scene.y(), 0.0));
+  const double dx = direction_world.x - position_world.x;
+  const double dy = direction_world.y - position_world.y;
+  if (std::hypot(dx, dy) < 0.05) {
+    LOG_WARN("Task waypoint heading point must be at least 0.05 m away");
+    return;
+  }
+  emit signalTaskWaypointPlaced(
+      RobotPose(position_world.x, position_world.y, std::atan2(dy, dx)));
+  CancelPendingTaskWaypointPlacement();
+}
+
+void SceneManager::UpdateTaskWaypoints(
+    const QVector<task_group::Waypoint> &points, int selected_row,
+    bool show_disabled) {
+  for (auto *line : task_waypoint_lines_) {
+    removeItem(line);
+    delete line;
+  }
+  task_waypoint_lines_.clear();
+  for (auto *item : task_waypoint_items_) delete item;
+  task_waypoint_items_.clear();
+
+  auto *map_display = FactoryDisplay::Instance()->GetDisplay(DISPLAY_MAP);
+  if (!map_display) return;
+  QVector<QPointF> positions;
+  positions.reserve(points.size());
+  for (const auto &point : points) {
+    positions.push_back(display_manager_->wordPose2Map(QPointF(point.x, point.y)));
+  }
+  for (int index = 1; index < points.size(); ++index) {
+    if ((!points[index - 1].enabled || !points[index].enabled) &&
+        !show_disabled) continue;
+    auto *line = new QGraphicsLineItem(
+        QLineF(positions[index - 1], positions[index]), map_display);
+    QPen pen(QColor(0, 121, 107, 180), 2.0);
+    if (!points[index - 1].enabled || !points[index].enabled) {
+      pen.setStyle(Qt::DashLine);
+      pen.setColor(QColor(117, 117, 117, 150));
+    }
+    line->setPen(pen);
+    line->setZValue(70.0);
+    task_waypoint_lines_.push_back(line);
+  }
+  for (int index = 0; index < points.size(); ++index) {
+    const auto &point = points[index];
+    if (!point.enabled && !show_disabled) continue;
+    const QPointF direction = display_manager_->wordPose2Map(
+        QPointF(point.x + std::cos(point.yaw),
+                point.y + std::sin(point.yaw)));
+    const QPointF delta = direction - positions[index];
+    auto *item = new TaskWaypointItem(
+        index, map_display,
+        [this](int row, const QPointF &position_scene,
+               const QPointF &direction_scene) {
+          const RobotPose position = display_manager_->scenePoseToWord(
+              RobotPose(position_scene.x(), position_scene.y(), 0.0));
+          const RobotPose direction = display_manager_->scenePoseToWord(
+              RobotPose(direction_scene.x(), direction_scene.y(), 0.0));
+          const RobotPose edited(
+              position.x, position.y,
+              std::atan2(direction.y - position.y,
+                         direction.x - position.x));
+          QTimer::singleShot(0, this, [this, row, edited]() {
+            emit signalTaskWaypointEdited(row, edited);
+          });
+        },
+        [this](int row) {
+          QTimer::singleShot(0, this,
+                             [this, row]() { emit signalTaskWaypointSelected(row); });
+        });
+    item->setPos(positions[index]);
+    item->setWaypoint(point.name, std::atan2(delta.y(), delta.x()),
+                      point.enabled, index == selected_row);
+    item->setEditing(current_mode_ == kEditTaskWaypoints);
+    task_waypoint_items_.push_back(item);
   }
 }
 
@@ -305,6 +409,13 @@ void SceneManager::mousePressEvent(QGraphicsSceneMouseEvent *mouseEvent) {
   QPointF position = mouseEvent->scenePos();  // 获取点击位置
   QGraphicsItem *click_item = itemAt(position, views()[0]->transform());
   Display::VirtualDisplay *display = dynamic_cast<Display::VirtualDisplay *>(click_item);
+  auto *task_waypoint = dynamic_cast<TaskWaypointItem *>(click_item);
+
+  if (current_mode_ == kEditTaskWaypoints && task_waypoint &&
+      mouseEvent->button() == Qt::LeftButton) {
+    QGraphicsScene::mousePressEvent(mouseEvent);
+    return;
+  }
 
   if (display != nullptr) {                          // 判断是否获取到了 item
     curr_handle_display_ = display;
@@ -356,6 +467,26 @@ void SceneManager::mousePressEvent(QGraphicsSceneMouseEvent *mouseEvent) {
         nav_goal_direction_preview_->setZValue(100.0);
       } else {
         CompleteNavGoalPlacement(position);
+      }
+      mouseEvent->accept();
+      return;
+    }
+    case MapEditMode::kEditTaskWaypoints: {
+      if (mouseEvent->button() == Qt::RightButton) {
+        CancelPendingTaskWaypointPlacement();
+        mouseEvent->accept();
+        return;
+      }
+      if (mouseEvent->button() != Qt::LeftButton) break;
+      if (!task_waypoint_position_pending_) {
+        task_waypoint_position_scene_ = position;
+        task_waypoint_position_pending_ = true;
+        task_waypoint_direction_preview_ = addLine(
+            QLineF(position, position),
+            QPen(QColor(0, 121, 107), 2.0, Qt::DashLine));
+        task_waypoint_direction_preview_->setZValue(100.0);
+      } else {
+        CompleteTaskWaypointPlacement(position);
       }
       mouseEvent->accept();
       return;
@@ -582,6 +713,13 @@ void SceneManager::mouseMoveEvent(QGraphicsSceneMouseEvent *mouseEvent) {
             QLineF(nav_goal_position_scene_, position));
       }
     } break;
+    case MapEditMode::kEditTaskWaypoints: {
+      if (task_waypoint_position_pending_ &&
+          task_waypoint_direction_preview_) {
+        task_waypoint_direction_preview_->setLine(
+            QLineF(task_waypoint_position_scene_, position));
+      }
+    } break;
     case MapEditMode::kErase: {
       if (left_pressed_ && is_erase_operation_active_ && current_map_ptr_) {
         auto map_ptr = static_cast<DisplayOccMap *>(FactoryDisplay::Instance()->GetDisplay(DISPLAY_MAP));
@@ -641,6 +779,11 @@ void SceneManager::wheelEvent(QGraphicsSceneWheelEvent *event) {
 }
 
 void SceneManager::keyPressEvent(QKeyEvent *event) {
+  if (event->key() == Qt::Key_Escape && task_waypoint_position_pending_) {
+    CancelPendingTaskWaypointPlacement();
+    event->accept();
+    return;
+  }
   if (event->key() == Qt::Key_Escape && nav_goal_position_pending_) {
     CancelPendingNavGoalPlacement();
     event->accept();

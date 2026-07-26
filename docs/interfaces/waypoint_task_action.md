@@ -10,10 +10,11 @@ Type: `agt_interfaces/action/ExecuteWaypointTask`
 
 Goal:
 
-- `task_file`: absolute path to a Qt-compatible JSON containing `points`;
+- `task_file`: absolute path to a legacy Qt points JSON or schema-v1 task group;
 - `poses`: portable `map`-frame input for future Qt/Web/autostart frontends;
 - `loop`: enables finite repetition;
-- `loop_count`: required to be `1..maximum_loops` when looping.
+- `loop_count`: always required to be `1..maximum_loops`; it is ignored after
+  validation when `loop=false`.
 
 Exactly one of `task_file` and `poses` is required. This keeps legacy Qt files usable
 without making future remote frontends depend on the robot computer's filesystem.
@@ -34,14 +35,19 @@ duplicates, exact repeated patterns caused by the vendor append-on-save defect, 
 points outside the current `/agt/map/global_occupancy`. It also requires recent
 `agt_safety` diagnostics with motion enabled and the emergency-stop latch clear.
 
+For schema-v1 files it additionally compares OccupancyGrid geometry, active map ID and
+version, map YAML/image hashes, and the localization PCD hash. Missing or mismatched
+active identity fails closed. Legacy files have no map binding and retain their existing
+runtime map-boundary behavior.
+
 The server never enables motion and never publishes velocity. It sends only
 `nav2_msgs/action/FollowWaypoints`; cancellation or loss of safety readiness cancels
 the active child goal. A Nav2 abort or any `missed_waypoints` makes the parent task fail.
 
 ## Qt integration boundary
 
-The maintained `agt-navigation-v2` Qt branch submits the currently selected points as
-`map`-frame poses to this Action. Its Start/Stop controls display Action feedback and
-forward cancellation. The JSON client remains available for headless operation and
-replay. Any future Qt/Web/autostart frontend must call this same Action and must not
-duplicate its state machine.
+The maintained `agt-navigation-v2` Qt branch submits an absolute saved schema-v1 task
+path so the server can repeat binding/hash checks. Portable clients may still submit
+`map`-frame poses. Start/Stop controls display Action feedback, result and missed
+waypoints, and forward cancellation. Any future Qt/Web/autostart frontend must call
+this same Action and must not duplicate its state machine.

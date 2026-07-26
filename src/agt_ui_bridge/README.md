@@ -4,7 +4,7 @@
 [`Aldoubt/Ros_Qt5_Gui_App:agt-navigation-v2`](https://github.com/Aldoubt/Ros_Qt5_Gui_App/tree/agt-navigation-v2)，
 固定源码快照位于 `third_party/ros_qt5_gui_app`，原项目 GPL-2.0 许可证与署名保持不变。
 GUI 负责地图显示、机器人位姿、速度控制、重定位、单点/多点导航、路径显示、
-栅格和拓扑地图编辑；本包负责 V2 配置、启动和地图 I/O。
+栅格和拓扑地图编辑，以及版本化任务组的离线编辑和基础栅格校验；本包负责 V2 配置、启动和地图 I/O。
 
 ## 构建主界面
 
@@ -24,7 +24,8 @@ source /opt/ros/humble/setup.bash
 ```
 
 构建过程会按上游 CMake 配置下载 Advanced Docking System、yaml-cpp、nlohmann/json 和
-topology_msgs，产物写入 `build/ros_qt5_gui_app`。源码固定在 fork 提交 `74d11e0`，构建产物
+topology_msgs，产物写入 `build/ros_qt5_gui_app`。固定 fork 提交以
+[`third_party/README.md`](../../third_party/README.md) 为唯一 provenance 记录，构建产物
 不会提交 Git。
 
 启动脚本只使用本仓库构建产物，找不到时会提示执行
@@ -40,6 +41,10 @@ ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=mapping
 ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=navigation
 ```
 
+以上是 GUI/地图 I/O 的独立启动入口，不会启动 Nav2、定位、安全或
+`ExecuteWaypointTask` server。在线任务执行必须使用完整 `agt_bringup` navigation 链，命令和
+断车默认见任务库工作流文档。
+
 首次启动会把对应模板复制到 profile 独立目录：
 `runtime/gui/ros_qt5_gui_app/mapping/config.json` 或
 `runtime/gui/ros_qt5_gui_app/navigation/config.json`。GUI 修改只保存在各自 runtime，互不覆盖，
@@ -52,6 +57,13 @@ ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
 ```
 
 ## V2 默认映射
+
+Task Library 的完整离线编辑、地图绑定、旧格式迁移和执行流程见
+[`docs/workflows/qt5_offline_task_group_editor.md`](../../docs/workflows/qt5_offline_task_group_editor.md)。
+Qt5 主窗口将它内嵌在右侧 `任务中心 / Task Center`，并与原有拓扑任务通过页签切换；
+切换离开 Task Library 或隐藏任务中心会退出地图点位编辑模式。
+版本化默认值来自 `config/task_library.yaml`，启动时合并到 profile runtime 配置；已保存的操作者
+设置不会被覆盖，`TaskLibraryRoot` 始终由启动脚本解析为当前工作区的绝对 `runtime/maps` 路径。
 
 - mapping 地图：`/agt/map/mapping_occupancy`
 - navigation 地图：`/agt/map/global_occupancy`

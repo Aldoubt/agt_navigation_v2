@@ -9,7 +9,7 @@ ${SOURCE_FILE}
 ${INCLUDE_FILE}
 )
 
-target_link_libraries(${TARGET_NAME} ${Boost_LIBRARIES} Qt5::Core basic nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp)
+target_link_libraries(${TARGET_NAME} ${Boost_LIBRARIES} Qt5::Core Qt5::Gui basic nlohmann_json::nlohmann_json yaml-cpp::yaml-cpp)
 target_include_directories(${TARGET_NAME} PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 set_target_properties(${TARGET_NAME} PROPERTIES

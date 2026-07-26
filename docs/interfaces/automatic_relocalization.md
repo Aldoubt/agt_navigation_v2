@@ -1,10 +1,10 @@
 # Automatic Relocalization Interface
 
 当前阶段：结构化接口、候选加载/展开、外部粗位姿校验、顺序配准编排、基础质量门禁和基础
-supervisor 已实现。低频 TRACKING 验证不改写 `map -> odom`；PCD processing record 的
-`state: ready`/`map_file` 门禁和 waypoint/safety 基础定位门禁已接入，Nav2 lifecycle、PCD
-内容 hash 的读取、候选身份绑定和 processing-record 校验已接入；旧记录的 hash 写回以及完整
-的短期运动一致性验证仍按后续阶段实现。
+supervisor 已实现。低频 TRACKING 验证不改写 `map -> odom`，并使用点云时间的 odom 传播预测
+作为当前配准初值；PCD processing record 的 `state: ready`/`map_file` 门禁和 waypoint/safety
+基础定位门禁已接入，Nav2 lifecycle、PCD 内容 hash 的读取、候选身份绑定和 processing-record
+校验已接入。旧记录的 hash 写回和长期运动质量评估仍按后续阶段实现。
 
 运维控制器的 `/agt/localization/set_mode` 只选择有界 `MANUAL_ONLY`、`AUTO_ON_START` 或
 `AUTO_RECOVERY` policy；它复用下方唯一 `/agt/localization/relocalize` Action，不创建第二套
@@ -55,7 +55,13 @@ UNINITIALIZED -> SEARCHING -> VERIFYING -> TRACKING
 现已实现并测试 `TRACKING -> DEGRADED -> RECOVERING -> LOST` 的有界迁移、取消和超时。
 低频验证成功时只恢复结构化状态，不重写 `map -> odom`。稳定错误码包括 map not ready、scan
 too small、backend/fitness failure、invalid request/guess、timeout/canceled、ambiguous result、
-stale status、TF unavailable、map hash mismatch 和 no candidates。
+stale status、TF unavailable、map hash mismatch、no candidates、stale scan 和 invalid scan
+timestamp。
+
+点云只保留最新一帧。`max_cloud_age_s`、`max_cloud_future_tolerance_s` 和
+`require_nonzero_cloud_stamp` 在 ROS 参数入口校验；点云过期、来自未来或时间戳无效时，节点
+拒绝本次配准并保留具体 stamp/age 原因。动态 `odom -> tracking_frame` 只在点云时间查询，
+不会用最新 TF 静默替代。
 
 `has_converged=true` 只代表后端数值迭代收敛；`localization_accepted=true` 和 `pose_valid=true`
 还需要 fitness、inlier、overlap、初值修正量、候选分数差、地图范围、短期运动一致性和连续验证

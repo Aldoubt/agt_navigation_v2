@@ -32,6 +32,12 @@ DisplayManager::DisplayManager() {
   connect(scene_manager_ptr_,
           SIGNAL(signalEditMapModeChanged(MapEditMode)), this,
           SIGNAL(signalEditMapModeChanged(MapEditMode)));
+  connect(scene_manager_ptr_, &SceneManager::signalTaskWaypointPlaced, this,
+          &DisplayManager::signalTaskWaypointPlaced);
+  connect(scene_manager_ptr_, &SceneManager::signalTaskWaypointEdited, this,
+          &DisplayManager::signalTaskWaypointEdited);
+  connect(scene_manager_ptr_, &SceneManager::signalTaskWaypointSelected, this,
+          &DisplayManager::signalTaskWaypointSelected);
   //------------------------------------start display instace (register
   // display)-----------------------------
   (new DisplayOccMap(DISPLAY_MAP, 1));
@@ -287,6 +293,11 @@ void DisplayManager::StartReloc() {
   }
 }
 void DisplayManager::SetEditMapMode(MapEditMode mode) { scene_manager_ptr_->SetEditMapMode(mode); }
+void DisplayManager::UpdateTaskWaypoints(
+    const QVector<task_group::Waypoint> &points, int selected_row,
+    bool show_disabled) {
+  scene_manager_ptr_->UpdateTaskWaypoints(points, selected_row, show_disabled);
+}
 void DisplayManager::SetToolRange(double range) {
   if (!scene_manager_ptr_) {
     return;

@@ -70,6 +70,7 @@ ros2 launch agt_map_processing save_occupancy_map.launch.py \
 Nav2 local costmap 的瞬时局部障碍。
 保存默认使用 `free_thresh=0.196`、`occupied_thresh=0.65`，以保持 PGM 的 `205` unknown
 像素在 Nav2 重新加载时不被解释为空闲空间。
+保存入口不会覆盖已有的 PGM/YAML；需要重新生成时请使用新的 `map_prefix`，并保留已验证地图。
 
 OctoMap 使用当前帧 `lidar_link` 点云和 `odom -> lidar_link` TF，因此射线原点会随机器人
 运动。车辆 `base_link -> lidar_link` 外参完成标定和高度阈值调优前，输出地图只用于链路

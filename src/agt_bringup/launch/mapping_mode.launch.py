@@ -28,7 +28,22 @@ def default_runtime_dir():
 
 def prepare_runtime(context):
     runtime_dir = Path(LaunchConfiguration("runtime_dir").perform(context))
-    Path(LaunchConfiguration("mapping_output_dir").perform(context)).mkdir(parents=True, exist_ok=True)
+    mapping_output_dir = Path(
+        LaunchConfiguration("mapping_output_dir").perform(context)
+    ).expanduser()
+    if mapping_output_dir.exists() and not mapping_output_dir.is_dir():
+        raise RuntimeError(f"PCD output path is not a directory: {mapping_output_dir}")
+    existing = (
+        sorted(path.name for path in mapping_output_dir.iterdir())
+        if mapping_output_dir.is_dir()
+        else []
+    )
+    if existing:
+        raise RuntimeError(
+            f"refusing to overwrite existing PCD output directory: {mapping_output_dir} "
+            f"({', '.join(existing[:8])}); choose a new output directory"
+        )
+    mapping_output_dir.mkdir(parents=True, exist_ok=True)
     runtime_dir.joinpath("rosbag").mkdir(parents=True, exist_ok=True)
     return []
 

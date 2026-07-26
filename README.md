@@ -16,7 +16,7 @@
 | 阶段 | 当前状态 | 已验证范围 | 主要剩余工作 |
 | --- | --- | --- | --- |
 | Phase 0：旧系统基线 | 部分完成 | 现有 bag 保留旧链注册点云、里程计、TF 和投影地图 | 固定旧仓库 tag/commit、参数快照和可复现报告 |
-| Phase 1：仓库与接口 | 已完成 | 16 个 `agt_*` package 可被 colcon 识别，命名和目录契约已建立 | 按后续模块需要补充自定义 msg/srv/action |
+| Phase 1：仓库与接口 | 已完成 | 20 个 `agt_*` package 可被 colcon 识别，命名和目录契约已建立 | 按后续模块需要补充自定义 msg/srv/action |
 | Phase 2：机器人描述 | 已离线完成 | TF 单父节点、MK-mini/BUNKER 尺寸配置和 Xacro 展开通过 | 标定 `base_link -> lidar_link`，实测 BUNKER 基准高度和履带中心距 |
 | Phase 3：传感器与建图 | 大包 baseline 可用 | MID360 转换、FAST-LIVO2 完整大包回放、稀疏体素 PCD 保存和统一接口通过 | 新旧轨迹/点云数值报告、车辆外参优化与独立 bag 验证 |
 | Phase 4：重定位 | 大地图初验通过 | NDT 线程边界回归、同源 369,970 点 PCD 离线初验及 BUNKER 低 fitness 实测 | 批量验证不同位置/错误初值的收敛率、误差、恢复时间和 TF 稳定性 |
@@ -29,6 +29,13 @@
 履带速度投影、输入超时归零、急停锁存和复位后保持禁用。当前 `mid360_map` 离线覆盖预览
 为 `679` 个姿态、总长 `67.54 m`，确定性运动时间估算为 `171.86 s`，报告写入
 `runtime/results/mid360_coverage_time.json`。
+
+`agt_teach_repeat` 增加了独立的示教路径资产链：直接从 rosbag2 提取
+`/agt/mapping/odometry`，显式变换到 `map`，生成密集 `FollowPath` 路径和稀疏 Qt 兼容控制点，
+复用 canonical footprint 做只读验证/走廊审计，并在定位、safety 或 TaskReadiness 失效时取消
+Nav2 子目标。它不发布 TF 或速度，不修改地图，默认禁止执行。架构与命令见
+[`docs/architecture/teach_repeat_module.md`](docs/architecture/teach_repeat_module.md) 和
+[`docs/workflows/teach_repeat_quick_start.md`](docs/workflows/teach_repeat_quick_start.md)。
 
 ## MID360 外参填写
 
@@ -63,9 +70,8 @@ ros2 launch agt_description description.launch.py \
 - ROS package 统一以 `agt_` 开头；节点名使用 `agt_<模块>_<功能>`。
 - 标准 frame 不带前导 `/`：`map`、`odom`、`base_footprint`、`base_link`、`lidar_link`、`imu_link`。
 - `livox_frame` 仅作为旧驱动兼容 frame；V2 模块接口统一使用 `lidar_link`。
-- `/agt/sensors/lidar/custom` 是保留的原始 MID360 `CustomMsg`，由 bag 记录并作为自滤除
-  输入；FAST-LIVO2 的正常输入是 `/agt/sensors/lidar/custom_filtered`。跨模块点云继续
-  使用 PointCloud2，不把 Livox `CustomMsg` 扩散到地图处理、感知和导航模块。
+- MID360 到 FAST-LIVO2 的后端输入使用 `/agt/sensors/lidar/custom`；跨模块点云统一使用
+  PointCloud2。不要把 Livox `CustomMsg` 扩散到地图处理、感知和导航模块。
 - V2 topic 放在 `/agt/<领域>/<名称>` 下，例如 `/agt/sensors/lidar/points`。
 - launch 参数和 YAML key 使用相同名称；长度用米，角度用弧度。
 - TF 发布责任固定：全局定位发布 `map -> odom`，连续里程计发布
@@ -336,7 +342,11 @@ NOTICE 机制；它也与当前全部 `agt_*` package 声明一致。但它不�
 - `agt_safety`
 - `agt_chassis`
 - `agt_ui_bridge`
+- `agt_system_manager`
+- `agt_map_manager`
 - `agt_experiment_manager`
+- `agt_teach_repeat`
+- `agt_web_console`
 - `agt_evaluation`
 
 自动重定位接口已在 `agt_interfaces` 生成：`LocalizationStatus.msg` 提供机器可解析状态，
@@ -402,6 +412,7 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 | `agt_localization_fusion` | package 边界已建立 | 需要 LIO、轮速、IMU，后续 RTK/UWB 数据；测试延迟、漂移、跳变和传感器失效降级 |
 | `agt_perception` | base frame 高度/量程/车体裁剪障碍点云 baseline 已编译 | 需要标注或典型场景点云，测试地面/障碍精度、误检漏检和处理频率 |
 | `agt_navigation` | Nav2 核心、运动学闭环和 TASK-07 global KeepoutFilter 阻断/恢复规划已通过 | 用真实地图/定位测试语义边界、规划成功率、跟踪误差和窄通道通过性 |
+| `agt_teach_repeat` | rosbag2 提取、路径处理/绑定、只读预览、full-footprint 验证、FollowPath 门禁取消和内部重复性指标离线通过 | 用真实同源 map/PCD 和实车完成低速限速、Collision Monitor、急停、定位丢失和多次重复性验收 |
 | `agt_coverage_planning` | TASK-00~15 完成、TASK-16 部分：可取消 Action、总控条件启动、离线预览和路径时间 JSON 报告可用 | 修复零长度 SWATH；增加覆盖率、重叠率、跨行/鱼尾策略和统一任务报告 |
 | `agt_safety` | BUNKER 履带仲裁、急停锁存、限速、超时和合成消息测试已完成 | 架空履带后做低速实车制动距离、急停和进程/通信中断测试 |
 | `agt_chassis` | 官方 bunker_ros2、状态桥接、TF 隔离和双层命令 watchdog 已落地并编译 | 需要 BUNKER CAN 实机验证协议版本、轮速里程计、状态错误码和断连归零 |
@@ -637,24 +648,6 @@ ros2 launch agt_bringup system.launch.py \
 `record_bag:=true` 会同时记录传感器、TF、
 里程计、地图、导航、安全和底盘诊断话题到 `runtime/rosbag/mapping_<时间>/`。
 
-建图链在 FAST-LIVO2 前默认启动 `agt_livox_self_filter`：
-
-```text
-/agt/sensors/lidar/custom
-    -> agt_livox_self_filter
-/agt/sensors/lidar/custom_filtered
-    -> FAST-LIVO2
-/agt/mapping/registered_points_lidar
-    -> agt_perception/local_obstacle_filter
-    -> /agt/perception/obstacle_cloud
-```
-
-过滤器由 `start_lidar_self_filter:=true` 控制，独立于 `start_sensor`；历史 bag 建图因此
-无需 remap。需要 A/B 基线时显式设置 `start_lidar_self_filter:=false`，FAST-LIVO2 会回退
-消费原始 CustomMsg。底盘盒和高台盒只来自
-`profiles/platforms/bunker.yaml:platform.geometry.self_filter`，不改变 URDF 或 Nav2
-footprint；高台尺寸完成实测前保持 `verified: false`。
-
 结束建图时，先保持总控运行，在另一个终端保存二维地图：
 
 ```bash
@@ -683,8 +676,7 @@ runtime/maps/greenhouse_01/pcd/localization_map.processing.yaml
 # 终端 1：总控，不启动真实雷达、CAN 和 RViz
 ros2 launch agt_bringup system.launch.py \
   mode:=mapping map_name:=mid360_bag_test use_sim_time:=true \
-  start_sensor:=false start_lidar_self_filter:=true \
-  start_chassis:=false start_rviz:=false
+  start_sensor:=false start_chassis:=false start_rviz:=false
 
 # 终端 2：回放转换后的 CustomMsg + IMU
 ros2 bag play runtime/rosbag/mid360_mapping_custom_full --clock

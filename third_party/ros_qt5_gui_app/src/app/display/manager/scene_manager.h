@@ -15,6 +15,8 @@
 #include "widgets/set_pose_widget.h"
 #include "widgets/topology_route_widget.h"
 #include "display/manager/map_edit_command.h"
+#include "display/task_waypoint_item.h"
+#include "task_group/task_group.h"
 
 namespace Display {
 
@@ -27,6 +29,7 @@ enum MapEditMode {
   kRegion,        // 添加区域模式
   kDrawWithPen,   //画笔
   kLinkTopology,  // 拓扑图
+  kEditTaskWaypoints,
 };
 
 class DisplayManager;
@@ -71,6 +74,11 @@ class SceneManager : public QGraphicsScene {
   bool nav_goal_position_pending_{false};
   QPointF nav_goal_position_scene_;
   QGraphicsLineItem* nav_goal_direction_preview_{nullptr};
+  bool task_waypoint_position_pending_{false};
+  QPointF task_waypoint_position_scene_;
+  QGraphicsLineItem *task_waypoint_direction_preview_{nullptr};
+  QVector<TaskWaypointItem *> task_waypoint_items_;
+  QVector<QGraphicsLineItem *> task_waypoint_lines_;
   
   // 点位移动跟踪（用于撤销）
   std::map<std::string, TopologyMap::PointInfo> point_move_start_positions_;
@@ -95,6 +103,9 @@ class SceneManager : public QGraphicsScene {
   void signalTopologyMapUpdate(const TopologyMap &map);
   void signalCurrentSelectPointChanged(const TopologyMap::PointInfo &);
   void signalEditMapModeChanged(MapEditMode mode);
+  void signalTaskWaypointPlaced(const RobotPose &pose);
+  void signalTaskWaypointEdited(int row, const RobotPose &pose);
+  void signalTaskWaypointSelected(int row);
  public slots:
   void SetEditMapMode(MapEditMode mode);
   void SetToolRange(double range);
@@ -110,6 +121,8 @@ class SceneManager : public QGraphicsScene {
   void OpenTopologyMap(const std::string &file_path);
   void UpdateTopologyMap(const TopologyMap &topology_map);
   TopologyMap GetTopologyMap() { return topology_map_; }
+  void UpdateTaskWaypoints(const QVector<task_group::Waypoint> &points,
+                           int selected_row, bool show_disabled);
 
  private:
   void mousePressEvent(QGraphicsSceneMouseEvent *mouseEvent) override;
@@ -127,6 +140,8 @@ class SceneManager : public QGraphicsScene {
   void setPenCursor();
   void drawPoint(const QPointF &);
   void CancelPendingNavGoalPlacement();
+  void CancelPendingTaskWaypointPlacement();
+  void CompleteTaskWaypointPlacement(const QPointF &direction_scene);
   void CompleteNavGoalPlacement(const QPointF &direction_scene);
   void SetPointMoveEnable(bool is_enable);
   void cleanupTopologyDisplays(const std::vector<std::string> &point_names);

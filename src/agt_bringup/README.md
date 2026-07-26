@@ -91,6 +91,10 @@ ros2 launch agt_bringup system.launch.py \
 ros2 launch agt_bringup save_mapping_result.launch.py map_name:=greenhouse_01
 ```
 
+保存会拒绝覆盖已有的 PGM/YAML；FAST-LIVO2 也会拒绝非空的 PCD 输出目录。重复采集必须使用
+新的 `map_name`，确认二维图保存成功后再对建图总控使用 `Ctrl+C`，这样 PGM/YAML 与本次退出
+生成的 PCD 始终属于同一份采集结果。
+
 确认二维地图保存成功后，再对建图总控使用 `Ctrl+C`；PCD 将保存到
 `runtime/maps/<map_name>/pcd/`，rosbag 也会完成元数据写入。导航前必须同时检查
 `localization_map.pcd` 和 `localization_map.processing.yaml`，且处理状态为 `ready`。不要先关闭总控再保存二维地图。

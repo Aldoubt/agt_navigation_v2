@@ -23,6 +23,14 @@ MAP_TOPIC="/agt/map/mapping_occupancy"
 OUTPUT_DIR="${REPOSITORY_ROOT}/runtime/maps/${MAP_NAME}"
 OUTPUT_PREFIX="${OUTPUT_DIR}/${MAP_NAME}"
 
+for output in "${OUTPUT_PREFIX}.pgm" "${OUTPUT_PREFIX}.yaml"; do
+  if [[ -e "${output}" ]]; then
+    echo "Refusing to overwrite existing map output: ${output}" >&2
+    echo "Choose a new map name." >&2
+    exit 5
+  fi
+done
+
 if ! ros2 topic list | grep -Fqx -- "${MAP_TOPIC}"; then
   echo "Mapping topic is not available: ${MAP_TOPIC}" >&2
   exit 2
@@ -41,6 +49,8 @@ ros2 run nav2_map_server map_saver_cli \
   -f "${OUTPUT_PREFIX}" \
   --ros-args \
   -p map_subscribe_transient_local:=true \
+  -p free_thresh_default:=0.196 \
+  -p occupied_thresh_default:=0.65 \
   -p save_map_timeout:=60.0
 
 if [[ ! -f "${OUTPUT_PREFIX}.pgm" || ! -f "${OUTPUT_PREFIX}.yaml" ]]; then

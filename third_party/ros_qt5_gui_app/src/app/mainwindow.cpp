@@ -31,6 +31,7 @@
 #include <QButtonGroup>
 #include <QMessageBox>
 #include <QMetaObject>
+#include <QTabWidget>
 #include <cmath>
 
 #include "widgets/speed_ctrl.h"
@@ -164,6 +165,12 @@ void MainWindow::registerChannel() {
           nav_goal_table_view_->UpdateTaskExecutionStatus(status);
         },
         Qt::QueuedConnection);
+    if (task_library_dock_) {
+      QMetaObject::invokeMethod(
+          task_library_dock_,
+          [this, status]() { task_library_dock_->UpdateTaskExecutionStatus(status); },
+          Qt::QueuedConnection);
+    }
   });
 }
 
@@ -775,8 +782,6 @@ void MainWindow::setupUi() {
   QVBoxLayout *horizontalLayout_13 = new QVBoxLayout();
   horizontalLayout_13->addWidget(nav_goal_table_view_);
   task_list_widget->setLayout(horizontalLayout_13);
-  ads::CDockWidget *nav_goal_list_dock_widget =
-      new ads::CDockWidget(UiLanguage::Text("任务", "Task"));
   
   // 现代化按钮样式
   QString modernButtonStyle = R"(
@@ -875,14 +880,44 @@ void MainWindow::setupUi() {
   horizontalLayout_13->addLayout(horizontalLayout_15);
   horizontalLayout_13->addLayout(horizontalLayout_14);
   horizontalLayout_13->addLayout(horizontalLayout_16);
-  nav_goal_list_dock_widget->setWidget(task_list_widget);
+
+  const bool task_library_enabled =
+      GET_CONFIG_VALUE("TaskLibraryEnabled", "true") == "true";
+  auto *task_workspace_tabs = new QTabWidget();
+  task_workspace_tabs->setDocumentMode(true);
+  task_workspace_tabs->addTab(
+      task_list_widget, UiLanguage::Text("拓扑任务", "Topology task"));
+  if (task_library_enabled) {
+    task_library_dock_ =
+        new TaskLibraryDock(task_execution_enabled, task_workspace_tabs);
+    task_workspace_tabs->addTab(
+        task_library_dock_, UiLanguage::Text("任务组库", "Task Library"));
+    task_workspace_tabs->setCurrentWidget(task_library_dock_);
+  }
+
+  ads::CDockWidget *nav_goal_list_dock_widget =
+      new ads::CDockWidget(UiLanguage::Text("任务中心", "Task Center"));
+  nav_goal_list_dock_widget->setWidget(task_workspace_tabs);
   nav_goal_list_dock_widget->setMinimumSizeHintMode(
       CDockWidget::MinimumSizeHintFromDockWidget);
-  nav_goal_list_dock_widget->setMinimumSize(200, 150);
-  nav_goal_list_dock_widget->setMaximumSize(480, 9999);
+  nav_goal_list_dock_widget->setMinimumSize(
+      task_library_enabled ? 420 : 200, task_library_enabled ? 300 : 150);
+  nav_goal_list_dock_widget->setMaximumSize(680, QWIDGETSIZE_MAX);
   dock_manager_->addDockWidget(ads::DockWidgetArea::RightDockWidgetArea,
                                nav_goal_list_dock_widget, center_docker_area_);
-  nav_goal_list_dock_widget->toggleView(false);
+  nav_goal_list_dock_widget->toggleView(task_library_enabled);
+  connect(task_workspace_tabs, &QTabWidget::currentChanged, this,
+          [this, task_workspace_tabs](int index) {
+            if (task_library_dock_ &&
+                task_workspace_tabs->widget(index) != task_library_dock_) {
+              task_library_dock_->DeactivateMapEditing();
+            }
+          });
+  connect(nav_goal_list_dock_widget, &ads::CDockWidget::viewToggled, this,
+          [this](bool open) {
+            if (!open && task_library_dock_)
+              task_library_dock_->DeactivateMapEditing();
+          });
   connect(nav_goal_table_view_, &NavGoalTableView::signalSendNavGoal,
           [this](const RobotPose &pose) {
             PUBLISH(MSG_ID_SET_NAV_GOAL_POSE, pose);
@@ -940,7 +975,7 @@ void MainWindow::setupUi() {
   ui->menuView->addAction(nav_goal_list_dock_widget->toggleViewAction());
   connect(
       btn_add_one_goal, &QPushButton::clicked,
-      [this, nav_goal_list_dock_widget]() { nav_goal_table_view_->AddItem(); });
+      [this]() { nav_goal_table_view_->AddItem(); });
   btn_start_task_chain->setProperty("taskRunning", false);
   connect(btn_preview_task_chain, &QPushButton::clicked,
           nav_goal_table_view_, &NavGoalTableView::PreviewTaskChain);
@@ -973,6 +1008,38 @@ void MainWindow::setupUi() {
       SIGNAL(signalCurrentSelectPointChanged(const TopologyMap::PointInfo &)),
       nav_goal_table_view_,
       SLOT(UpdateSelectPoint(const TopologyMap::PointInfo &)));
+
+  //////////////////////////////////////////////////////Task Library
+  if (task_library_dock_) {
+    connect(task_library_dock_, &TaskLibraryDock::signalExecuteTask,
+            [this](const TaskExecutionRequest &request) {
+              PUBLISH(MSG_ID_EXECUTE_TASK_CHAIN, request);
+            });
+    connect(task_library_dock_, &TaskLibraryDock::signalCancelTask,
+            [this]() { PUBLISH(MSG_ID_CANCEL_TASK_CHAIN, true); });
+    connect(task_library_dock_, &TaskLibraryDock::signalWaypointsChanged,
+            display_manager_, &Display::DisplayManager::UpdateTaskWaypoints);
+    connect(task_library_dock_, &TaskLibraryDock::signalTaskEditModeChanged,
+            [this](bool enabled) {
+              display_manager_->SetEditMapMode(
+                  enabled ? Display::MapEditMode::kEditTaskWaypoints
+                          : Display::MapEditMode::kStopEdit);
+            });
+    connect(display_manager_,
+            &Display::DisplayManager::signalTaskWaypointPlaced,
+            task_library_dock_, &TaskLibraryDock::AddTaskWaypoint);
+    connect(display_manager_,
+            &Display::DisplayManager::signalTaskWaypointEdited,
+            task_library_dock_, &TaskLibraryDock::UpdateTaskWaypoint);
+    connect(display_manager_,
+            &Display::DisplayManager::signalTaskWaypointSelected,
+            task_library_dock_, &TaskLibraryDock::SelectTaskWaypoint);
+    const std::string configured_map =
+        Config::ConfigManager::Instance()->GetRootConfig().map_config.path;
+    if (!configured_map.empty()) {
+      task_library_dock_->SetMapPath(QString::fromStdString(configured_map));
+    }
+  }
 
   //////////////////////////////////////////////////////图片
   for (auto one_image : Config::ConfigManager::Instance()->GetRootConfig().images) {
@@ -1203,6 +1270,10 @@ void MainWindow::signalCursorPose(QPointF pos) {
 
 //============================================================================
 void MainWindow::closeEvent(QCloseEvent *event) {
+  if (task_library_dock_ && !task_library_dock_->ConfirmClose()) {
+    event->ignore();
+    return;
+  }
   // Delete dock manager here to delete all floating widgets. This ensures
   // that all top level windows of the dock manager are properly closed
   // write state
@@ -1276,6 +1347,10 @@ bool MainWindow::LoadMap(const std::string& file_path) {
   std::string extension = QFileInfo(QString::fromStdString(file_path)).suffix().toStdString();
   
   if (extension == "yaml" || extension == "yml") {
+    if (task_library_dock_ && !task_library_dock_->ConfirmMapChange(
+                                  QString::fromStdString(file_path))) {
+      return false;
+    }
     OccupancyMap map;
     if (map.Load(file_path)) {
       map_path_ = file_path;
@@ -1287,6 +1362,9 @@ bool MainWindow::LoadMap(const std::string& file_path) {
       Config::ConfigManager::Instance()->StoreConfig();
 
       display_manager_->UpdateOCCMap(map);
+      if (task_library_dock_) {
+        task_library_dock_->SetMapPath(QString::fromStdString(file_path));
+      }
       // A topology belongs to exactly one map. Clear the previous one before
       // considering a same-name sidecar so switching maps cannot retain stale
       // or out-of-bounds task points.

@@ -23,12 +23,19 @@ def test_mapping_mode_offers_non_executing_gui_but_keeps_it_off_by_default():
     assert 'free_thresh_default:=0.196' in read(
         "src/agt_bringup/launch/save_mapping_result.launch.py"
     )
+    assert 'occupied_thresh_default:=0.65' in read(
+        "src/agt_bringup/launch/save_mapping_result.launch.py"
+    )
+    assert "refusing to overwrite existing map output" in read(
+        "src/agt_bringup/launch/save_mapping_result.launch.py"
+    )
     assert 'DeclareLaunchArgument(\n                "mapping_output_dir"' in source
     assert '"start_chassis",\n                default_value="false"' in source
     assert '"start_chassis_monitor", default_value="false"' in source
     assert '"start_octomap_projection",' in source
     assert 'DeclareLaunchArgument("octomap_input_rate_hz", default_value="0.2")' in source
     assert 'DeclareLaunchArgument("octomap_cloud_max_points", default_value="8000")' in source
+    assert "refusing to overwrite existing PCD output directory" in source
 
 
 def test_navigation_mode_starts_navigation_gui_and_defaults_optional_features_off():
@@ -113,3 +120,9 @@ def test_bunker_fast_livo_chain_starts_custommsg_self_filter_for_bag_replay():
     assert '"filter_params_file": LaunchConfiguration("lidar_self_filter_params_file")' in mapping
     assert '"fail_open_on_tf_error", default_value="false"' in sensor
     assert '"zero_point_epsilon", default_value="0.000001"' in sensor
+
+
+def test_mapping_pcd_output_is_fail_closed_when_reused():
+    source = read("src/agt_mapping/launch/fast_livo2_mapping.launch.py")
+    assert "OpaqueFunction(function=validate_pcd_output)" in source
+    assert "refusing to overwrite existing PCD output directory" in source

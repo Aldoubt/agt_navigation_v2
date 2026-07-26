@@ -31,6 +31,7 @@
 #include "display/point_shape.h"
 #include "display/robot_shape.h"
 #include "widgets/set_pose_widget.h"
+#include "task_group/task_group.h"
 // group
 #define GROUP_MAP "Group_Map"
 namespace Display {
@@ -64,6 +65,9 @@ class DisplayManager : public QObject {
   void signalCurrentSelectPointChanged(const TopologyMap::PointInfo &);
   void signalPubMap(const OccupancyMap &map);
   void signalEditMapModeChanged(MapEditMode mode);
+  void signalTaskWaypointPlaced(const RobotPose &pose);
+  void signalTaskWaypointEdited(int row, const RobotPose &pose);
+  void signalTaskWaypointSelected(int row);
  public slots:
   void updateScaled(double value);
   void StartReloc();
@@ -105,6 +109,8 @@ class DisplayManager : public QObject {
   bool SetDisplayConfig(const std::string &config_name, const std::any &data);
   void SetRelocMode(bool is_move);
   void SetNavGoalMode(bool is_start);
+  void UpdateTaskWaypoints(const QVector<task_group::Waypoint> &points,
+                           int selected_row, bool show_disabled);
   OccupancyMap &GetMap();
   RobotPose GetRobotPose() { return robot_pose_; }
   void SetFocusOn(const std::string &display_type) {

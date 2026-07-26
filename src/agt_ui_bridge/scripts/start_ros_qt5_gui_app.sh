@@ -73,6 +73,8 @@ fi
 prepare_args=(
   --config "${RUNTIME_DIR}/config.json"
   --template "${CONFIG_TEMPLATE}"
+  --runtime-maps-root "${WS_ROOT}/runtime/maps"
+  --task-library-config "${PACKAGE_SHARE}/config/task_library.yaml"
 )
 if [[ -n "${MAP_YAML}" ]]; then
   prepare_args+=(--map "${MAP_YAML}")

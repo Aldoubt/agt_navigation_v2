@@ -12,6 +12,7 @@ sys.path.insert(0, str(PACKAGE_ROOT))
 from agt_ui_bridge.qt_runtime import (  # noqa: E402
     QtRuntimeError,
     prepare_runtime_config,
+    task_library_runtime_keys,
     validate_nav2_map,
     validate_topology_for_map,
 )
@@ -142,3 +143,42 @@ def test_stale_topology_is_reported(tmp_path):
     )
     warnings = validate_topology_for_map(map_yaml, geometry)
     assert warnings == ["topology point 0 lies outside the selected map"]
+
+
+def test_task_library_yaml_supplies_versioned_runtime_defaults(tmp_path):
+    task_config = tmp_path / "task_library.yaml"
+    task_config.write_text(
+        yaml.safe_dump(
+            {
+                "task_library": {
+                    "enabled": True,
+                    "maximum_points": 123,
+                    "maximum_loops": 7,
+                    "unknown_cell_policy": "warn",
+                    "line_check_step_ratio": 0.25,
+                    "autosave_enabled": False,
+                    "autosave_interval_s": 12,
+                    "backup_count": 3,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    keys = task_library_runtime_keys(task_config)
+    assert keys["TaskMaximumPoints"] == "123"
+    assert keys["TaskUnknownCellPolicy"] == "warn"
+    assert keys["TaskAutosaveEnabled"] == "false"
+
+    config = tmp_path / "config.json"
+    template = tmp_path / "template.json"
+    _config(config)
+    _config(template)
+    prepare_runtime_config(
+        config,
+        template,
+        runtime_maps_root=tmp_path / "maps",
+        task_library_config=task_config,
+    )
+    runtime = json.loads(config.read_text(encoding="utf-8"))["key_value"]
+    assert runtime["TaskMaximumLoops"] == "7"
+    assert runtime["TaskLibraryRoot"] == str((tmp_path / "maps").resolve())

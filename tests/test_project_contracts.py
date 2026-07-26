@@ -15,7 +15,7 @@ TOPIC_NAME = re.compile(r"^/agt/[a-z0-9_/]+$")
 
 def test_all_packages_follow_the_naming_contract():
     manifests = sorted((ROOT / "src").glob("agt_*/package.xml"))
-    assert len(manifests) == 16
+    assert len(manifests) == 20
     for manifest in manifests:
         name = ET.parse(manifest).getroot().findtext("name")
         assert PACKAGE_NAME.fullmatch(name), name
@@ -131,6 +131,54 @@ def test_fast_livo_adapter_is_installed_as_an_executable():
     assert adapter.stat().st_mode & 0o111
 
 
+def test_teach_repeat_package_and_recording_contract_are_present():
+    package = ROOT / "src/agt_teach_repeat"
+    assert (package / "package.xml").is_file()
+    assert (package / "launch/teach_extract.launch.py").is_file()
+    assert (package / "launch/teach_preview.launch.py").is_file()
+    assert (package / "launch/repeat_test.launch.py").is_file()
+    profiles = yaml.safe_load(
+        (ROOT / "src/agt_experiment_manager/config/bag_profiles.yaml").read_text(
+            encoding="utf-8"
+        )
+    )["profiles"]
+    teach_topics = profiles["teach_repeat"]["topics"]
+    assert teach_topics
+    assert all(topic.startswith("/") for topic in teach_topics)
+    for topic in (
+        "/agt/teach/reference_path",
+        "/agt/teach/path_validated",
+        "/agt/teach/executed_path",
+        "/agt/teach/execution_status",
+        "/agt/teach/metrics",
+    ):
+        assert topic in teach_topics
+
+
+def test_teach_repeat_reuses_canonical_geometry_and_cannot_edit_maps():
+    package = ROOT / "src/agt_teach_repeat/agt_teach_repeat"
+    source = "\n".join(
+        path.read_text(encoding="utf-8") for path in sorted(package.glob("*.py"))
+    )
+    assert "load_platform_profile" in source
+    assert "agt_coverage_planning.path_validator" in source
+    for bunker_dimension in ("0.5915", "0.4690", "1.023", "0.778"):
+        assert bunker_dimension not in source
+    corridor = (package / "corridor_auditor.py").read_text(encoding="utf-8")
+    assert "OccupancyGrid" in corridor
+    assert "create_publisher(OccupancyGrid" not in corridor
+    assert "write_bytes" not in corridor
+    core = (package / "corridor_audit.py").read_text(encoding="utf-8")
+    assert '"eligible_for_automatic_map_edit": False' in core
+    assert "write_p5" not in source
+    assert "imwrite" not in source
+    assert "agt_teach_repeat" not in "\n".join(
+        path.read_text(encoding="utf-8", errors="ignore")
+        for path in (ROOT / "third_party/fast_livo2_ros2").rglob("*")
+        if path.is_file()
+    )
+
+
 def test_lidar_only_fast_livo_still_has_required_camera_model():
     camera = yaml.safe_load(
         (
@@ -174,8 +222,9 @@ def test_relocalization_uses_base_to_lidar_extrinsics_before_publishing_map_odom
         encoding="utf-8"
     )
     assert 'declare_parameter<std::string>("base_frame", "base_link")' in source
-    assert "poseMsgToEigen(msg->pose.pose) * base_from_tracking" in source
-    assert "result.estimated_pose * tracking_in_odom" in source
+    assert "candidateToPose(candidate) * base_from_tracking" in source
+    assert "attempt.result.estimated_pose * tracking_from_base" in source
+    assert "best.result.estimated_pose * tracking_from_odom" in source
     assert '"/agt/localization/status"' in source
     assert (ROOT / "third_party/relocalization_core/LICENSE").exists()
     assert (ROOT / "third_party/ndt_omp_ros2/LICENSE").exists()
@@ -190,7 +239,7 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     provenance = (ROOT / "third_party/README.md").read_text(encoding="utf-8")
     assert "https://github.com/Aldoubt/Ros_Qt5_Gui_App.git" in provenance
     assert "agt-navigation-v2" in provenance
-    assert "5948714c3d05011be9240be098696b9f9bdcc66f" in provenance
+    assert "a180d981b42845ec3d2bd4a998eb89ea1dfdbb86" in provenance
     config = json.loads(
         (ROOT / "src/agt_ui_bridge/config/ros_qt5_gui_app.json").read_text(
             encoding="utf-8"

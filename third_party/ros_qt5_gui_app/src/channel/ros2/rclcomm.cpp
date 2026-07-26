@@ -305,16 +305,20 @@ void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
   WaypointTask::Goal goal;
   goal.loop = request.loop_count > 1;
   goal.loop_count = request.loop_count;
-  for (const auto &point : request.points) {
-    geometry_msgs::msg::PoseStamped pose;
-    pose.header.frame_id = "map";
-    pose.header.stamp = node->now();
-    pose.pose.position.x = point.x;
-    pose.pose.position.y = point.y;
-    tf2::Quaternion quaternion;
-    quaternion.setRPY(0.0, 0.0, point.theta);
-    pose.pose.orientation = tf2::toMsg(quaternion);
-    goal.poses.push_back(pose);
+  if (!request.task_file.empty()) {
+    goal.task_file = request.task_file;
+  } else {
+    for (const auto &point : request.points) {
+      geometry_msgs::msg::PoseStamped pose;
+      pose.header.frame_id = "map";
+      pose.header.stamp = node->now();
+      pose.pose.position.x = point.x;
+      pose.pose.position.y = point.y;
+      tf2::Quaternion quaternion;
+      quaternion.setRPY(0.0, 0.0, point.theta);
+      pose.pose.orientation = tf2::toMsg(quaternion);
+      goal.poses.push_back(pose);
+    }
   }
 
   auto options = rclcpp_action::Client<WaypointTask>::SendGoalOptions();
@@ -380,6 +384,11 @@ void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
         }
         final_status.message = result.result ? result.result->message
                                              : "waypoint task returned no result";
+        if (result.result) {
+          final_status.missed_waypoints.assign(
+              result.result->missed_waypoints.begin(),
+              result.result->missed_waypoints.end());
+        }
         PublishTaskStatus(final_status);
       };
   waypoint_task_client_->async_send_goal(goal, options);

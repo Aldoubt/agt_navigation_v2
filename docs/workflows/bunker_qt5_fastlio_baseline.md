@@ -86,8 +86,9 @@ runtime/maps/greenhouse_01/pcd/                 # FAST-LIVO2 PCD 输出目录
 ```
 
 保存脚本检查 `/agt/map/mapping_occupancy` 的存在和类型，以 transient-local 方式保存栅格，
-不会终止 FAST-LIVO2。保存 PGM/YAML 后使用正常 `Ctrl+C` 结束建图，让 FAST-LIVO2 完成 PCD
-落盘；确认 PCD 文件存在且非空。不要使用 `kill -9` 作为正常停止方式。
+不会终止 FAST-LIVO2，也不会覆盖已有 PGM/YAML。重复采集必须换用新的地图名；保存 PGM/YAML
+后使用正常 `Ctrl+C` 结束建图，让 FAST-LIVO2 完成 PCD 落盘；确认 PCD 文件存在且非空。
+不要使用 `kill -9` 作为正常停止方式。
 
 ## 使用同源地图启动导航
 

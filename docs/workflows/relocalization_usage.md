@@ -58,6 +58,42 @@ ros2 launch agt_bringup system.launch.py \
 Nav2 lifecycle manager 初始保持非活动，定位状态进入 `TRACKING` 后才由 gate 发送标准
 `STARTUP`。即使 gate 启动 Nav2，运动仍需单独检查安全状态并显式调用 motion enable。
 
+### 点云时间与 tracking validation
+
+`agt_localization` 只缓存最新一帧注册点云；一次候选搜索的全部候选共用同一条点云和
+`cloud_stamp`。将点云转换到 `tracking_frame`、查询动态 `odom -> tracking_frame` 和计算
+`map -> odom` 都使用这个时间戳，TF 不存在时不会回退到最新值。`base_link -> lidar_link`
+是静态外参时可使用静态 TF。
+
+初始手动/Action/配置候选仍使用 candidate 粗初值。进入 tracking validation 后，NDT/ICP 初值改为：
+
+```text
+map -> tracking_frame predicted
+  = map -> odom * odom -> tracking_frame(cloud_stamp)
+```
+
+质量 innovation 比较当前 odom 传播预测与本次配准结果；验证只更新 supervisor 状态和质量字段，
+不更新 `map -> odom`，也不覆盖最近有效位姿。`global_pose` 和 `aligned_points` 的测量时间为
+点云时间，20 Hz 持续 TF 重发才使用当前 ROS 时间。
+
+点云新鲜度默认由 `max_cloud_age_s: 0.5`、`max_cloud_future_tolerance_s: 0.1` 和
+`require_nonzero_cloud_stamp: true` 控制。拒绝时状态会报告 `ERROR_STALE_SCAN` 或
+`ERROR_INVALID_SCAN_TIMESTAMP` 及实际 stamp/age。
+
+使用历史 bag 做定位回放时必须启用 ROS clock：
+
+```bash
+ros2 launch agt_localization relocalization.launch.py \
+  use_sim_time:=true \
+  global_map_pcd:=<same-map-localization.pcd> \
+  global_map_processing_record:=<same-map-processing.yaml>
+ros2 bag play runtime/rosbag/Benchmark-BAG-260725 --clock
+```
+
+回放中的点云、`/tf` 和 `/clock` 必须同时覆盖待测试的测量时刻；节点不使用系统墙钟判断点云
+新鲜度。该 bag 含注册点云和 TF，可用于时间一致性/过期拒绝回归；定位精度仍需使用同源 PCD
+和明确的初始位姿另行验收。
+
 ## 自动重定位
 
 自动模式是一个启动后只发送一次的、有候选上限和超时的 `Relocalize` Action 请求。客户端会

@@ -28,7 +28,7 @@ include(Getnlohmann)
 include(GetDockWidget)
 include(GetYamlCpp)
 include(GTestHelper)
-find_package(Qt5 COMPONENTS Core REQUIRED)
+find_package(Qt5 COMPONENTS Core Gui REQUIRED)
 find_package(Boost REQUIRED COMPONENTS filesystem)
 find_package(Eigen3 REQUIRED)
 

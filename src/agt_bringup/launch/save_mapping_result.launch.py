@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
@@ -14,7 +15,30 @@ def default_runtime_dir():
 def prepare_map_directory(context):
     runtime_dir = Path(LaunchConfiguration("runtime_dir").perform(context))
     map_name = LaunchConfiguration("map_name").perform(context)
-    runtime_dir.joinpath("maps", map_name).mkdir(parents=True, exist_ok=True)
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", map_name):
+        raise RuntimeError(
+            "map_name may contain only letters, numbers, '_' and '-'; "
+            "choose a new versioned map name"
+        )
+    map_dir = runtime_dir / "maps" / map_name
+    output_prefix = map_dir / map_name
+    existing = [
+        path
+        for path in (
+            output_prefix.with_suffix(".pgm"),
+            output_prefix.with_suffix(".yaml"),
+            Path(str(output_prefix) + ".pgm.tmp"),
+            Path(str(output_prefix) + ".yaml.tmp"),
+        )
+        if path.exists()
+    ]
+    if existing:
+        names = ", ".join(str(path) for path in existing)
+        raise RuntimeError(
+            f"refusing to overwrite existing map output: {names}; "
+            "choose a new map_name"
+        )
+    map_dir.mkdir(parents=True, exist_ok=True)
     return []
 
 
@@ -50,6 +74,8 @@ def generate_launch_description():
                     "map_subscribe_transient_local:=true",
                     "-p",
                     "free_thresh_default:=0.196",
+                    "-p",
+                    "occupied_thresh_default:=0.65",
                     "-p",
                     "save_map_timeout:=60.0",
                 ],

@@ -4,7 +4,9 @@ if(BUILD_WITH_TEST)
 # 查找 GTest 库
 find_package(GTest REQUIRED)
 include_directories(${GTEST_INCLUDE_DIRS})
-file(GLOB_RECURSE SRC_FILE CONFIGURE_DEPENDS  ${CMAKE_SOURCE_DIR}  *_test.cpp *_test.cc)
+file(GLOB_RECURSE SRC_FILE CONFIGURE_DEPENDS
+  ${CMAKE_CURRENT_SOURCE_DIR}/*_test.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/*_test.cc)
 
 # 检查是否有测试源文件
 if(SRC_FILE)

@@ -46,6 +46,8 @@ def test_map_saver_preserves_pgm_unknown_on_nav2_reload():
         PACKAGE_ROOT / "launch" / "save_occupancy_map.launch.py"
     ).read_text(encoding="utf-8")
     assert "free_thresh_default:=0.196" in launch_source
+    assert "occupied_thresh_default:=0.65" in launch_source
+    assert "refusing to overwrite existing map output" in launch_source
 
 
 def test_mapping_adapter_output_frame_matches_octomap_frame():

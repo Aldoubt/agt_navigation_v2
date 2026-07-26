@@ -154,6 +154,7 @@ def generate_launch_description():
             ),
             DeclareLaunchArgument("backend", default_value="ndt"),
             DeclareLaunchArgument("map_id", default_value=""),
+            DeclareLaunchArgument("map_version_id", default_value=""),
             DeclareLaunchArgument("configured_candidates_yaml", default_value=""),
             DeclareLaunchArgument("last_valid_pose_path", default_value=""),
             DeclareLaunchArgument(
@@ -312,6 +313,8 @@ def generate_launch_description():
                         / "nav2_bunker.yaml"
                     ),
                     "map": LaunchConfiguration("map"),
+                    "map_id": LaunchConfiguration("map_id"),
+                    "map_version_id": LaunchConfiguration("map_version_id"),
                     "use_sim_time": use_sim_time,
                     "use_keepout_filter": semantic_enabled,
                     "autostart": "false",

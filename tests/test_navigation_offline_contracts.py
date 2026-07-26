@@ -195,6 +195,28 @@ def test_bag_recorder_captures_debugging_contracts():
         assert f'"{topic}"' in recorder
 
 
+def test_teach_preview_is_read_only_and_repeat_execution_is_fail_closed():
+    preview = (
+        ROOT / "src/agt_teach_repeat/launch/teach_preview.launch.py"
+    ).read_text(encoding="utf-8")
+    repeat = (
+        ROOT / "src/agt_teach_repeat/launch/repeat_test.launch.py"
+    ).read_text(encoding="utf-8")
+    executor = (
+        ROOT / "src/agt_teach_repeat/agt_teach_repeat/teach_path_executor.py"
+    ).read_text(encoding="utf-8")
+    for forbidden in ("controller_server", "agt_chassis", "motion_enable"):
+        assert forbidden not in preview
+    assert 'DeclareLaunchArgument("execution_enabled", default_value="false")' in repeat
+    assert "FollowWaypoints" not in executor
+    assert "FollowPath" in executor
+    assert 'create_publisher(Twist' not in executor
+    assert '"/cmd_vel"' not in executor
+    assert '"/agt/localization/status"' in executor
+    assert '"/agt/system/task_readiness"' in executor
+    assert '"/agt/safety/status"' in executor
+
+
 def test_fast_livo_pcd_output_is_runtime_configurable():
     source = (ROOT / "third_party/fast_livo2_ros2/src/LIVMapper.cpp").read_text()
     mapping_launch = (

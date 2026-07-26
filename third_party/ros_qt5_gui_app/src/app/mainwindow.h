@@ -33,6 +33,7 @@
 #include "point_type.h"
 #include "widgets/dashboard.h"
 #include "widgets/nav_goal_table_view.h"
+#include "widgets/task_library_dock.h"
 #include "widgets/set_pose_widget.h"
 #include "widgets/speed_ctrl.h"
 #include "widgets/ratio_layouted_frame.h"
@@ -80,6 +81,7 @@ class MainWindow : public QMainWindow {
   QThread message_thread_;
   SpeedCtrlWidget *speed_ctrl_widget_;
   NavGoalTableView *nav_goal_table_view_;
+  TaskLibraryDock *task_library_dock_{nullptr};
   QProgressBar *battery_bar_;
   QLabel *label_power_;
   ads::CDockAreaWidget *center_docker_area_;

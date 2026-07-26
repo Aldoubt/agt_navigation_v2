@@ -31,3 +31,8 @@ profiles:
     description: RViz debug frontend; it has no TF or command publisher
     command: [rviz2]
     allowed_argument_keys: []
+  teach_preview:
+    mode: TEACH_PREVIEW
+    description: Preview and validate a recorded teach path without motion nodes
+    command: [ros2, launch, agt_teach_repeat, teach_preview.launch.py]
+    allowed_argument_keys: [manifest, start_rviz, use_sim_time]

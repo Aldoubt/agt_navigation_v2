@@ -91,6 +91,9 @@
 - The localization supervisor owns structured `TRACKING/DEGRADED/RECOVERING/LOST` transitions. Low-frequency tracking validation may publish status but must not rewrite `map -> odom`; a lost state waits for an explicit recovery request.
 - Startup automatic relocalization, when explicitly enabled, may send only one bounded project Action request. It must not publish velocity, enable motion, bypass Nav2/safety, or retry without a new explicit recovery request.
 - `agt_navigation` must reject waypoint Actions without a fresh accepted `LocalizationStatus`; `agt_safety` must independently fail-closed for navigation input while preserving manual priority.
+- `agt_localization` uses the fixed registered-cloud timestamp for dynamic TF, rejects invalid/stale/future
+  clouds with explicit status errors, and tracking validation seeds registration from
+  `map -> odom * odom -> tracking_frame` without rewriting `map -> odom` or the last accepted pose.
 
 ## Realtime Traversability Resource Contract
 - `bunker_realtime_traversability_provisional.yaml` is a non-running design candidate until a bounded runtime node, diagnostics, persistence, and bag regression exist; it must remain disabled by default.
@@ -126,11 +129,33 @@
   clicks target the explicitly selected task row and topology mutations must
   refresh all task selectors. The default operator language is `zh_CN`;
   `en_US` is a persisted, restart-applied frontend preference.
+- The Qt Task Library shares the existing Task Center as a tab beside topology
+  tasks. Switching away from the library or hiding the Task Center must cancel
+  task-waypoint map editing so a hidden editor cannot consume map clicks.
 - Offline waypoint preview is planner-only: its Qt profile must disable task
   execution, and its launch may start only the map server, planner server,
   preview adapter, lifecycle managers, and GUI. It publishes advisory `/plan`
   from explicit task points and must not start control, BT navigation, safety
   enablement, velocity publishers, localization, or chassis nodes.
+- Versioned waypoint task groups live only under
+  `runtime/maps/<map_id>/versions/<map_version_id>/tasks/`; `task_index.json`
+  is a rebuildable index and task files store map-version-relative asset paths.
+- Schema-v1 task coordinates are metric `map` poses with stable waypoint IDs
+  and finite bounded loops. Qt scene/image coordinates must never be persisted
+  as execution coordinates.
+- Task-group writes must use atomic replacement, retained backups, and a
+  matching content hash. Save-as, copy, import, and delete must not silently
+  overwrite another task or discard unsaved edits.
+- `CONTENT_CHANGED` requires full offline revalidation and an explicit rebind
+  plus save before execution. `GEOMETRY_MISMATCH` is read-only and may only be
+  copied for explicit manual migration; automatic coordinate transforms are
+  forbidden.
+- Offline task validation checks the base raster and sampled waypoint segments
+  only. It is not footprint feasibility, Nav2 planning, localization, safety,
+  or execution approval.
+- The Action server accepts legacy Qt `points/theta` JSON and schema-v1 task
+  groups. Schema-v1 execution must fail closed unless the active map ID,
+  version, YAML/image hashes, and localization PCD hash can be checked.
 
 ## Navigation Task Orchestration Contract
 - Navigation is an Action capability, not a frontend-owned workflow. Qt, Web, autostart, and future mission managers must consume project Actions and their explicit result/cancel semantics.
@@ -208,6 +233,37 @@
 - Prefer small, reviewable changes.
 - Keep placeholders explicit so future migration tasks know what is still missing.
 - For each module, document inputs, outputs, TF responsibility, and non-goals.
+
+## Teach-Repeat Runtime Contract
+- `agt_teach_repeat` is an optional navigation client and offline asset pipeline;
+  it is not a SLAM, localization, TF, controller, safety, map-edit, or chassis owner.
+- Raw teach poses come only from `/agt/mapping/odometry`. Missing mapping odometry
+  must fail with an actionable error and must never fall back to velocity commands
+  or chassis odometry.
+- Each executable reference path is explicitly transformed from its recorded odom
+  frame into `map` by the manifest's planar `map_from_teach_odom`; identity is an
+  explicit configured value, not an implicit frame assumption.
+- Teach assets bind the reference path, map YAML, localization PCD, and ready PCD
+  processing record by SHA-256. Preview may remain available with a warning after
+  a binding mismatch, but execution is fail-closed.
+- Path and corridor checks consume `navigation_footprint` from the selected platform
+  profile and reuse the coverage path-validation core. They must not contain a
+  second footprint or modify the OccupancyGrid, PGM, PCD, or semantic products.
+- `/agt/teach/path_validated` is empty after any invalid or incomplete validation.
+  Corridor outputs are advisory and `eligible_for_automatic_map_edit` remains false.
+- Teach execution may send only Nav2 `FollowPath` and a conservative Nav2 speed
+  limit. It must not publish velocity, enable motion, publish TF/odometry, bypass
+  Collision Monitor or `agt_safety`, or start a second navigation stack.
+- Execution requires current accepted `TRACKING` localization with matching map
+  identity, operator-enabled safety with clear emergency stop, ready
+  `/agt/system/task_readiness`, a matching validated path, and an available Nav2
+  server. Loss of any runtime gate cancels the active child goal.
+- Repeatability errors use the onboard map-frame localization estimate and therefore
+  measure system-internal repeatability, not independent absolute-position truth.
+  Mapping and chassis odometry remain comparison evidence only.
+- Runtime assets live under `runtime/teach_repeat/<demo_id>/` and are not committed.
+  Writes are atomic, finite-only, schema checked, and do not overwrite an existing
+  demo unless overwrite is explicitly requested.
 
 ## Web Experiment and Operations Console Contract
 - Real MID360 health checks consume the adapter's `/agt/sensors/lidar/custom`

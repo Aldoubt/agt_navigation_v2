@@ -310,5 +310,26 @@ curl http://127.0.0.1:8080/api/v1/mapping/session
 
 正常停止优先使用 Web 的停止/完成动作或 `ChangeSystemMode` 的 IDLE 请求。不要用 `kill -9` 作为普通关闭流程，也不要手工停止不属于当前系统管理器的进程组。
 
+## 5. 示教复现数据链
+
+```text
+rosbag2 /agt/mapping/odometry (odom -> base_footprint)
+  -> bag_path_extractor
+  -> raw_path.csv
+  -> SE(2) map_from_teach_odom + resample/smooth/yaw/curvature
+  -> reference_path.yaml + task_control_points.json
+  -> teach_path_publisher
+  -> /agt/teach/reference_path
+  -> teach_path_validator + global OccupancyGrid + canonical platform footprint
+  -> /agt/teach/path_validated
+  -> teach_path_executor -- Nav2 /follow_path (controller_id=FollowPath)
+  -> Collision Monitor -> agt_safety -> agt_chassis
+```
+
+`agt_teach_repeat` 不发布 TF、odometry 或速度。执行器只消费结构化
+`/agt/localization/status`、`/agt/system/task_readiness`、`/agt/safety/status` 和急停状态，并在任一
+门禁失效时取消 Nav2 子目标。评测误差使用 `LocalizationStatus.global_pose` 的 `map` 位姿；
+`/agt/mapping/odometry` 和 `/agt/chassis/odometry` 只保存为漂移/滑移对比证据。
+
 
 https://open.cherryin.ai/?utm_source=chatgpt.com

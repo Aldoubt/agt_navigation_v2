@@ -2,6 +2,7 @@
 build/
 install/
 log/
+/lidar_static_map_benchmark/
 
 # Runtime outputs
 runtime/maps/

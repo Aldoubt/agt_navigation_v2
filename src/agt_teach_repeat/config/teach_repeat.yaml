@@ -1,0 +1,43 @@
+/**:
+  ros__parameters:
+    platform_profile: ""
+    manifest: ""
+    use_sim_time: false
+    minimum_translation_m: 0.02
+    minimum_yaw_change_rad: 0.02
+    resample_distance_m: 0.10
+    smoothing_enabled: true
+    smoothing_method: moving_average
+    smoothing_window: 5
+    max_smoothing_deviation_m: 0.05
+    maximum_point_count: 20000
+    occupied_cost_threshold: 65
+    unknown_space_policy: collision
+    outside_costmap_is_collision: true
+    maximum_sample_count: 200000
+    maximum_linear_speed_mps: 0.20
+    maximum_reverse_speed_mps: 0.10
+    maximum_angular_speed_radps: 0.35
+    localization_status_timeout_s: 1.0
+    safety_status_timeout_s: 1.0
+    task_readiness_timeout_s: 1.0
+    feedback_timeout_s: 2.0
+    hard_lateral_error_m: 0.30
+    follow_path_action: /follow_path
+    controller_id: FollowPath
+    localization_evaluation:
+      minimum_attempts: 3
+      minimum_success_rate: 0.80
+      maximum_ambiguous_results: 0
+      maximum_wrong_accepts: 0
+      maximum_tracking_lost_count: 0
+      maximum_median_relocalization_time_s: 5.0
+    repeatability_evaluation:
+      maximum_lateral_rmse_m: 0.10
+      maximum_lateral_p95_m: 0.20
+      maximum_lateral_max_m: 0.30
+      maximum_yaw_rmse_deg: 5.0
+      maximum_yaw_max_deg: 10.0
+      minimum_completion_ratio: 0.99
+      maximum_manual_interventions: 0
+      maximum_emergency_stops: 0

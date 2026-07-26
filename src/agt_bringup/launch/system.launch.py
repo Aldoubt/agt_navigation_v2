@@ -267,6 +267,7 @@ def generate_launch_description():
                         "global_map_processing_record"
                     ),
                     "map_id": LaunchConfiguration("map_id"),
+                    "map_version_id": LaunchConfiguration("map_version_id"),
                     "configured_candidates_yaml": LaunchConfiguration(
                         "configured_candidates_yaml"
                     ),

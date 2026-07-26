@@ -20,6 +20,19 @@ def visibility(config):
     }
 
 
+def task_library_keys():
+    return {
+        "TaskLibraryEnabled": "true",
+        "TaskMaximumPoints": "200",
+        "TaskMaximumLoops": "10",
+        "TaskUnknownCellPolicy": "reject",
+        "TaskLineCheckStepRatio": "0.5",
+        "TaskAutosaveEnabled": "true",
+        "TaskAutosaveIntervalS": "30",
+        "TaskBackupCount": "5",
+    }
+
+
 def test_mapping_profile_contract():
     config = load_profile("mapping")
     assert topics(config)["kOccupancyMap"] == "/agt/map/mapping_occupancy"
@@ -37,6 +50,7 @@ def test_mapping_profile_contract():
         "EnableOfflinePlanningPreview": "false",
         "UiLanguage": "zh_CN",
         "UseNativeWindowFrame": "true",
+        **task_library_keys(),
     }
 
 
@@ -57,6 +71,7 @@ def test_navigation_profile_contract():
         "EnableOfflinePlanningPreview": "true",
         "UiLanguage": "zh_CN",
         "UseNativeWindowFrame": "true",
+        **task_library_keys(),
     }
 
 
@@ -66,6 +81,7 @@ def test_offline_profile_is_preview_only():
     assert topics(config)["kGlobalPath"] == "/plan"
     assert config["key_value"]["EnableTaskExecution"] == "false"
     assert config["key_value"]["EnableOfflinePlanningPreview"] == "true"
+    assert task_library_keys().items() <= config["key_value"].items()
 
 
 def test_profiles_have_isolated_runtime_configs():

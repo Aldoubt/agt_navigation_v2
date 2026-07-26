@@ -211,8 +211,11 @@ class OccupancyMap {
    * @return {*}
    */
   void idx2xy(const int &c, const int &r, double &x, double &y) {
-    x = map_config.origin[0] + c * map_config.resolution;
-    y = map_config.origin[1] + r * map_config.resolution;
+    const double local_x = c * map_config.resolution;
+    const double local_y = r * map_config.resolution;
+    const double yaw = map_config.origin.size() >= 3 ? map_config.origin[2] : 0.0;
+    x = map_config.origin[0] + std::cos(yaw) * local_x - std::sin(yaw) * local_y;
+    y = map_config.origin[1] + std::sin(yaw) * local_x + std::cos(yaw) * local_y;
   }
   /**
    * @description: 输入全局坐标，返回栅格地图的行与列号
@@ -223,8 +226,11 @@ class OccupancyMap {
    * @return {*}
    */
   void xy2idx(const double &x, const double &y, int &c, int &r) {
-    c = round(x - map_config.origin[0]) / map_config.resolution;
-    r = round(y - map_config.origin[1]) / map_config.resolution;
+    const double dx = x - map_config.origin[0];
+    const double dy = y - map_config.origin[1];
+    const double yaw = map_config.origin.size() >= 3 ? map_config.origin[2] : 0.0;
+    c = std::lround((std::cos(yaw) * dx + std::sin(yaw) * dy) / map_config.resolution);
+    r = std::lround((-std::sin(yaw) * dx + std::cos(yaw) * dy) / map_config.resolution);
   }
   /**
    * @description:输入全局坐标，判断是否在栅格地图内
@@ -233,8 +239,9 @@ class OccupancyMap {
    * @return {*}
    */
   bool inMap(const double &x, const double &y) {
-    int c_idx = round((x - map_config.origin[0]) / map_config.resolution);
-    int r_idx = round((y - map_config.origin[1]) / map_config.resolution);
+    int c_idx = 0;
+    int r_idx = 0;
+    xy2idx(x, y, c_idx, r_idx);
     return (c_idx >= 0 && r_idx >= 0 && c_idx < cols && r_idx < rows);
   }
   /**
@@ -252,8 +259,11 @@ class OccupancyMap {
    */
   void ScenePose2xy(const double &scene_x, const double &scene_y,
                     double &word_x, double &word_y) {
-    word_x = scene_x * map_config.resolution + map_config.origin[0];
-    word_y = (height() - scene_y) * map_config.resolution + map_config.origin[1];
+    const double local_x = scene_x * map_config.resolution;
+    const double local_y = (height() - scene_y) * map_config.resolution;
+    const double yaw = map_config.origin.size() >= 3 ? map_config.origin[2] : 0.0;
+    word_x = map_config.origin[0] + std::cos(yaw) * local_x - std::sin(yaw) * local_y;
+    word_y = map_config.origin[1] + std::sin(yaw) * local_x + std::cos(yaw) * local_y;
   }
   /**
    * @description:输入栅格坐标,返回世界坐标
@@ -275,8 +285,13 @@ class OccupancyMap {
    */
   void xy2ScenePose(const double &word_x, const double &word_y, double &scene_x,
                     double &scene_y) {
-    scene_x = (word_x - map_config.origin[0]) / map_config.resolution;
-    scene_y = height() - (word_y - map_config.origin[1]) / map_config.resolution;
+    const double dx = word_x - map_config.origin[0];
+    const double dy = word_y - map_config.origin[1];
+    const double yaw = map_config.origin.size() >= 3 ? map_config.origin[2] : 0.0;
+    const double local_x = std::cos(yaw) * dx + std::sin(yaw) * dy;
+    const double local_y = -std::sin(yaw) * dx + std::cos(yaw) * dy;
+    scene_x = local_x / map_config.resolution;
+    scene_y = height() - local_y / map_config.resolution;
   }
   /**
    * @description:
