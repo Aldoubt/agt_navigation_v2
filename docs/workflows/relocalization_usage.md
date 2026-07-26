@@ -76,6 +76,23 @@ map -> tracking_frame predicted
 不更新 `map -> odom`，也不覆盖最近有效位姿。`global_pose` 和 `aligned_points` 的测量时间为
 点云时间，20 Hz 持续 TF 重发才使用当前 ROS 时间。
 
+tracking validation 在进入 TF 查询和配准前会原子预留本次 `cloud_stamp`，并且只接受严格大于
+上一帧的纳秒时间戳。相同时间戳会跳过，不执行 NDT、不计成功或失败，也不改变当前状态；因此
+wall timer 在 bag 或 `/clock` 暂停时继续触发也不会重复消费同一帧。若 ROS 时间回退，当前帧会
+成为新的序列基线但不会执行验证，下一帧时间戳增加后才恢复；时间回退不会直接触发 `LOST`。
+回退后缓存中的旧 duplicate 会在新鲜度错误前被识别并跳过，避免新点云尚未到达时把同一旧帧
+反复计为 future-cloud 失败；非 duplicate 帧的过期、未来和无效时间戳门禁保持不变。
+
+一次已消费的 tracking validation 只在外层 worker 完成一次 supervisor 更新。`runCandidates()`
+在 tracking 模式只返回配准结果，超时、取消、TF、点云和质量失败均由外层统一调用一次
+`trackingValidation(false)`；成功同样由外层调用一次 `trackingValidation(true)`。该路径仍不更新
+`map -> odom`，也不覆盖 last valid pose。
+
+`tracking_confirmations_required` 当前只允许 `1`。任何非 `1` 值都会在节点启动时以
+`multi-frame bootstrap confirmation is not implemented` 明确失败。未来多帧启动确认需要临时
+`map -> odom`、严格的新点云门禁、N 帧独立确认和最终 TF 提交，本次没有实现，也不能通过修改
+YAML 提前启用。
+
 点云新鲜度默认由 `max_cloud_age_s: 0.5`、`max_cloud_future_tolerance_s: 0.1` 和
 `require_nonzero_cloud_stamp: true` 控制。拒绝时状态会报告 `ERROR_STALE_SCAN` 或
 `ERROR_INVALID_SCAN_TIMESTAMP` 及实际 stamp/age。
