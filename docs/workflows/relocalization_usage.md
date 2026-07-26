@@ -77,16 +77,26 @@ map -> tracking_frame predicted
 点云时间，20 Hz 持续 TF 重发才使用当前 ROS 时间。
 
 tracking validation 在进入 TF 查询和配准前会原子预留本次 `cloud_stamp`，并且只接受严格大于
-上一帧的纳秒时间戳。相同时间戳会跳过，不执行 NDT、不计成功或失败，也不改变当前状态；因此
-wall timer 在 bag 或 `/clock` 暂停时继续触发也不会重复消费同一帧。若 ROS 时间回退，当前帧会
-成为新的序列基线但不会执行验证，下一帧时间戳增加后才恢复；时间回退不会直接触发 `LOST`。
-回退后缓存中的旧 duplicate 会在新鲜度错误前被识别并跳过，避免新点云尚未到达时把同一旧帧
-反复计为 future-cloud 失败；非 duplicate 帧的过期、未来和无效时间戳门禁保持不变。
+上一帧的纳秒时间戳。相同时间戳只有在点云仍通过新鲜度门禁时才跳过；bag 与 `/clock` 一起暂停
+时，fresh duplicate 不执行 NDT、不计成功或失败，也不发布状态。实车 ROS 时间继续而点云停发
+时，缓存帧超过 `max_cloud_age_s` 后会以 `ERROR_STALE_SCAN` 失败，不会被 duplicate 门禁掩盖；
+连续周期将推动 `TRACKING -> DEGRADED -> RECOVERING -> LOST`。future 或 invalid duplicate 也按
+对应时间错误拒绝。
 
-一次已消费的 tracking validation 只在外层 worker 完成一次 supervisor 更新。`runCandidates()`
-在 tracking 模式只返回配准结果，超时、取消、TF、点云和质量失败均由外层统一调用一次
-`trackingValidation(false)`；成功同样由外层调用一次 `trackingValidation(true)`。该路径仍不更新
-`map -> odom`，也不覆盖 last valid pose。
+若 ROS 时间回退且当前帧新鲜，该帧成为新的序列基线但不执行验证；再次出现同一时间戳时按
+fresh duplicate 跳过，下一帧时间戳严格增加后才恢复。回退帧和 fresh duplicate 都是 skip：
+不更新 supervisor，不执行 NDT，也不发布新的 `LocalizationStatus`。
+
+一次非 skip tracking validation 只在外层 worker 完成一次 supervisor 更新并发布一次最终权威
+状态。`runCandidates()` 在 tracking 模式仅计算并返回 accepted/rejected/skipped，不发布 map/cloud
+准备失败、TF 失败、取消、超时、`VERIFYING`、候选质量结果、候选耗尽或歧义等中间状态；外层对
+失败统一调用一次 `trackingValidation(false)`，成功调用一次 `trackingValidation(true)`。因此成功
+验证不会短暂发出 `pose_valid=false`，不会误取消 teach-repeat 或使 Nav2/safety gate 抖动。该路径
+仍不更新 `map -> odom`，也不覆盖 last valid pose。
+
+最终状态的 `has_converged` 是 NDT/ICP 后端真实收敛值，和质量接受是两层语义。后端可收敛但因
+fitness 或 innovation 被拒绝，此时 `has_converged=true`，而 `localization_accepted=false`、
+`pose_valid=false`；只有完整质量门禁接受时后两者才为 `true`。
 
 `tracking_confirmations_required` 当前只允许 `1`。任何非 `1` 值都会在节点启动时以
 `multi-frame bootstrap confirmation is not implemented` 明确失败。未来多帧启动确认需要临时

@@ -94,9 +94,12 @@
 - `agt_localization` uses the fixed registered-cloud timestamp for dynamic TF, rejects invalid/stale/future
   clouds with explicit status errors, and tracking validation seeds registration from
   `map -> odom * odom -> tracking_frame` without rewriting `map -> odom` or the last accepted pose.
-- Tracking validation consumes only a strictly newer registered-cloud stamp. Duplicate stamps and ROS-time
-  rollback baselines are skipped without registration or supervisor counters; each consumed result is applied
-  to the supervisor exactly once by the outer tracking worker.
+- Tracking validation skips a duplicate registered-cloud stamp only while that cached cloud is still fresh.
+  A stale, future, or invalid duplicate is rejected and counts as one validation failure; a fresh ROS-time
+  rollback baseline is skipped and becomes the new sequence baseline without changing supervisor counters.
+- `runCandidates()` must not publish authoritative intermediate status while tracking validation is active.
+  The outer tracking worker applies each non-skipped result to the supervisor exactly once and publishes one
+  final status; skipped results publish no status and do not change success or failure counters.
 - `tracking_confirmations_required` currently supports only `1`. Non-`1` values must fail at node startup;
   multi-frame bootstrap confirmation requires a separate future contract and must not be inferred from the
   existing supervisor capability.

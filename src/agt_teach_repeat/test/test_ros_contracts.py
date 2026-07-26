@@ -216,6 +216,40 @@ def test_localization_readiness_and_runtime_loss_cancel_child(tmp_path):
         node.destroy_node()
 
 
+def test_accepted_tracking_validation_status_does_not_cancel_child(tmp_path):
+    manifest_path = make_asset(tmp_path)
+    node = TeachPathExecutor(
+        parameter_overrides=parameters(manifest_path, execution_enabled=True, auto_start=False)
+    )
+
+    class Child:
+        def __init__(self):
+            self.canceled = False
+
+        def cancel_goal_async(self):
+            self.canceled = True
+
+    try:
+        child = Child()
+        node._active = True
+        node._child_goal = child
+        message = LocalizationStatus()
+        message.state = LocalizationStatus.STATE_TRACKING
+        message.pose_valid = True
+        message.localization_accepted = True
+        message.error_code = LocalizationStatus.ERROR_NONE
+        message.map_id = "map_01"
+        message.map_hash = node.manifest["map"]["localization_pcd_sha256"]
+
+        node._localization_callback(message)
+
+        assert node._localization_ready is True
+        assert child.canceled is False
+        assert node._pending_failure == ""
+    finally:
+        node.destroy_node()
+
+
 def test_evaluator_records_machine_safety_loss_and_empty_failed_run(tmp_path):
     manifest = make_asset(tmp_path)
     node = RepeatabilityEvaluator(parameter_overrides=parameters(manifest))
