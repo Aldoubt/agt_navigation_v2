@@ -29,6 +29,7 @@ class TaskLibraryDock final : public QWidget {
   bool ConfirmClose();
 
  public slots:
+  void UpdateTopologyMap(const TopologyMap &topology_map);
   void AddTaskWaypoint(const basic::RobotPose &pose);
   void UpdateTaskWaypoint(int row, const basic::RobotPose &pose);
   void SelectTaskWaypoint(int row);
@@ -65,6 +66,7 @@ class TaskLibraryDock final : public QWidget {
   void SetAllEnabled();
   void MarkDirty();
   void ToggleMapEditing(bool enabled);
+  void AddSelectedTopologyPoint();
 
  private:
   bool EnsureRepository(QString *error = nullptr);
@@ -80,6 +82,7 @@ class TaskLibraryDock final : public QWidget {
   task_group::TaskGroup DraftTask() const;
   TaskExecutionRequest requestFromCurrent() const;
   void PublishWaypoints();
+  void RefreshTopologyPointChoices();
   QString nextWaypointId() const;
   QString availableTaskId(const QString &base) const;
 
@@ -100,6 +103,7 @@ class TaskLibraryDock final : public QWidget {
   int backup_count_{5};
   task_group::TaskGroup task_;
   task_group::WaypointTableModel *model_{nullptr};
+  TopologyMap topology_map_;
 
   QListWidget *task_list_{nullptr};
   QLineEdit *name_edit_{nullptr};
@@ -118,5 +122,7 @@ class TaskLibraryDock final : public QWidget {
   QVector<QWidget *> task_edit_widgets_;
   QCheckBox *show_disabled_{nullptr};
   QTableView *table_{nullptr};
+  QComboBox *topology_point_selector_{nullptr};
+  QPushButton *add_topology_point_button_{nullptr};
   QTimer *autosave_timer_{nullptr};
 };

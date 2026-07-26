@@ -62,7 +62,9 @@ ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
 Task Library 的完整离线编辑、地图绑定、旧格式迁移和执行流程见
 [`docs/workflows/qt5_offline_task_group_editor.md`](../../docs/workflows/qt5_offline_task_group_editor.md)。
 Qt5 主窗口将它内嵌在右侧 `任务中心 / Task Center`，并与原有拓扑任务通过页签切换；
-切换离开 Task Library 或隐藏任务中心会退出地图点位编辑模式。
+切换离开 Task Library 或隐藏任务中心会退出地图点位编辑模式。Task Library 的拓扑点下拉框
+随当前拓扑增删改实时刷新；“添加选中点”把点名、米制 `map` 坐标和 yaw 快照到版本化任务，
+之后修改拓扑不会静默改写已经保存的任务几何。
 版本化默认值来自 `config/task_library.yaml`，启动时合并到 profile runtime 配置；已保存的操作者
 设置不会被覆盖，`TaskLibraryRoot` 始终由启动脚本解析为当前工作区的绝对 `runtime/maps` 路径。
 

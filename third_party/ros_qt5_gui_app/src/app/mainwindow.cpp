@@ -1037,6 +1037,8 @@ void MainWindow::setupUi() {
                   enabled ? Display::MapEditMode::kEditTaskWaypoints
                           : Display::MapEditMode::kStopEdit);
             });
+    connect(display_manager_, &Display::DisplayManager::signalTopologyMapUpdate,
+            task_library_dock_, &TaskLibraryDock::UpdateTopologyMap);
     connect(display_manager_,
             &Display::DisplayManager::signalTaskWaypointPlaced,
             task_library_dock_, &TaskLibraryDock::AddTaskWaypoint);

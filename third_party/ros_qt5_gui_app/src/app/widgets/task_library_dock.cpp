@@ -14,6 +14,7 @@
 #include <QTableView>
 #include <QVBoxLayout>
 
+#include <algorithm>
 #include <cmath>
 
 #include "config/config_manager.h"
@@ -129,6 +130,20 @@ TaskLibraryDock::TaskLibraryDock(bool task_execution_enabled, QWidget *parent)
             PublishWaypoints();
           });
 
+  auto *topology_row = new QHBoxLayout();
+  topology_row->addWidget(
+      new QLabel(UiLanguage::Text("拓扑点", "Topology waypoint"), this));
+  topology_point_selector_ = new QComboBox(this);
+  topology_point_selector_->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+  topology_point_selector_->setMinimumContentsLength(18);
+  topology_row->addWidget(topology_point_selector_, 1);
+  add_topology_point_button_ = button(
+      UiLanguage::Text("添加选中点", "Add selected"), this);
+  connect(add_topology_point_button_, &QPushButton::clicked, this,
+          &TaskLibraryDock::AddSelectedTopologyPoint);
+  topology_row->addWidget(add_topology_point_button_);
+  outer->addLayout(topology_row);
+
   auto *row_buttons = new QGridLayout();
   int row_button_index = 0;
   const auto add_model_button = [&](const QString &text, auto slot) {
@@ -169,6 +184,7 @@ TaskLibraryDock::TaskLibraryDock(bool task_execution_enabled, QWidget *parent)
   execution_row->addWidget(execute_button_);
   execution_row->addWidget(stop_button_);
   outer->addLayout(execution_row);
+  RefreshTopologyPointChoices();
 
   connect(model_, &QAbstractItemModel::dataChanged, this, &TaskLibraryDock::MarkDirty);
   connect(model_, &QAbstractItemModel::rowsInserted, this, &TaskLibraryDock::MarkDirty);
@@ -465,6 +481,64 @@ void TaskLibraryDock::ToggleMapEditing(bool enabled) {
   PublishWaypoints();
 }
 
+void TaskLibraryDock::AddSelectedTopologyPoint() {
+  if (task_.task_group_id.isEmpty() || geometry_read_only_ ||
+      model_->rowCount() >= maximum_points_) return;
+  const QString selected = topology_point_selector_->currentData().toString();
+  const auto match = std::find_if(
+      topology_map_.points.cbegin(), topology_map_.points.cend(),
+      [&selected](const TopologyMap::PointInfo &point) {
+        return QString::fromStdString(point.name) == selected;
+      });
+  if (match == topology_map_.points.cend()) return;
+  if (!std::isfinite(match->x) || !std::isfinite(match->y) ||
+      !std::isfinite(match->theta)) {
+    ShowError(UiLanguage::Text("无法添加拓扑点", "Cannot add topology waypoint"),
+              UiLanguage::Text("拓扑点坐标或朝向不是有限数。",
+                               "Topology waypoint coordinates or heading are not finite."));
+    return;
+  }
+  task_group::Waypoint waypoint;
+  waypoint.id = nextWaypointId();
+  waypoint.name = selected;
+  waypoint.x = match->x;
+  waypoint.y = match->y;
+  waypoint.yaw = task_group::normalizeYaw(match->theta);
+  waypoint.note = UiLanguage::Text("来自拓扑点：%1", "From topology waypoint: %1")
+                      .arg(selected);
+  model_->addWaypoint(waypoint);
+  table_->selectRow(model_->rowCount() - 1);
+}
+
+void TaskLibraryDock::UpdateTopologyMap(const TopologyMap &topology_map) {
+  topology_map_ = topology_map;
+  RefreshTopologyPointChoices();
+}
+
+void TaskLibraryDock::RefreshTopologyPointChoices() {
+  if (!topology_point_selector_) return;
+  const QString selected = topology_point_selector_->currentData().toString();
+  const QSignalBlocker blocker(topology_point_selector_);
+  topology_point_selector_->clear();
+  if (topology_map_.points.empty()) {
+    topology_point_selector_->addItem(
+        UiLanguage::Text("暂无拓扑点", "No topology waypoints"), QString());
+  } else {
+    for (const auto &point : topology_map_.points) {
+      const QString name = QString::fromStdString(point.name);
+      topology_point_selector_->addItem(
+          QString("%1  (%2, %3)")
+              .arg(name)
+              .arg(point.x, 0, 'f', 2)
+              .arg(point.y, 0, 'f', 2),
+          name);
+    }
+    const int previous = topology_point_selector_->findData(selected);
+    if (previous >= 0) topology_point_selector_->setCurrentIndex(previous);
+  }
+  UpdateButtons();
+}
+
 QString TaskLibraryDock::availableTaskId(const QString &base) const {
   QString safe_base = base;
   if (!task_group::TaskValidator::isSafeComponent(safe_base)) {
@@ -628,6 +702,15 @@ void TaskLibraryDock::UpdateButtons() {
       !task_.task_group_id.isEmpty(), validation_allows_execution_,
       binding_state_));
   stop_button_->setEnabled(task_running_);
+  const bool topology_editable =
+      !task_.task_group_id.isEmpty() && !geometry_read_only_ &&
+      topology_point_selector_ &&
+      !topology_point_selector_->currentData().toString().isEmpty();
+  if (topology_point_selector_)
+    topology_point_selector_->setEnabled(topology_editable);
+  if (add_topology_point_button_)
+    add_topology_point_button_->setEnabled(
+        topology_editable && model_->rowCount() < maximum_points_);
 }
 
 void TaskLibraryDock::ShowError(const QString &title, const QString &message) { QMessageBox::warning(this, title, message); }

@@ -25,6 +25,9 @@ contract is:
 - decorative topology animation is limited to 10 FPS;
 - map clicks populate the explicitly selected task row, and topology changes
   refresh every task selector;
+- the Task Library topology selector snapshots the selected topology point
+  name, metric map pose, and heading into an independent task waypoint; later
+  topology edits do not silently rewrite saved task geometry;
 - offline map inspection uses view-level pan/zoom and manual navigation cancels
   robot-follow mode; the native window frame remains resizable;
 - `UiLanguage` selects persisted `zh_CN` (default) or `en_US` operator text and

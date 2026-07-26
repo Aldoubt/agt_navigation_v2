@@ -136,7 +136,10 @@
 - Offline Qt map inspection must allow view-level pan/zoom without moving map
   geometry and must cancel robot-follow mode on manual navigation. Task point
   clicks target the explicitly selected task row and topology mutations must
-  refresh all task selectors. The default operator language is `zh_CN`;
+  refresh all task selectors. The Task Library topology selector snapshots the
+  selected topology point name, metric map pose, and heading into a task
+  waypoint; later topology edits must not silently rewrite saved task geometry.
+  The default operator language is `zh_CN`;
   `en_US` is a persisted, restart-applied frontend preference.
 - The Qt Task Library shares the existing Task Center as a tab beside topology
   tasks. Switching away from the library or hiding the Task Center must cancel

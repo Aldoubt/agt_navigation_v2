@@ -239,7 +239,7 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     provenance = (ROOT / "third_party/README.md").read_text(encoding="utf-8")
     assert "https://github.com/Aldoubt/Ros_Qt5_Gui_App.git" in provenance
     assert "agt-navigation-v2" in provenance
-    assert "a180d981b42845ec3d2bd4a998eb89ea1dfdbb86" in provenance
+    assert "1597fbbcb25c2c069e51627ab6994470706384fc" in provenance
     config = json.loads(
         (ROOT / "src/agt_ui_bridge/config/ros_qt5_gui_app.json").read_text(
             encoding="utf-8"
@@ -252,6 +252,9 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     assert config["key_value"]["BaseFrameId"] == "base_footprint"
     rclcomm = (gui / "src/channel/ros2/rclcomm.cpp").read_text(encoding="utf-8")
     task_widget = (gui / "src/app/widgets/nav_goal_table_view.cpp").read_text(
+        encoding="utf-8"
+    )
+    task_library = (gui / "src/app/widgets/task_library_dock.cpp").read_text(
         encoding="utf-8"
     )
     map_loader = (gui / "src/basic/map/occupancy_map.h").read_text(
@@ -273,6 +276,10 @@ def test_qt5_map_editor_uses_v2_map_interfaces():
     assert "timer->start(100)" in scene_manager
     assert "RefreshPointChoices()" in task_widget
     assert "const int row = ActiveRow()" in task_widget
+    assert "AddSelectedTopologyPoint" in task_library
+    assert "RefreshTopologyPointChoices" in task_library
+    assert "waypoint.yaw = task_group::normalizeYaw(match->theta)" in task_library
+    assert "TaskLibraryDock::UpdateTopologyMap" in mainwindow
     assert "emit signalTopologyMapUpdate(topology_map_)" in scene_manager
     assert "void ViewManager::ZoomAt" in view_manager
     assert "SetRobotFocus(false)" in view_manager
