@@ -42,7 +42,7 @@ live topics retain their configured freshness limits.
 | Assets | verified PGM/YAML and ready PCD processing record | `NAV_MAP_INVALID`, `LOCALIZATION_PCD_INVALID` |
 | Localization identity | status map id/hash equals active map | `LOCALIZATION_MAP_MISMATCH` |
 | Localization quality | fresh `TRACKING`, `pose_valid`, `localization_accepted` | `LOCALIZATION_NOT_TRACKING`, `POSE_INVALID`, `LOCALIZATION_NOT_ACCEPTED`, `LOCALIZATION_STATUS_STALE` |
-| Safety/chassis | no emergency stop, connected chassis, safety allows navigation | `EMERGENCY_STOP`, `CHASSIS_DISCONNECTED`, `SAFETY_NOT_READY` |
+| Safety/chassis | `/agt/safety/status` is fresh, `motion_enabled=true`, authoritative `emergency_stop=false`, connected chassis, safety reports `navigation_ready=true` | `EMERGENCY_STOP`, `CHASSIS_DISCONNECTED`, `SAFETY_NOT_READY` |
 | Nav2/TF | required lifecycle nodes active and fresh `map -> odom -> base_footprint` chain | `NAV2_NOT_ACTIVE`, `TF_NOT_FRESH` |
 | Task validator | current task is revalidated by the existing Action server before child dispatch | `TASK_INVALID` |
 
@@ -51,6 +51,17 @@ matrix. The Action server repeats runtime prerequisites and its existing task
 validator protects against malformed or out-of-map waypoints. The health node's
 `task_valid` default means no task-specific request is currently pending; it is
 not permission to skip Action validation.
+
+`agt_safety` is the owner of the emergency-stop latch. The health node consumes
+`emergency_stop`/`estop_latched` and `navigation_ready` from its diagnostic status;
+the optional `/agt/safety/emergency_stop` input is not a required health topic.
+This prevents a missing hardware-adapter publisher from being interpreted as an
+active stop after the safety controller has explicitly reported a clear latch.
+
+The baseline localization status is emitted on the 5 s tracking-validation
+period and can spend up to 3 s in registration. Safety, the lifecycle gate, the
+waypoint Action, and the health contract therefore use a 10 s message freshness
+window. The `TaskReadiness` snapshot itself remains a separate 2 s cache gate.
 
 For `MAPPING`, BUNKER chassis telemetry is optional because mapping can be tested
 with MID360 and FAST-LIVO2 while the vehicle is disconnected. The Web console

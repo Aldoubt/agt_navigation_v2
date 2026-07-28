@@ -49,6 +49,51 @@ _TOPIC_TYPES = {
 _LATCHED_MAP_QOS = QoSProfile(depth=1)
 _LATCHED_MAP_QOS.reliability = ReliabilityPolicy.RELIABLE
 _LATCHED_MAP_QOS.durability = DurabilityPolicy.TRANSIENT_LOCAL
+_NAV2_LIFECYCLE_NODES = (
+    "map_server",
+    "planner_server",
+    "smoother_server",
+    "controller_server",
+    "behavior_server",
+    "bt_navigator",
+    "waypoint_follower",
+    "collision_monitor",
+)
+
+
+def _topic_is_fresh(stats, topic: str, timeout: float, now: float) -> bool:
+    observation = stats.get(topic)
+    return bool(
+        observation
+        and int(observation.get("count", 0)) > 0
+        and now - float(observation.get("last_seen", float("-inf"))) <= timeout
+    )
+
+
+def _safety_gate_from_status(message: DiagnosticArray) -> tuple[bool, bool, bool, bool]:
+    for status in message.status:
+        if status.name != "agt_safety/tracked_controller":
+            continue
+        values = {item.key: item.value.strip().lower() for item in status.values}
+        required = {
+            "motion_enabled",
+            "emergency_stop",
+            "estop_latched",
+            "navigation_ready",
+        }
+        if not required.issubset(values):
+            return True, False, True, False
+        motion_enabled = values.get("motion_enabled") == "true"
+        emergency_stop = any(
+            values[key] != "false" for key in ("emergency_stop", "estop_latched")
+        )
+        navigation_ready = (
+            values.get("navigation_ready") == "true"
+            and motion_enabled
+            and not emergency_stop
+        )
+        return True, motion_enabled, emergency_stop, navigation_ready
+    return False, False, True, False
 
 
 class SystemHealthNode(Node):
@@ -73,6 +118,21 @@ class SystemHealthNode(Node):
         # flag represents the shared runtime prerequisites until a future task
         # validator publishes a task-specific decision.
         self._task_valid = bool(self.declare_parameter("task_valid", True).value)
+        self._localization_status_timeout = float(
+            self.declare_parameter("localization_status_timeout", 10.0).value
+        )
+        self._safety_status_timeout = float(
+            self.declare_parameter("safety_status_timeout", 1.0).value
+        )
+        self._chassis_status_timeout = float(
+            self.declare_parameter("chassis_status_timeout", 1.0).value
+        )
+        if min(
+            self._localization_status_timeout,
+            self._safety_status_timeout,
+            self._chassis_status_timeout,
+        ) <= 0.0:
+            raise ValueError("readiness status timeouts must be positive")
         self._min_free_space_bytes = int(float(self.declare_parameter("min_free_space_gb", 1.0).value) * 1024**3)
         self._stats_lock = threading.Lock()
         self._topic_callback_group = ReentrantCallbackGroup()
@@ -90,13 +150,16 @@ class SystemHealthNode(Node):
         self._lifecycle_futures = {}
         self._lifecycle_clients = {
             node: self.create_client(GetState, f"/{node}/get_state", callback_group=self._control_callback_group)
-            for node in ("map_server", "planner_server", "controller_server", "bt_navigator", "waypoint_follower")
+            for node in _NAV2_LIFECYCLE_NODES
         }
         self._tf_buffer = Buffer()
         self._tf_listener = TransformListener(self._tf_buffer, self)
         self._localization = LocalizationStatus()
         self._chassis_connected = False
+        # The safety controller is the authoritative owner of the estop latch.
+        # Missing the optional input topic must not fabricate an active estop.
         self._emergency_stop = True
+        self._safety_status_seen = False
         self._safety_allows_navigation = False
         self._health = None
         self._publisher = self.create_publisher(SystemHealth, "/agt/system/health", 10)
@@ -124,20 +187,20 @@ class SystemHealthNode(Node):
                 self._localization = message
             elif topic == "/agt/chassis/connected":
                 self._chassis_connected = bool(message.data)
-            elif topic == "/agt/safety/emergency_stop":
-                self._emergency_stop = bool(message.data)
             elif topic == "/agt/safety/status":
-                for status in message.status:
-                    for value in status.values:
-                        if value.key == "motion_enabled":
-                            self._conditions["safety.motion_enabled"] = value.value.lower() == "true"
-                        if value.key in ("emergency_stop", "estop_latched"):
-                            self._conditions["safety.emergency_stop_clear"] = value.value.lower() == "false"
-                    self._safety_allows_navigation = (
-                        status.level == status.OK
-                        and self._conditions.get("safety.motion_enabled", False)
-                        and not self._emergency_stop
-                    )
+                (
+                    self._safety_status_seen,
+                    motion_enabled,
+                    self._emergency_stop,
+                    self._safety_allows_navigation,
+                ) = _safety_gate_from_status(message)
+                self._conditions["safety.motion_enabled"] = motion_enabled
+                self._conditions["safety.emergency_stop_clear"] = (
+                    self._safety_status_seen and not self._emergency_stop
+                )
+                self._conditions["safety.navigation_ready"] = (
+                    self._safety_status_seen and self._safety_allows_navigation
+                )
 
     def _refresh_graph(self) -> None:
         self._nodes = {
@@ -272,11 +335,34 @@ class SystemHealthNode(Node):
         return message
 
     def _evaluate(self):
+        now = time.monotonic()
         with self._stats_lock:
             localization = self._localization
-            emergency_stop = self._emergency_stop
-            chassis_connected = self._chassis_connected
-            safety_allows_navigation = self._safety_allows_navigation
+            localization_fresh = _topic_is_fresh(
+                self._stats,
+                "/agt/localization/status",
+                self._localization_status_timeout,
+                now,
+            )
+            safety_fresh = _topic_is_fresh(
+                self._stats,
+                "/agt/safety/status",
+                self._safety_status_timeout,
+                now,
+            )
+            chassis_fresh = _topic_is_fresh(
+                self._stats,
+                "/agt/chassis/connected",
+                self._chassis_status_timeout,
+                now,
+            )
+            emergency_stop = (
+                self._emergency_stop
+                if self._safety_status_seen and safety_fresh
+                else True
+            )
+            chassis_connected = self._chassis_connected and chassis_fresh
+            safety_allows_navigation = self._safety_allows_navigation and safety_fresh
         return evaluate_task_readiness(
             ReadinessInputs(
                 active_mode=self._mode,
@@ -291,13 +377,14 @@ class SystemHealthNode(Node):
                 localization_state=self._localization_state(localization.state),
                 pose_valid=localization.pose_valid,
                 localization_accepted=localization.localization_accepted,
-                status_stale=localization.status_stale,
+                status_stale=localization.status_stale or not localization_fresh,
                 emergency_stop=emergency_stop,
                 chassis_connected=chassis_connected,
                 safety_allows_navigation=safety_allows_navigation,
-                nav2_active=all(self._lifecycle_states.get(node) == "active" for node in (
-                    "map_server", "planner_server", "controller_server", "bt_navigator", "waypoint_follower"
-                )),
+                nav2_active=all(
+                    self._lifecycle_states.get(node) == "active"
+                    for node in _NAV2_LIFECYCLE_NODES
+                ),
                 tf_chain_fresh={"map->odom", "odom->base_footprint", "base_link->lidar_link"}.issubset(self._frames),
                 task_valid=self._task_valid,
                 health_revision=self._health.revision if self._health else 0,

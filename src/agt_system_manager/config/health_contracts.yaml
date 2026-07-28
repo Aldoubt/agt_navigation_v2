@@ -77,14 +77,14 @@ health:
           expected_message_type: diagnostic_msgs/msg/DiagnosticArray
           min_rate_hz: 2.0
           max_age_sec: 1.0
-        - name: /agt/safety/emergency_stop
-          expected_message_type: std_msgs/msg/Bool
-          max_age_sec: 1.0
       conditions:
         - name: safety.motion_enabled
           expected: true
           severity: ERROR
         - name: safety.emergency_stop_clear
+          expected: true
+          severity: ERROR
+        - name: safety.navigation_ready
           expected: true
           severity: ERROR
     - component_id: localization
@@ -93,18 +93,23 @@ health:
       required_topics:
         - name: /agt/localization/status
           expected_message_type: agt_interfaces/msg/LocalizationStatus
-          max_age_sec: 1.0
+          # The authoritative status is emitted at the 5 s tracking-validation
+          # period; the runtime freshness window is 10 s.
+          max_age_sec: 10.0
       required_nodes: [agt_relocalization]
     - component_id: nav2
       display_name: Nav2 lifecycle
       required_in_modes: [NAVIGATION]
-      required_nodes: [map_server, planner_server, controller_server, bt_navigator, waypoint_follower]
+      required_nodes: [map_server, planner_server, smoother_server, controller_server, behavior_server, bt_navigator, waypoint_follower, collision_monitor]
       required_lifecycle_states:
         map_server: active
         planner_server: active
+        smoother_server: active
         controller_server: active
+        behavior_server: active
         bt_navigator: active
         waypoint_follower: active
+        collision_monitor: active
     - component_id: map_and_costmap
       display_name: Navigation map and costmap
       required_in_modes: [NAVIGATION]

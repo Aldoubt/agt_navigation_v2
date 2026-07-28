@@ -60,6 +60,11 @@ platform profile；覆盖规划不能脱离语义服务器启动。
 `map_server active -> localization TRACKING/accepted -> safety localization guard -> semantic LOADED -> keepout mask -> global costmap ->
 coverage planner` 链共同决定；进程存在不等于可执行。只有下列检查通过后才允许手动使能安全层：
 
+定位状态的低频 tracking validation 周期为 5 秒，安全层、Nav2 lifecycle gate、Waypoint
+Action 和健康合同统一使用 10 秒 freshness window；TaskReadiness 自身仍要求最近的快照。
+Nav2 gate 在定位恢复后优先 `RESUME`，启动命令被 lifecycle manager 拒绝或服务异常时执行一次
+`RESET` 后重试，门禁保持 fail-closed，不会因一次 service 回调异常退出。
+
 ```bash
 ros2 lifecycle get /map_server
 ros2 topic echo /agt/localization/status --once

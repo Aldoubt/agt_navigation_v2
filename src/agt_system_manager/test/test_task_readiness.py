@@ -55,3 +55,32 @@ def test_stale_localization_and_missing_runtime_inputs_fail_closed():
     assert "MODE_NOT_NAVIGATION" in result.blocker_codes
     assert "LOCALIZATION_STATUS_STALE" in result.blocker_codes
     assert "SAFETY_NOT_READY" in result.blocker_codes
+
+
+def test_clear_safety_status_is_the_estop_source_when_input_topic_is_absent():
+    from pathlib import Path
+
+    contract = Path(__file__).resolve().parents[1] / "config" / "health_contracts.yaml"
+    text = contract.read_text(encoding="utf-8")
+    assert "/agt/safety/emergency_stop" not in text
+    assert "safety.emergency_stop_clear" in text
+
+
+def test_navigation_gate_requires_all_runtime_nav2_lifecycle_nodes():
+    from pathlib import Path
+    import yaml
+
+    contract = Path(__file__).resolve().parents[1] / "config" / "health_contracts.yaml"
+    health = yaml.safe_load(contract.read_text(encoding="utf-8"))["health"]
+    nav2 = next(item for item in health["components"] if item["component_id"] == "nav2")
+    for node in (
+        "map_server",
+        "planner_server",
+        "smoother_server",
+        "controller_server",
+        "behavior_server",
+        "bt_navigator",
+        "waypoint_follower",
+        "collision_monitor",
+    ):
+        assert nav2["required_lifecycle_states"][node] == "active"

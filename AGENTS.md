@@ -91,6 +91,7 @@
 - The localization supervisor owns structured `TRACKING/DEGRADED/RECOVERING/LOST` transitions. Low-frequency tracking validation may publish status but must not rewrite `map -> odom`; a lost state waits for an explicit recovery request.
 - Startup automatic relocalization, when explicitly enabled, may send only one bounded project Action request. It must not publish velocity, enable motion, bypass Nav2/safety, or retry without a new explicit recovery request.
 - `agt_navigation` must reject waypoint Actions without a fresh accepted `LocalizationStatus`; `agt_safety` must independently fail-closed for navigation input while preserving manual priority.
+- The baseline `LocalizationStatus` tracking-validation period is 5 s with a 3 s validation timeout. Safety, the Nav2 localization gate, the waypoint Action, and the health contract must use a freshness window of at least 10 s; `TaskReadiness` retains its own short snapshot timeout. `agt_safety` diagnostics are authoritative for `emergency_stop`/`estop_latched` and `navigation_ready`; a missing optional `/agt/safety/emergency_stop` publisher must not fabricate an active stop after the controller reports a clear latch.
 - `agt_localization` uses the fixed registered-cloud timestamp for dynamic TF, rejects invalid/stale/future
   clouds with explicit status errors, and tracking validation seeds registration from
   `map -> odom * odom -> tracking_frame` without rewriting `map -> odom` or the last accepted pose.

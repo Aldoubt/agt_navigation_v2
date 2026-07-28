@@ -1,5 +1,8 @@
 # 核心接口草案
 
+当前导航启动顺序、Qt5/Nav2/安全数据流以及门禁矩阵见
+[`current_navigation_startup_and_dataflow.md`](../architecture/current_navigation_startup_and_dataflow.md)。
+
 ## Topics
 - `/agt/sensors/lidar/custom`：`livox_ros_driver2/msg/CustomMsg`，MID360 原始输入。
 - `/agt/sensors/lidar/custom_filtered`：`livox_ros_driver2/msg/CustomMsg`，由

@@ -172,6 +172,7 @@ def generate_launch_description():
             DeclareLaunchArgument("auto_relocalize_timeout_s", default_value="30.0"),
             DeclareLaunchArgument("auto_relocalize_max_candidates", default_value="0"),
             DeclareLaunchArgument("auto_relocalize_publish_debug", default_value="false"),
+            DeclareLaunchArgument("localization_status_timeout", default_value="10.0"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("start_sensor", default_value="true"),
             DeclareLaunchArgument("start_lidar_self_filter", default_value="true"),
@@ -319,6 +320,7 @@ def generate_launch_description():
                     "use_keepout_filter": semantic_enabled,
                     "autostart": "false",
                     "enable_localization_gate": "true",
+                    "localization_status_timeout": LaunchConfiguration("localization_status_timeout"),
                 },
             ),
             include(

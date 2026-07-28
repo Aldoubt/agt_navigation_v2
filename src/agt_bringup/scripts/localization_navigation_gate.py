@@ -25,7 +25,7 @@ class LocalizationNavigationGate(Node):
             "manager_service", "/lifecycle_manager_navigation/manage_nodes"
         ).value
         self._status_timeout = float(
-            self.declare_parameter("localization_status_timeout", 1.0).value
+            self.declare_parameter("localization_status_timeout", 10.0).value
         )
         self._retry_period = float(
             self.declare_parameter("lifecycle_retry_period", 1.0).value
@@ -47,6 +47,8 @@ class LocalizationNavigationGate(Node):
         self._status_stamp = float("-inf")
         self._invalid_since = None
         self._nav_started = False
+        self._nav_paused = False
+        self._recovery_reset_required = False
         self._desired_command = None
         self._pending_command = None
         self._in_flight = False
@@ -93,11 +95,17 @@ class LocalizationNavigationGate(Node):
             return
         if self._desired_command is None:
             return
-        if self._desired_command == ManageLifecycleNodes.Request.STARTUP and self._nav_started:
+        command = self._desired_command
+        if command == ManageLifecycleNodes.Request.STARTUP:
+            if self._nav_started:
+                return
+            if self._recovery_reset_required:
+                command = ManageLifecycleNodes.Request.RESET
+            elif self._nav_paused:
+                command = ManageLifecycleNodes.Request.RESUME
+        elif command == ManageLifecycleNodes.Request.PAUSE and not self._nav_started:
             return
-        if self._desired_command == ManageLifecycleNodes.Request.PAUSE and not self._nav_started:
-            return
-        self._send(self._desired_command)
+        self._send(command)
 
     def _send(self, command: int) -> None:
         request = ManageLifecycleNodes.Request()
@@ -109,21 +117,56 @@ class LocalizationNavigationGate(Node):
 
     def _command_done(self, future) -> None:
         self._in_flight = False
+        command = self._pending_command
+        self._pending_command = None
         try:
             response = future.result()
+            success = bool(response.success)
         except Exception as error:  # keep the gate fail-closed on service errors
             self.get_logger().error("Nav2 lifecycle command failed: %s", error)
+            if command in (
+                ManageLifecycleNodes.Request.STARTUP,
+                ManageLifecycleNodes.Request.RESUME,
+            ):
+                self._nav_started = False
+                self._nav_paused = False
+                self._recovery_reset_required = True
+            elif command == ManageLifecycleNodes.Request.RESET:
+                self._recovery_reset_required = False
             return
-        if not response.success:
-            self.get_logger().error("Nav2 lifecycle command was rejected: %s", response.message)
+        if not success:
+            self.get_logger().error(
+                "Nav2 lifecycle command %s was rejected", command
+            )
+            if command in (
+                ManageLifecycleNodes.Request.STARTUP,
+                ManageLifecycleNodes.Request.RESUME,
+            ):
+                self._nav_started = False
+                self._nav_paused = False
+                self._recovery_reset_required = True
+            elif command == ManageLifecycleNodes.Request.RESET:
+                self._recovery_reset_required = False
             return
-        if self._pending_command == ManageLifecycleNodes.Request.STARTUP:
+        if command == ManageLifecycleNodes.Request.STARTUP:
             self._nav_started = True
+            self._nav_paused = False
+            self._recovery_reset_required = False
             self.get_logger().info("Nav2 lifecycle manager started after accepted localization")
-        elif self._pending_command == ManageLifecycleNodes.Request.PAUSE:
+        elif command == ManageLifecycleNodes.Request.PAUSE:
             self._nav_started = False
+            self._nav_paused = True
             self.get_logger().warn("Nav2 lifecycle manager paused because localization is not ready")
-        self._pending_command = None
+        elif command == ManageLifecycleNodes.Request.RESUME:
+            self._nav_started = True
+            self._nav_paused = False
+            self._recovery_reset_required = False
+            self.get_logger().info("Nav2 lifecycle manager resumed after localization recovered")
+        elif command == ManageLifecycleNodes.Request.RESET:
+            self._nav_started = False
+            self._nav_paused = False
+            self._recovery_reset_required = False
+            self.get_logger().warn("Nav2 lifecycle manager reset after a rejected startup")
 
 
 def main(args=None) -> None:

@@ -221,6 +221,7 @@ def generate_launch_description():
             DeclareLaunchArgument("auto_relocalize_timeout_s", default_value="30.0"),
             DeclareLaunchArgument("auto_relocalize_max_candidates", default_value="0"),
             DeclareLaunchArgument("auto_relocalize_publish_debug", default_value="false"),
+            DeclareLaunchArgument("localization_status_timeout", default_value="10.0"),
             DeclareLaunchArgument("start_semantic_map_server", default_value="false"),
             DeclareLaunchArgument("start_coverage_planning", default_value="false"),
             DeclareLaunchArgument("semantic_map", default_value=""),
@@ -242,6 +243,9 @@ def generate_launch_description():
                     "runtime_dir": LaunchConfiguration("runtime_dir"),
                     "active_map_pointer": LaunchConfiguration("active_map_pointer"),
                     "health_contract": LaunchConfiguration("health_contract"),
+                    "localization_status_timeout": LaunchConfiguration(
+                        "localization_status_timeout"
+                    ),
                     "task_valid": True,
                 }],
                 condition=IfCondition(LaunchConfiguration("start_system_health")),
@@ -293,6 +297,9 @@ def generate_launch_description():
                     ),
                     "auto_relocalize_publish_debug": LaunchConfiguration(
                         "auto_relocalize_publish_debug"
+                    ),
+                    "localization_status_timeout": LaunchConfiguration(
+                        "localization_status_timeout"
                     ),
                     "start_gui": LaunchConfiguration("start_gui"),
                     "start_semantic_map_server": LaunchConfiguration(

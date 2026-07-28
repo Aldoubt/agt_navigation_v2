@@ -77,7 +77,13 @@ class HealthSmokePublisher(Node):
     def _diagnostics(stamp, safety: bool = False) -> DiagnosticArray:
         status = DiagnosticStatus(level=DiagnosticStatus.OK, name="health_smoke")
         if safety:
-            status.values = [KeyValue(key="motion_enabled", value="true"), KeyValue(key="emergency_stop", value="false")]
+            status.name = "agt_safety/tracked_controller"
+            status.values = [
+                KeyValue(key="motion_enabled", value="true"),
+                KeyValue(key="estop_latched", value="false"),
+                KeyValue(key="emergency_stop", value="false"),
+                KeyValue(key="navigation_ready", value="true"),
+            ]
         message = DiagnosticArray()
         message.header.stamp = stamp
         message.status = [status]
@@ -94,7 +100,6 @@ class HealthSmokePublisher(Node):
         imu.header.frame_id = "imu_link"
         imu.orientation.w = 1.0
         connected = Bool(data=True)
-        clear = Bool(data=False)
         localization = LocalizationStatus()
         localization.header.stamp = stamp
         localization.state = LocalizationStatus.STATE_TRACKING
@@ -121,7 +126,6 @@ class HealthSmokePublisher(Node):
             "/agt/chassis/odometry": odom,
             "/agt/chassis/status": self._diagnostics(stamp),
             "/agt/safety/status": self._diagnostics(stamp, safety=True),
-            "/agt/safety/emergency_stop": clear,
             "/agt/localization/status": localization,
             "/agt/map/global_occupancy": grid,
             "/global_costmap/costmap": grid,
@@ -161,7 +165,19 @@ class FakeLifecycleNode(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     nodes = [HealthSmokePublisher()]
-    nodes.extend(FakeLifecycleNode(name) for name in ("map_server", "planner_server", "controller_server", "bt_navigator", "waypoint_follower"))
+    nodes.extend(
+        FakeLifecycleNode(name)
+        for name in (
+            "map_server",
+            "planner_server",
+            "smoother_server",
+            "controller_server",
+            "behavior_server",
+            "bt_navigator",
+            "waypoint_follower",
+            "collision_monitor",
+        )
+    )
     executor = MultiThreadedExecutor(num_threads=4)
     for node in nodes:
         executor.add_node(node)
