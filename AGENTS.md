@@ -22,6 +22,12 @@
 - Do not modify validated parameters or datasets from the legacy repository without explicit approval.
 - ROS 2 managers are the only real business backend. Qt5 and Web are clients and must not own
   system mode, mission, active-map, experiment, bag-process, safety, or chassis state.
+- `agt_map_manager` is the only runtime owner of `MapRegistry` mutations and active-map
+  publication. Managed mapping imports, activates, and cleans failed versions through
+  `/agt/maps/manage`; consumers must use the returned asset paths instead of reconstructing them.
+- `agt_experiment_manager` is the only runtime owner of rosbag record/playback processes.
+  Managed mapping creates an experiment and starts the explicit `mapping` profile through
+  `/agt/data/bags/manage`; the legacy launch recorder remains compatibility-only.
 - `agt_mission_manager` may sequence only project Actions and finite waits. It must not call Nav2
   native Actions, start launch files, publish velocity/TF, or infer completion from distance or time.
 - `/agt/system/robot_state` is a read model, not a new business owner. Unknown or stale evidence

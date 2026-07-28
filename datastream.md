@@ -37,13 +37,23 @@ ros2 launch agt_system_manager system_manager.launch.py \
   runtime_dir:="$AGT_WS/runtime"
 ```
 
-该 launch 会启动三个节点：
+该 launch 会启动八个业务节点：
 
 - `agt_system_manager_health`：发布 `/agt/system/health` 和 `/agt/system/task_readiness`。
 - `agt_system_mode_manager`：提供 `/agt/system/change_mode` Action，管理 profile 进程组。
+- `agt_map_manager`：提供地图版本服务并发布唯一 `/agt/maps/active` 上下文。
+- `agt_experiment_manager`：提供实验/Bag 服务并持有唯一 record/playback 子进程。
+- `agt_robot_state_aggregator`：发布 `/agt/system/robot_state` 统一只读快照。
+- `agt_mission_manager`：提供有限 Mission Action、暂停恢复、事件和审计。
+- `agt_mapping_session_manager`：编排受管建图，但地图与录包仍委托对应 manager。
 - `agt_relocalization_mode_controller`：管理 `MANUAL_ONLY`、`AUTO_ON_START` 和 `AUTO_RECOVERY`。
 
 系统管理器的实现入口是 [system_manager.launch.py](/home/yangxuan/agt_navigation_v2/src/agt_system_manager/launch/system_manager.launch.py:10) 和 [system_mode_manager.py](/home/yangxuan/agt_navigation_v2/src/agt_system_manager/scripts/system_mode_manager.py:21)。
+
+正式建图使用 `/agt/mapping/manage_session`。START 先通过 experiment manager 创建实验并启动
+`mapping` bag profile，再以 `record_bag:=false` 启动能力链；FINALIZE 正常刷新 PCD、停止录包并
+完成实验；COMMIT 通过 map manager 导入并可选激活新版本。Qt/Web 不创建 Bag 子进程或直接写
+registry。
 
 ### 2.2 直接启动建图链
 

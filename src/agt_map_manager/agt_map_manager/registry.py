@@ -194,8 +194,10 @@ class MapRegistry:
         version_root = self.root / map_id / "versions" / version_id
         navigation = version_root / "navigation"
         pointcloud = version_root / "pointcloud"
+        tasks = version_root / "tasks"
         navigation.mkdir(parents=True)
         pointcloud.mkdir()
+        tasks.mkdir()
         with open(map_yaml, "r", encoding="utf-8") as stream:
             map_data = yaml.safe_load(stream) or {}
         source_image = (map_yaml.parent / str(map_data.get("image", ""))).resolve()

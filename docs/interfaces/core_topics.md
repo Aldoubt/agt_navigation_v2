@@ -106,13 +106,28 @@ CAN 接口的 up/down 配置不属于 ROS/Web 接口，必须由主机管理员�
 
 - `/agt/system/health`：`agt_interfaces/msg/SystemHealth`，周期结构化健康快照。
 - `/agt/system/task_readiness`：`agt_interfaces/msg/TaskReadiness`，共享 fail-closed 任务门禁。
+- `/agt/system/robot_state`：`agt_interfaces/msg/RobotState`，2 Hz 与输入变化即时发布的统一读模型；
+  reliable transient-local depth 1，字段仍需独立检查 known/freshness。
 - `/agt/system/get_health`：`agt_interfaces/srv/GetSystemHealth`。
+- `/agt/system/get_robot_state`：`agt_interfaces/srv/GetRobotState`。
 - `/agt/system/evaluate_task_readiness`：`agt_interfaces/srv/EvaluateTaskReadiness`。
 - `/agt/system/change_mode`：`agt_interfaces/action/ChangeSystemMode`，只接受白名单 profile。
 - `/agt/localization/set_mode`：`agt_interfaces/srv/SetLocalizationMode`，有界重定位策略。
 
 Web、Qt bridge 和 Action server 都消费这些机器接口；不得解析旧
 `/agt/localization/status_text` 参与控制。
+
+## 业务 manager 接口
+
+- `/agt/maps/list`：`agt_interfaces/srv/ListMapVersions`。
+- `/agt/maps/manage`：`agt_interfaces/srv/ManageMapVersion`。
+- `/agt/maps/active`：`agt_interfaces/msg/MapVersionSummary`，reliable transient-local depth 1。
+- `/agt/data/bags/list`：`agt_interfaces/srv/ListBagSessions`。
+- `/agt/data/bags/manage`：`agt_interfaces/srv/ManageBagSession`。
+- `/agt/data/bags/status`：`agt_interfaces/msg/BagSessionSummary`，reliable transient-local depth 1。
+
+完整操作、错误码、路径与 owner 规则见
+[`business_manager_services.md`](business_manager_services.md)。
 
 ## 覆盖规划服务
 - `/agt/coverage/plan`: `std_srvs/srv/Trigger`，按当前语义任务发起一次异步规划

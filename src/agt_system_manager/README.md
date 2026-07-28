@@ -17,7 +17,7 @@ change. `/agt/system/get_robot_state` returns the same read model. It consumes
 UNKNOWN/blocker state when health, readiness, localization, Mission, lifecycle,
 safety, chassis, odometry, or Bag evidence is missing or stale. It does not own
 any field it aggregates. `system_manager.launch.py` also starts the separate
-`agt_mission_manager` business owner.
+`agt_mission_manager`, `agt_map_manager`, and `agt_experiment_manager` business owners.
 
 `mapping_session_manager.py` owns the finite real-mapping artifact sequence at
 `/agt/mapping/manage_session`. `mapping_session_workflow.py run` turns one
@@ -34,6 +34,11 @@ and still rejects explicit non-trinary modes. It produces an editable candidate
 only after those gates; only a later COMMIT copies that candidate into a new
 immutable map version and creates its `tasks/` directory. See
 [`docs/workflows/mapping_task_navigation_workflow.md`](../../docs/workflows/mapping_task_navigation_workflow.md).
+
+The mapping Action does not own `MapRegistry` or a rosbag process. START creates an experiment and
+starts the `mapping` bag profile through `/agt/data/bags/manage`; FINALIZE stops and completes that
+capture; COMMIT imports and optionally activates the candidate through `/agt/maps/manage`. The
+mapping launch receives `record_bag:=false`, so only one recorder and one map owner exist.
 
 `teach_mapping_workflow.py` adds a bounded, atomic session workflow around the
 existing teach-repeat and mapping modules. It references large source assets by

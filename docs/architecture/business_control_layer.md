@@ -20,3 +20,16 @@ Mission manager 只编排项目 `ExecuteWaypointTask` 和有限等待，不调�
 状态 topic 使用 reliable、transient-local、depth 1，使重启后的前端能立即得到最后一个明确
 快照；每个快照仍携带时间戳和 freshness，latched 数据本身不表示仍然新鲜。事件 topic 使用
 reliable volatile，避免旧外部事件被新 WAIT_EVENT 步骤消费。
+
+## 地图与实验所有权
+
+`agt_map_manager` 是运行时唯一的 registry 写入者。它扫描或重建 SQLite 索引、校验 manifest、
+导入受管候选、切换 active、pin/archive/delete/purge，并发布 `/agt/maps/active`。`SystemHealth`、
+RobotState、建图会话、Web 和 Qt 都不得读取 active pointer 来建立第二份活动地图状态。
+
+`agt_experiment_manager` 是运行时唯一的 rosbag 子进程 owner。录制和回放只接受配置文件中的显式
+profile。建图会话先创建实验并启动 `mapping` profile，再启动建图能力链；采集结束时先正常停止
+建图以刷新 PCD，再停止录包并完成实验。失败或丢失进程显示为 `ERROR`/`INTERRUPTED`，不变成成功。
+
+服务字段、错误码和 QoS 见
+[`business_manager_services.md`](../interfaces/business_manager_services.md)。

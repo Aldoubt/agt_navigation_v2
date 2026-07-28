@@ -78,7 +78,9 @@ class RobotStateAggregator(Node):
                 qos,
                 callback_group=callback_group,
             )
-        self.create_timer(self._publish_period_s, self._publish, callback_group=callback_group)
+        self._timer = self.create_timer(
+            self._publish_period_s, self._publish, callback_group=callback_group
+        )
         self._publish()
 
     def _input(self, key: str, message) -> None:
@@ -121,7 +123,9 @@ class RobotStateAggregator(Node):
         if readiness is not None:
             message.task_readiness = copy.deepcopy(readiness)
         map_fresh = self._fresh("map", self._map_timeout_s, now)
-        message.active_map_known = map_fresh
+        message.active_map_known = bool(
+            map_fresh and getattr(self._values["map"], "active", False)
+        )
         message.active_map_freshness_s = (
             max(0.0, now - self._seen["map"]) if map_fresh else float("inf")
         )
@@ -214,6 +218,10 @@ class RobotStateAggregator(Node):
         response.error_code = 0
         response.message = "current RobotState snapshot"
         return response
+
+    def destroy_node(self):
+        self._timer.cancel()
+        return super().destroy_node()
 
 
 def main(args=None) -> None:

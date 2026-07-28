@@ -11,6 +11,7 @@
   <exec_depend>agt_mission_manager</exec_depend>
   <exec_depend>agt_map_processing</exec_depend>
   <exec_depend>agt_map_manager</exec_depend>
+  <exec_depend>agt_experiment_manager</exec_depend>
   <exec_depend>agt_coverage_planning</exec_depend>
   <exec_depend>agt_teach_repeat</exec_depend>
   <exec_depend>agt_ui_bridge</exec_depend>

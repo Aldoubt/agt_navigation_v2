@@ -26,7 +26,7 @@ manager 组成 ROS 2 统一业务后端，建图、定位、Nav2、安全和底�
 | Phase 4：重定位 | 大地图初验通过 | NDT 线程边界回归、同源 369,970 点 PCD 离线初验及 BUNKER 低 fitness 实测 | 批量验证不同位置/错误初值的收敛率、误差、恢复时间和 TF 稳定性 |
 | Phase 5：地图处理 | baseline 可用 | OctoMap 动态射线原点、二维 OccupancyGrid 和 PGM/YAML 保存通过回放 | 固定最终高度阈值并形成二维地图质量对比报告 |
 | Phase 6：Nav2 与安全链 | 离线 baseline 完成 | Smac2D、MPPI、BT、costmap、Collision Monitor、Qt action、BUNKER 安全链完成闭环目标测试 | 用真实地图/定位调参；完成障碍、CAN 与制动验收 |
-| Phase 7：实验与评测 | 部分完成 | 总控扩展录包、runtime 产物边界和离线路径时间 JSON 报告可用 | 实现配置/Git 快照、覆盖质量指标和统一报告生成 |
+| Phase 7：实验与评测 | 业务 facade 完成，报告仍部分完成 | ROS 实验/Bag 服务、显式 profile、配置与 Git 快照、重启中断恢复、runtime 产物边界和离线路径时间 JSON 报告可用 | 接入完整任务指标、覆盖质量指标和统一报告生成；完成真实长包验收 |
 | Phase 8：Qt5 与覆盖规划 | 离线链基本实现，但 `execution-blocked` | 语义/Keepout、Coverage Server 适配、路径语义、fail-closed 校验、连接修复和时间估算通过 | 修复零长度 SWATH；补齐任务 manifest、覆盖质量指标和可复现报告 |
 
 项目契约与各 package 均提供离线回归；BUNKER 无 CAN 运行测试已验证默认禁用、手动优先、
@@ -240,7 +240,7 @@ FAST-LIVO 和它所需的 Vikit 已按固定提交 vendor 在 `third_party/`，�
 ## Web 实验与运维控制台
 
 当前仓库已新增可独立验证的 Web 运维链：`agt_system_manager` 发布配置驱动的
-`SystemHealth` 和共享 `TaskReadiness`，`agt_map_manager` 管理不可变地图版本，
+`SystemHealth`、共享 `TaskReadiness` 和 `RobotState`，`agt_map_manager` 通过 ROS 服务管理不可变地图版本，
 `agt_experiment_manager` 保存实验 manifest、事件、定位结果、bag profile 和报告，
 `agt_web_console` 提供默认只监听 `127.0.0.1` 的 FastAPI/WebSocket 适配层与轻量静态页面。
 这些模块不重写 FAST-LIVO2、定位、Nav2、Qt 或安全层，也不发布速度或 TF。
@@ -427,7 +427,10 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 | `agt_safety` | BUNKER 履带仲裁、急停锁存、限速、超时和合成消息测试已完成 | 架空履带后做低速实车制动距离、急停和进程/通信中断测试 |
 | `agt_chassis` | 官方 bunker_ros2、状态桥接、TF 隔离和双层命令 watchdog 已落地并编译 | 需要 BUNKER CAN 实机验证协议版本、轮速里程计、状态错误码和断连归零 |
 | `agt_ui_bridge` | 维护版 Qt 已接项目多点 Action；错误 YAML、切图旧拓扑和 Snap 环境已有保护；语义 mask 已由 Nav2 消费 | 实机验证地图首次显示、多点成功/失败/取消反馈，以及语义切换和操作门禁 |
-| `agt_experiment_manager` | profile 骨架、runtime 目录和总控录包入口已建立 | 实现配置合并、Git/参数快照、产物命名、失败恢复和一键复现实验 |
+| `agt_system_manager` | RobotState、有限建图会话和业务 manager 组合 launch 已建立；建图会话通过服务委托 map/bag owner | 真实 MID360 验证自动 mapping profile、正常关机、候选导入和错误恢复 |
+| `agt_mission_manager` | 有限 Mission、暂停恢复、事件、审计和重启 INTERRUPTED 已完成离线回归 | 用真实 READY 任务验证 child success/failure/cancel 和双前端一致性 |
+| `agt_map_manager` | 版本 list/manage/active ROS facade、候选导入、依赖保护和受管资产路径已完成 | 用真实地图审计 legacy 导入、切换和保留策略 |
+| `agt_experiment_manager` | 实验/Bag ROS facade、显式 profile、配置/Git 快照、失败和重启恢复已完成 | 接入完整任务指标并用真实长包生成统一报告 |
 | `agt_evaluation` | package 边界与覆盖路径时间估算 baseline 已建立 | 增加覆盖率/重叠率，并用 bag/真值生成定位、导航和资源占用统一报告 |
 
 ## 后续数据与实机准备

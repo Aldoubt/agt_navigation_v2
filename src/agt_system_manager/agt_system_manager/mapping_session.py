@@ -605,7 +605,9 @@ class MappingSessionRepository:
                 "runtime_dir": str(session_root.resolve()),
                 "map_name": map_id,
                 "mapping_output_dir": str(pcd_dir.resolve()),
-                "record_bag": "true",
+                # The experiment manager owns the recorder. The launch argument
+                # remains present only to disable the legacy compatibility path.
+                "record_bag": "false",
                 "bag_profile": "mapping",
             }
             return session, launch_arguments
@@ -621,10 +623,10 @@ class MappingSessionRepository:
         map_id = self.validate_id(str(session["map_id"]), "map_id")
         bag_root = Path(str(session["bag_directory"])).resolve()
         try:
-            bag_root.relative_to(root)
+            bag_root.relative_to(self.runtime_dir)
         except ValueError as error:
             raise MappingSessionError(
-                "session_path_invalid", "mapping bag directory escapes the managed session"
+                "session_path_invalid", "mapping bag directory escapes the managed runtime"
             ) from error
         bag_candidates = sorted(
             (path for path in bag_root.iterdir() if path.is_dir()),
@@ -1040,21 +1042,26 @@ class MappingSessionRepository:
                 if isinstance(error, MappingSessionError):
                     raise
                 raise MappingSessionError("map_commit_failed", str(error)) from error
-            version_root = (
-                Path(map_registry.root)
-                / str(session["map_id"])
-                / "versions"
-                / result.map_version_id
-            ).resolve()
-            tasks_directory = version_root / "tasks"
-            tasks_directory.mkdir(exist_ok=True)
+            registered_map_yaml = str(getattr(result, "navigation_yaml", ""))
+            tasks_directory = str(getattr(result, "tasks_directory", ""))
+            if not registered_map_yaml or not tasks_directory:
+                version_root = (
+                    Path(map_registry.root)
+                    / str(session["map_id"])
+                    / "versions"
+                    / result.map_version_id
+                ).resolve()
+                tasks_path = version_root / "tasks"
+                tasks_path.mkdir(exist_ok=True)
+                registered_map_yaml = str(version_root / "navigation" / "map.yaml")
+                tasks_directory = str(tasks_path)
             return self.update(
                 session,
                 "REGISTERED",
                 map_version_id=result.map_version_id,
                 activated=bool(activate),
-                registered_map_yaml=str(version_root / "navigation" / "map.yaml"),
-                tasks_directory=str(tasks_directory),
+                registered_map_yaml=registered_map_yaml,
+                tasks_directory=tasks_directory,
             )
 
     def discard(self, session_id: str) -> dict[str, Any]:

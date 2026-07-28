@@ -29,3 +29,7 @@ flowchart TB
 `ChangeSystemMode`、`ManageMappingSession`、`ExecuteWaypointTask` 和 `Relocalize` 保持可用。
 新的正式任务入口是 `ExecuteMission`；`/goal_pose` 仅保留为默认隐藏的高级调试入口。旧入口
 只有在新 Qt/Web 工作流、离线回归和实车门禁分别验收后才可评审删除。
+
+`ManageMappingSession` 仍是项目建图 Action，但它不再成为另一份地图或 Bag owner：录包委托
+experiment manager，候选导入/激活委托 map manager。底层 launch 中的 `record_bag` 仅供旧命令
+兼容，正式受管会话固定传 `false`。
