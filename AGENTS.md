@@ -112,6 +112,18 @@
 
 ## Static Navigation Map Contract
 - Offline obstacle completion must preserve a ray-traced free/unknown baseline and add only repeatable registered-cloud obstacle evidence; a raw point projection must not silently turn unknown space into free space.
+- Managed mapping sessions treat the saved online OctoMap PGM/YAML as an
+  `online_preview` input, never as the final editable candidate. After normal
+  PCD/bag shutdown, the offline producer must rebuild bounded 2D free-space rays
+  from timestamp-matched registered clouds and the recorded sensor origin, then
+  overlay the conservative `ground_temporal` evidence and complete polygon sweep.
+  Added canvas area remains unknown until crossed by a reconstructed ray.
+- Managed static-map production records ray range, sampling interval, evidence
+  range, canvas padding, source/target bounds, rejected points and edge margins.
+  It must reject pose mismatches, ground-fit failures, evidence/sweep clipping,
+  report/raster count mismatches and known cells entering the protected edge.
+  `eligible_for_candidate` is only permission to edit/commit a map candidate; it
+  is never localization, planning, safety, or execution approval.
 - Registered-cloud height filtering is relative to a timestamp-matched/interpolated recorded base pose, and must reject non-finite points and canonical polygon-footprint self returns before grid accumulation. Callback-time latest pose is forbidden for offline evidence.
 - Evidence thresholds and any grid padding must be explicit and recorded. Nav2 inflation and the robot footprint remain runtime costmap products and must not be baked into the source PGM.
 - Trinary PGM/YAML saves must use `free_thresh: 0.196` and `occupied_thresh: 0.65` so the canonical `205` unknown pixel round-trips as unknown when Nav2 reloads the map.
@@ -131,8 +143,10 @@
 - Mapping mode uses RViz as the default 3D frontend. Its optional Qt profile must default off and reject navigation task execution in both UI and channel; navigation mode owns the task-capable Qt profile.
 - Qt navigation point authoring uses a two-click contract: the first click fixes
   the `map` position and the second fixes heading; canceling or changing tools
-  must discard incomplete placement. Large-map Qt profiles keep full costmap
-  rendering disabled by default because planning truth remains in Nav2/RViz.
+  must discard incomplete placement. The heading stem must begin outside the
+  numbered marker and the marker label must render above every heading so its
+  task order remains legible. Large-map Qt profiles keep full costmap rendering
+  disabled by default because planning truth remains in Nav2/RViz.
 - Offline Qt map inspection must allow view-level pan/zoom without moving map
   geometry and must cancel robot-follow mode on manual navigation. Task point
   clicks target the explicitly selected task row and topology mutations must
@@ -141,14 +155,28 @@
   waypoint; later topology edits must not silently rewrite saved task geometry.
   The default operator language is `zh_CN`;
   `en_US` is a persisted, restart-applied frontend preference.
-- The Qt Task Library shares the existing Task Center as a tab beside topology
-  tasks. Switching away from the library or hiding the Task Center must cancel
-  task-waypoint map editing so a hidden editor cannot consume map clicks.
+- Navigation and offline Qt profiles expose the versioned Task Library as the
+  only Task Center authoring surface; the legacy topology-task tab is mapping-only
+  compatibility. Hiding the Task Center must cancel task-waypoint map editing so
+  a hidden editor cannot consume map clicks.
+- READY map-version PGM/YAML assets are immutable in navigation, offline, and
+  teach Qt profiles. Base-raster editing and map save/save-as controls are
+  mapping-only; edited rasters must be registered as a new version before they
+  can be selected for navigation.
 - Offline waypoint preview is planner-only: its Qt profile must disable task
   execution, and its launch may start only the map server, planner server,
   preview adapter, lifecycle managers, and GUI. It publishes advisory `/plan`
   from explicit task points and must not start control, BT navigation, safety
   enablement, velocity publishers, localization, or chassis nodes.
+- Offline Qt must fail immediately when the preview adapter is absent instead
+  of reporting a request as submitted. The adapter publishes each current/total
+  segment and a terminal success/failure on its advisory status topic; every
+  ComputePathToPose segment has a positive finite timeout and failure clears
+  `/plan`.
+- Consecutive waypoint poses are ordered Nav2 goals, not a required straight-line
+  path. Save-time validation checks each enabled endpoint against the base raster
+  but must not reject a task because the visual chord crosses occupied or unknown
+  cells; route reachability belongs to planner preview and runtime Nav2 Actions.
 - Teach-route annotation semantics are project-owned data products. The backend
   records deterministic direction spacing and turn/U-turn window thresholds in the
   route asset and publishes `/agt/teach/route_annotations`; Qt may only render
@@ -168,9 +196,9 @@
   plus save before execution. `GEOMETRY_MISMATCH` is read-only and may only be
   copied for explicit manual migration; automatic coordinate transforms are
   forbidden.
-- Offline task validation checks the base raster and sampled waypoint segments
-  only. It is not footprint feasibility, Nav2 planning, localization, safety,
-  or execution approval.
+- Offline task validation checks enabled waypoint endpoints against the base
+  raster only. It is not route reachability, footprint feasibility, Nav2
+  planning, localization, safety, or execution approval.
 - The Action server accepts legacy Qt `points/theta` JSON and schema-v1 task
   groups. Schema-v1 execution must fail closed unless the active map ID,
   version, YAML/image hashes, and localization PCD hash can be checked.
@@ -334,9 +362,20 @@
   observation. Its occupancy preview is bounded,
   read-only UI data and cannot feed navigation.
 - Full-map OctoMap projection consumes an explicit bounded-rate, voxel-capped
-  copy of the registered cloud; the immediate local obstacle chain must continue
-  consuming the unthrottled registered cloud. Mapping-only PCD replay may disable
-  the full-map projection explicitly.
+  copy of the registered cloud. Its republisher keeps only the newest unprocessed
+  lidar-frame cloud on a steady-time timer and preserves the original stamp and
+  frame so OctoMap resolves the matching dynamic sensor origin. It may release
+  only one cloud until the corresponding OccupancyGrid publication acknowledges
+  projection, with a bounded recovery timeout; it must not feed delayed queued
+  clouds or relabel them into the fixed frame. The immediate local obstacle chain
+  must continue consuming the unthrottled registered cloud.
+  Mapping-only PCD replay may disable the full-map projection explicitly.
+- Humble OctoMap Server 2.3.1 must use its declared `point_cloud_*` parameter
+  names and complete 2D projection; its incremental projection path publishes
+  an all-unknown grid in this baseline. OctoMap publishes a volatile internal
+  `/agt/map/mapping_occupancy_raw`; the project throttle relays completed grids
+  as transient-local `/agt/map/mapping_occupancy`. Qt, SaveMap, bags, and other
+  consumers must use only the project output topic.
 - Web mapping bag playback is forced to the configured raw-input allowlist
   (`/clock`, `/tf_static`, MID360 CustomMsg, and IMU), excluding recorded
   FAST-LIVO2 outputs and `/tf`; navigation mode refuses bag playback.
@@ -353,15 +392,12 @@
   owned by `agt_system_mode_manager`; Web must report the missing server and
   its diagnostic command instead of treating an unavailable manager as a
   mapping launch failure.
-- Web mapping completion is an explicit retain/delete decision. Retain saves
-  PGM/YAML through the configured map-saver service, waits for the ready
-  FAST-LIVO2 PCD processing record, and only then delegates immutable version
-  registration to `agt_map_manager`; the finish UI must confirm acquisition is
-  complete and allow a validated final map name before saving. For a managed
-  Web session, a ready record without `pcd_sha256` is finalized from the stopped
-  PCD before registration; an existing mismatched hash remains fail-closed.
-  Delete removes only the managed temporary mapping session. Offline
-  retain/delete is simulation-only and writes no real assets.
+- Real Web mapping control consumes `/agt/mapping/manage_session`; Web must not
+  create mapping directories, call SaveMap directly, wait for PCD, or register
+  map versions. The map ID is fixed at START. FINALIZE_CAPTURE produces an
+  editable candidate, COMMIT creates a new immutable version, and DISCARD moves
+  the session plus any failed version to recoverable trash. Offline
+  retain/delete remains simulation-only and writes no real assets.
 - Web navigation startup requires an active `READY` map version and derives
   `map`, localization PCD, and processing-record arguments from its manifest.
   Browser-supplied asset paths must match the selected version or the service
@@ -395,6 +431,51 @@
   mode is `MAPPING`; stopping or never starting that mode clears both previews.
   Preview pan/robot-centering is view-only and cannot alter map coordinates or
   feed navigation.
+
+## Mapping Session Workflow Contract
+- `/agt/mapping/manage_session` is the only project boundary for a real mapping
+  session. Qt, Web, CLI, and future frontends must use its finite
+  START/FINALIZE_CAPTURE/COMMIT/DISCARD/STATUS operations and must not reproduce
+  the artifact sequence.
+- START owns `runtime_dir`, `map_name`, `mapping_output_dir`, `record_bag`, and
+  `bag_profile`. Every real mapping session records the explicit `mapping` bag
+  profile; a frontend cannot disable or redirect that evidence.
+- FINALIZE_CAPTURE must save trinary PGM/YAML while the mapping OccupancyGrid is
+  still live and verify that the raster contains both free and occupied evidence
+  before stopping the managed mapping process normally so FAST-LIVO2 and rosbag
+  can flush. It then requires a non-empty PCD, `state: ready` processing record
+  with matching SHA-256, and bag `metadata.yaml`. The saved online raster is then
+  preserved under `online_preview/`; FINALIZE runs the managed offline static-map
+  producer and reaches `CANDIDATE_READY` only after its report and promoted PGM
+  pass the static-navigation-map quality contract. A grid-save or grid-content
+  failure leaves mapping running; incomplete post-stop assets and offline-build
+  failures fail closed.
+- `BUILDING_STATIC_MAP` and `CANDIDATE_BUILD_FAILED` are non-motion states. A
+  failed/restarted offline build may retry FINALIZE from the preserved online
+  preview without saving the grid again or stopping mapping a second time. Qt
+  candidate authoring must not open before `CANDIDATE_READY`.
+- The managed CLI may translate one Ctrl+C into FINALIZE_CAPTURE. A second
+  signal must not force-kill asset writers. Normal workflow documentation must
+  not use SIGKILL as a mapping completion path.
+- `CANDIDATE_READY` assets below `runtime/mapping_sessions/` are the only base
+  raster files that may be edited in place. COMMIT revalidates the current
+  candidate metadata and free/occupied raster evidence, rejects all-unknown
+  candidates, and copies valid contents into a new immutable
+  `runtime/maps/<map_id>/versions/<map_version_id>/` bundle. Existing READY
+  PGM/YAML files are never edited even when map geometry is unchanged.
+- The maintained Qt candidate saver omits the optional Nav2 `mode` key while
+  retaining trinary thresholds. COMMIT may atomically restore `mode: trinary`
+  only when the key is absent and must record that repair; an explicit null,
+  `scale`, `raw`, or other mode remains invalid and must fail closed.
+- Qt `mapping` is monitor-only. Qt `candidate` may edit only its explicitly
+  selected candidate in place and must disable map-open, Save As, task library,
+  planning preview, execution, and manual control. Qt `offline`/`navigation`
+  uses the committed READY map read-only and saves tasks only under that
+  version's `tasks/` directory.
+- Task authoring begins only after COMMIT supplies a real map version identity.
+  Candidate geometry cannot be used to create a schema-v1 task binding. Planner
+  preview remains advisory; activation and full navigation readiness are still
+  required before execution.
 
 ## Teach Mapping MVP Contract
 - Teach-mapping sessions bind one immutable bootstrap map, teach bag, platform

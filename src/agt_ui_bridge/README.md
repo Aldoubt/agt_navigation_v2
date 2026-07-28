@@ -38,6 +38,8 @@ topology_msgs，产物写入 `build/ros_qt5_gui_app`。固定 fork 提交以
 source /opt/ros/humble/setup.bash
 source install/setup.bash
 ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=mapping
+ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=candidate \
+  map:=/absolute/path/to/mapping-session-candidate.yaml
 ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=navigation
 ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=teach \
   map:=/absolute/path/to/map.yaml start_map_io_bridge:=false
@@ -49,7 +51,8 @@ ros2 launch agt_ui_bridge ros_qt5_gui.launch.py profile:=teach \
 
 首次启动会把对应模板复制到 profile 独立目录：
 `runtime/gui/ros_qt5_gui_app/<profile>/config.json`。GUI 修改只保存在各自 runtime，互不覆盖，
-也不会污染 vendor 源码。启动预检会从新版 profile 补齐缺失的能力键，但不覆盖已保存的用户值。
+也不会污染 vendor 源码。启动预检会保留普通显示偏好，但强制刷新执行、底图编辑、打开地图、
+另存为、任务库和手动控制等 profile 能力键，防止旧 runtime 配置重新打开已禁止能力。
 需要恢复仓库默认配置时执行：
 
 ```bash
@@ -61,14 +64,19 @@ ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
 
 Task Library 的完整离线编辑、地图绑定、旧格式迁移和执行流程见
 [`docs/workflows/qt5_offline_task_group_editor.md`](../../docs/workflows/qt5_offline_task_group_editor.md)。
-Qt5 主窗口将它内嵌在右侧 `任务中心 / Task Center`，并与原有拓扑任务通过页签切换；
-切换离开 Task Library 或隐藏任务中心会退出地图点位编辑模式。Task Library 的拓扑点下拉框
+Qt5 主窗口将它内嵌在右侧 `任务中心 / Task Center`。只有 navigation/offline profile 显示
+Task Library；实时 mapping 和候选 candidate 不建立任务版本绑定。隐藏任务中心会退出地图点位编辑模式。
+Task Library 的拓扑点下拉框
 随当前拓扑增删改实时刷新；“添加选中点”把点名、米制 `map` 坐标和 yaw 快照到版本化任务，
 之后修改拓扑不会静默改写已经保存的任务几何。
+保存校验只检查启用任务点端点；相邻点的显示连线不是直线路径约束。navigation/offline profile
+可从 Task Library 直接把当前点序列提交到 planner-only 预览链，并在 `/plan` 显示 Nav2 实际绕行。
+任务点数字绘制在朝向箭头之上；预览按钮在适配器缺失时立即报错，运行时显示逐段进度和终态。
 版本化默认值来自 `config/task_library.yaml`，启动时合并到 profile runtime 配置；已保存的操作者
 设置不会被覆盖，`TaskLibraryRoot` 始终由启动脚本解析为当前工作区的绝对 `runtime/maps` 路径。
 
-- mapping 地图：`/agt/map/mapping_occupancy`
+- mapping 监看地图：`/agt/map/mapping_occupancy`
+- candidate：只加载并原位保存显式传入的会话候选 YAML/PGM
 - navigation 地图：`/agt/map/global_occupancy`
 - 机器人里程计：`/agt/mapping/odometry`
 - 重定位初值：`/initialpose`
@@ -88,9 +96,11 @@ Qt5 主窗口将它内嵌在右侧 `任务中心 / Task Center`，并与原有�
 项目 `ExecuteWaypointTask` Action，并以 Nav2 Action 反馈、结果和 missed waypoint 判断成败。
 添加导航点采用两次点击：第一次固定位置，第二次从位置指向朝向点并计算 yaw；
 右键、Esc 或切换工具会丢弃未完成的点。拓扑线装饰刷新固定为 10 Hz，避免抢占大地图交互。
-手动速度已经接入 `agt_safety -> agt_chassis`，但必须先显式使能安全层。GUI 可直接打开、
-编辑并保存 PGM/YAML；错误 YAML 会提示而不退出，切换地图会先清空旧拓扑并拒绝同名 sidecar
-中的越界点。保存后的导航地图放在 `runtime/maps/`，下一次启动 map server 时使用对应 YAML。
+手动速度已经接入 `agt_safety -> agt_chassis`，但必须先显式使能安全层。navigation/offline/
+teach profile 不能编辑或保存 READY PGM/YAML；navigation/offline 只把任务保存到版本目录的
+`tasks/`。mapping 只监看；candidate 禁止打开其他地图和另存为，只能保存启动时选定的候选。
+错误 YAML 会提示而不退出，切换地图会先清空旧拓扑并拒绝同名 sidecar 中的越界点。候选修改后
+必须由 ManageMappingSession COMMIT 登记为新版本，不能覆盖 READY 资产。
 
 mapping profile 的 `FixedFrameId=odom` 与 FAST-LIVO2 建图链一致；navigation profile 固定为
 `map`，并要求 NDT/ICP 已发布 `map -> odom`。mapping profile 的

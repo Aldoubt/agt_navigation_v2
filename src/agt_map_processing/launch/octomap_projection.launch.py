@@ -39,7 +39,15 @@ def generate_launch_description():
                 description="Maximum XYZ points sent per throttled OctoMap cloud; zero disables the cap",
             ),
             DeclareLaunchArgument(
+                "processing_timeout_sec",
+                default_value="60.0",
+                description="Bounded wait for the OccupancyGrid acknowledgement before releasing a newer cloud",
+            ),
+            DeclareLaunchArgument(
                 "map_topic", default_value="/agt/map/mapping_occupancy"
+            ),
+            DeclareLaunchArgument(
+                "raw_map_topic", default_value="/agt/map/mapping_occupancy_raw"
             ),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             Node(
@@ -54,6 +62,10 @@ def generate_launch_description():
                         ),
                         "input_topic": LaunchConfiguration("cloud_topic"),
                         "output_topic": LaunchConfiguration("throttled_cloud_topic"),
+                        "projected_map_input_topic": LaunchConfiguration(
+                            "raw_map_topic"
+                        ),
+                        "map_output_topic": LaunchConfiguration("map_topic"),
                         "max_rate_hz": ParameterValue(
                             LaunchConfiguration("input_rate_hz"), value_type=float
                         ),
@@ -62,6 +74,10 @@ def generate_launch_description():
                         ),
                         "max_points": ParameterValue(
                             LaunchConfiguration("cloud_max_points"), value_type=int
+                        ),
+                        "processing_timeout_sec": ParameterValue(
+                            LaunchConfiguration("processing_timeout_sec"),
+                            value_type=float,
                         ),
                     }
                 ],
@@ -83,7 +99,7 @@ def generate_launch_description():
                 ],
                 remappings=[
                     ("cloud_in", LaunchConfiguration("throttled_cloud_topic")),
-                    ("projected_map", LaunchConfiguration("map_topic")),
+                    ("projected_map", LaunchConfiguration("raw_map_topic")),
                 ],
             ),
         ]

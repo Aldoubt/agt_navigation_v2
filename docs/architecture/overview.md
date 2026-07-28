@@ -21,6 +21,14 @@ MID360 / camera / future sensors
   -> mapping/localization/perception
   -> metric map products (PCD + Nav2 raster + semantic sidecars)
 
+managed mapping capture
+  -> online OctoMap preview (audit input only)
+  -> normal PCD + bag shutdown
+  -> offline ray-traced free/unknown baseline
+  -> ground_temporal obstacles + canonical footprint sweep
+  -> quality-gated editable candidate
+  -> immutable READY map version
+
 Qt5 / future Web UI / autostart manager
   -> project task Actions
   -> Nav2 planning and control

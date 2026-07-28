@@ -6,12 +6,16 @@
     # A 40 m ray at 5 cm resolution creates a large number of free OctoMap
     # nodes for every scan. Final static maps use the bounded offline pipeline.
     sensor_model.max_range: 15.0
-    pointcloud_min_z: 0.10
-    pointcloud_max_z: 1.00
+    point_cloud_min_z: 0.10
+    point_cloud_max_z: 1.00
     occupancy_min_z: 0.10
     occupancy_max_z: 1.00
     filter_speckles: true
-    filter_ground: false
-    incremental_2D_projection: true
+    filter_ground_plane: false
+    # octomap_server 2.3.1 does not call update2DMap in its incremental path.
+    # Keep complete projection enabled until that upstream behavior changes.
+    incremental_2D_projection: false
     compress_map: true
-    latch: true
+    # Avoid serializing every full 3D output without subscribers. The project
+    # relay republishes only the 2D grid as transient-local.
+    latch: false

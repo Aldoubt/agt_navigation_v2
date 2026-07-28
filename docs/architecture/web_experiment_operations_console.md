@@ -122,11 +122,13 @@ discovery: it accepts occupancy and registered-cloud data only while the managed
 mode is `MAPPING`, and clears both products when mapping is stopped. Canvas pan,
 zoom, and robot-centering are display-only operations.
 
-Mapping persistence is owned by the Web console only as orchestration. A mapping
-request receives a unique temporary root under the configured runtime
-`mapping_sessions` directory and passes its PCD output directory to `agt_bringup`.
-The launch owns the map-saver service and FAST-LIVO2 shutdown; the Web service
-observes the resulting PGM/YAML and ready PCD processing record, then delegates
-immutable version registration to `agt_map_manager`. Delete removes only that
-temporary root. Navigation startup must supply a selected active READY version;
-both the browser and service validate that the requested assets match its manifest.
+Mapping persistence is owned by `/agt/mapping/manage_session`; the Web console is
+only an Action client. START allocates the unique `mapping_sessions` root and
+forces the mapping bag profile. FINALIZE saves the live OctoMap raster, stops the
+mapping process normally, validates PCD/hash/bag assets, preserves the online map
+as audit input, then rebuilds the offline ray-traced + `ground_temporal` candidate.
+The browser must not expose candidate editing until `CANDIDATE_READY`; offline
+quality failure is reported as retryable and never falls back to the online map.
+COMMIT alone delegates immutable version registration to `agt_map_manager`.
+Navigation startup must supply a selected active READY version; both the browser
+and service validate that the requested assets match its manifest.

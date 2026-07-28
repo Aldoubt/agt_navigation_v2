@@ -7,12 +7,11 @@ import threading
 import time
 from typing import Any, Mapping
 
-from agt_interfaces.action import ChangeSystemMode, Relocalize
+from agt_interfaces.action import ChangeSystemMode, ManageMappingSession, Relocalize
 from agt_interfaces.msg import LocalizationStatus, SystemHealth, TaskReadiness
 from diagnostic_msgs.msg import DiagnosticArray
 from agt_interfaces.srv import SetLocalizationMode
 from nav_msgs.msg import OccupancyGrid, Odometry
-from nav2_msgs.srv import SaveMap
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -77,9 +76,14 @@ class RosConsoleBridge(Node):
         self._active_mode = "IDLE"
         self._status_listeners: list[Any] = []
         self._mode_action = ActionClient(self, ChangeSystemMode, "/agt/system/change_mode", callback_group=group)
+        self._mapping_session_action = ActionClient(
+            self,
+            ManageMappingSession,
+            "/agt/mapping/manage_session",
+            callback_group=group,
+        )
         self._relocalize_action = ActionClient(self, Relocalize, "/agt/localization/relocalize", callback_group=group)
         self._localization_mode = self.create_client(SetLocalizationMode, "/agt/localization/set_mode", callback_group=group)
-        self._mapping_save = self.create_client(SaveMap, "/agt_mapping_map_saver/save_map", callback_group=group)
         self.create_subscription(SystemHealth, "/agt/system/health", self._health_callback, 10, callback_group=group)
         self.create_subscription(TaskReadiness, "/agt/system/task_readiness", self._readiness_callback, 10, callback_group=group)
         self.create_subscription(LocalizationStatus, "/agt/localization/status", self._localization_callback, 10, callback_group=group)
@@ -489,23 +493,79 @@ class RosConsoleBridge(Node):
         self._executor.shutdown()
         self._thread.join(timeout=2.0)
 
-    def save_mapping_map(self, map_url: str) -> dict[str, Any]:
-        target = Path(str(map_url)).expanduser().resolve()
-        staging_root = (self._runtime_dir / "mapping_sessions").resolve()
-        try:
-            target.parent.relative_to(staging_root)
-        except ValueError as error:
-            raise ValueError("建图地图输出路径必须位于受管 mapping_sessions 目录") from error
-        if not target.parent.is_dir():
-            raise ValueError("建图会话输出目录不存在")
-        if not self._mapping_save.wait_for_service(timeout_sec=3.0):
-            raise RuntimeError("/agt_mapping_map_saver/save_map 服务不可用，请确认建图模式已启动")
-        request = SaveMap.Request()
-        request.map_topic = "/agt/map/mapping_occupancy"
-        request.map_url = str(target)
-        request.image_format = "pgm"
-        request.map_mode = "trinary"
-        request.free_thresh = 0.196
-        request.occupied_thresh = 0.65
-        response = self._wait(self._mapping_save.call_async(request), timeout=75.0)
-        return {"success": bool(response.result), "map_url": str(target), "message": "PGM/YAML 保存完成" if response.result else "map_saver 返回失败"}
+    def manage_mapping_session(
+        self,
+        operation: str,
+        *,
+        map_id: str = "",
+        session_id: str = "",
+        arguments: Mapping[str, Any] | None = None,
+        activate: bool = False,
+        timeout_s: float = 120.0,
+    ) -> dict[str, Any]:
+        operations = {
+            "status": ManageMappingSession.Goal.OP_STATUS,
+            "start": ManageMappingSession.Goal.OP_START,
+            "finalize": ManageMappingSession.Goal.OP_FINALIZE_CAPTURE,
+            "commit": ManageMappingSession.Goal.OP_COMMIT,
+            "discard": ManageMappingSession.Goal.OP_DISCARD,
+        }
+        if operation not in operations:
+            raise ValueError(f"unsupported mapping-session operation: {operation}")
+        if not self._mapping_session_action.wait_for_server(timeout_sec=5.0):
+            raise RuntimeError(
+                "系统管理器未运行：未发现 /agt/mapping/manage_session Action server"
+            )
+        goal = ManageMappingSession.Goal()
+        goal.operation = operations[operation]
+        goal.map_id = str(map_id)
+        goal.session_id = str(session_id)
+        values = {str(key): str(value) for key, value in (arguments or {}).items()}
+        goal.argument_keys = list(values)
+        goal.argument_values = [values[key] for key in values]
+        goal.activate_after_commit = bool(activate)
+        goal.timeout_s = min(max(float(timeout_s), 0.1), 300.0)
+        handle = self._wait(
+            self._mapping_session_action.send_goal_async(goal), timeout=10.0
+        )
+        if not handle.accepted:
+            raise RuntimeError("mapping-session Action rejected the request")
+        wrapped = self._wait(handle.get_result_async(), timeout=goal.timeout_s + 20.0)
+        result = wrapped.result
+        if not result.success:
+            if (
+                operation == "status"
+                and result.error_code == ManageMappingSession.Result.ERROR_NOT_FOUND
+            ):
+                return {"success": False, "available": False, "state": "IDLE", "message": result.message}
+            raise RuntimeError(f"{result.message}（错误码 {result.error_code}）")
+        response = {
+            "success": True,
+            "available": result.state != "DISCARDED",
+            "state": result.state,
+            "session_id": result.session_id,
+            "map_id": result.map_id,
+            "map_name": result.map_id,
+            "map_version_id": result.map_version_id,
+            "version_id": result.map_version_id,
+            "session_file": result.session_file,
+            "candidate_map_yaml": result.candidate_map_yaml,
+            "candidate_map_image": result.candidate_map_image,
+            "localization_pcd": result.localization_pcd,
+            "processing_record": result.processing_record,
+            "bag_directory": result.bag_directory,
+            "registered_map_yaml": result.registered_map_yaml,
+            "tasks_directory": result.tasks_directory,
+            "pgm_ready": bool(result.candidate_map_yaml and Path(result.candidate_map_yaml).is_file()),
+            "pcd_ready": bool(result.processing_record and Path(result.processing_record).is_file()),
+            "message": result.message,
+        }
+        if result.session_file:
+            response["root"] = str(Path(result.session_file).resolve().parent)
+        with self._lock:
+            if result.state == "MAPPING":
+                self._active_mode = "MAPPING"
+            elif result.state in {"CANDIDATE_READY", "REGISTERED", "DISCARDED"}:
+                self._active_mode = "IDLE"
+                self._clear_mapping_previews_locked()
+        return response

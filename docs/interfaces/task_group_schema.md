@@ -37,11 +37,14 @@ the operator explicitly rebinds and saves. Any changed frame, resolution,
 dimensions, origin or origin yaw is `GEOMETRY_MISMATCH`; the task is read-only
 until it is explicitly copied to a new map version.
 
-The offline validator checks schema/model constraints, map bounds, occupied and
-unknown cells, sampled segments, repeated points and repeated whole-path
-patterns. `unknown_cell_policy` is `reject` by default and may be `warn` or
-`allow`. This is a base-raster check only; it does not replace Nav2 planning,
-localization, `agt_safety`, or the runtime canonical footprint check.
+The offline validator checks schema/model constraints, repeated points and
+repeated whole-path patterns, then checks every enabled waypoint endpoint for
+map bounds and occupied/unknown cells. It does not sample the straight chord
+between adjacent waypoints: those poses are ordered Nav2 goals, and the planned
+route may legitimately go around obstacles. `unknown_cell_policy` is `reject`
+by default and may be `warn` or `allow`. This endpoint-only base-raster check
+does not replace planner preview, localization, `agt_safety`, or the runtime
+canonical footprint check.
 
 At runtime a schema-v1 task additionally requires independently observed active
 map ID/version, YAML/image hashes, and the localization PCD hash. The server

@@ -20,7 +20,9 @@
 class TaskLibraryDock final : public QWidget {
   Q_OBJECT
  public:
-  explicit TaskLibraryDock(bool task_execution_enabled, QWidget *parent = nullptr);
+  explicit TaskLibraryDock(bool task_execution_enabled,
+                           bool task_preview_enabled,
+                           QWidget *parent = nullptr);
   ~TaskLibraryDock() override = default;
 
   void SetMapPath(const QString &map_path);
@@ -34,9 +36,11 @@ class TaskLibraryDock final : public QWidget {
   void UpdateTaskWaypoint(int row, const basic::RobotPose &pose);
   void SelectTaskWaypoint(int row);
   void UpdateTaskExecutionStatus(const TaskExecutionStatus &status);
+  void UpdateWaypointPreviewStatus(const std::string &status);
 
  signals:
   void signalExecuteTask(const TaskExecutionRequest &request);
+  void signalPreviewTask(const TaskExecutionRequest &request);
   void signalCancelTask();
   void signalWaypointsChanged(const QVector<task_group::Waypoint> &points,
                               int selected_row, bool show_disabled);
@@ -53,6 +57,7 @@ class TaskLibraryDock final : public QWidget {
   void ImportLegacy();
   void ExportLegacy();
   void RefreshTasks();
+  void PreviewTask();
   void ExecuteTask();
   void StopTask();
   void RebindCurrentMap();
@@ -87,9 +92,12 @@ class TaskLibraryDock final : public QWidget {
   QString availableTaskId(const QString &base) const;
 
   bool task_execution_enabled_{false};
+  bool task_preview_enabled_{false};
   bool dirty_{false};
   bool task_running_{false};
+  bool preview_running_{false};
   bool geometry_read_only_{false};
+  bool validation_allows_preview_{false};
   bool validation_allows_execution_{false};
   task_group::BindingState binding_state_{task_group::BindingState::Unverified};
   QString map_path_;
@@ -99,7 +107,6 @@ class TaskLibraryDock final : public QWidget {
   int maximum_points_{task_group::kDefaultMaximumPoints};
   int maximum_loops_{task_group::kDefaultMaximumLoops};
   QString unknown_cell_policy_{"reject"};
-  double line_check_step_ratio_{0.5};
   int backup_count_{5};
   task_group::TaskGroup task_;
   task_group::WaypointTableModel *model_{nullptr};
@@ -113,6 +120,7 @@ class TaskLibraryDock final : public QWidget {
   QLabel *binding_label_{nullptr};
   QLabel *validation_label_{nullptr};
   QLabel *dirty_label_{nullptr};
+  QPushButton *preview_button_{nullptr};
   QPushButton *execute_button_{nullptr};
   QPushButton *stop_button_{nullptr};
   QPushButton *map_edit_button_{nullptr};

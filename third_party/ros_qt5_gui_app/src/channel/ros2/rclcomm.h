@@ -28,6 +28,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "diagnostic_msgs/msg/diagnostic_array.hpp"
 #include "std_msgs/msg/int32.hpp"
+#include "std_msgs/msg/string.hpp"
 #include "tf2/LinearMath/Quaternion.h"
 #include "tf2_geometry_msgs/tf2_geometry_msgs.h"
 #include "tf2_ros/buffer.h"
@@ -63,6 +64,8 @@ class rclcomm : public VirtualChannelNode {
   void topologyMapCallback(const topology_msgs::msg::TopologyMap::SharedPtr msg);
   void routeAnnotationsCallback(
       const visualization_msgs::msg::MarkerArray::SharedPtr msg);
+  void waypointPreviewStatusCallback(
+      const std_msgs::msg::String::SharedPtr msg);
 
  public:
   bool Start() override;
@@ -107,6 +110,8 @@ class rclcomm : public VirtualChannelNode {
       topology_map_subscriber_;
   rclcpp::Subscription<visualization_msgs::msg::MarkerArray>::SharedPtr
       route_annotations_subscriber_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr
+      waypoint_preview_status_subscriber_;
   rclcpp::Publisher<topology_msgs::msg::TopologyMap>::SharedPtr
       topology_map_update_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr

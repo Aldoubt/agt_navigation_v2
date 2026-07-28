@@ -56,7 +56,9 @@ def create_app(service: WebConsoleService):
     def prepare_mapping_session(body: dict[str, Any], x_agt_token: str | None = Header(default=None)):
         authorize(x_agt_token)
         try:
-            return service.prepare_mapping_session(str(body.get("map_name", "")))
+            return service.prepare_mapping_session(
+                str(body.get("map_name", "")), body.get("arguments", {})
+            )
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=409, detail=str(error)) from error
 

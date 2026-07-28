@@ -32,6 +32,8 @@
     "EnableTaskExecution": "true",
     "EnableCostmapDisplay": "false",
     "EnableOfflinePlanningPreview": "true",
+    "EnableBaseMapEditing": "false",
+    "EnableLegacyTopologyTasks": "true",
     "UiLanguage": "zh_CN",
     "UseNativeWindowFrame": "true"
   },

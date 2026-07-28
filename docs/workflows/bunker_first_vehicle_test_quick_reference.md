@@ -318,17 +318,18 @@ ros2 topic hz /agt/chassis/cmd_vel
 
 ## 10.1 Qt 手工多点 Demo
 
-维护版 Qt 的 **Start Task Chain** 已接到
-`/agt/navigation/execute_waypoint_task`，可以直接用于低速 Demo。按钮状态来自 Nav2 Action；
-**Stop Task Chain** 会取消任务，“Repeat twice (finite)”只用于明确的两遍测试，首次实车不要勾选。
+维护版 Qt 的 Task Library 已接到 `/agt/navigation/execute_waypoint_task`，可以直接用于低速
+Demo。执行/取消按钮状态来自 Nav2 Action；有限循环只用于明确的重复测试，首次实车保持一遍。
 
-1. 在 Qt 中打开当前 Nav2 YAML，编辑并保存同名 `.topology`；
-2. 添加任务点，确认顺序和朝向；
-3. 确认重定位、Nav2、底盘和安全状态后显式使能运动；
-4. 点击 **Start Task Chain**，观察 Pending/Running/Finish 或 Failed 状态。
+1. 使用当前 active READY 版本启动 navigation Qt；该 profile 的底图只读；
+2. 在任务中心点击“新建”，随后在地图上先点位置、再点朝向，重复添加并确认顺序；
+3. 点击“保存”，确认地图绑定为 `MATCHED` 且任务点端点校验通过；点间显示连线穿过障碍不会阻止保存；
+4. 至少有两个启用点时点击“预览路径”，确认 `/plan` 中的 Nav2 路径能绕开障碍；
+5. 确认重定位、Nav2、底盘和安全状态后显式使能运动；
+6. 点击“执行任务”，观察 Pending/Running/Finish 或 Failed 状态。
 
-离线编辑时先在 Task 表中选中目标行，再点击地图上的已有点位，该点会写入当前行；
-新增、改名或删除点位后下拉框会自动刷新。鼠标中键拖动可在任意工具下平移，普通查看
+离线编辑时可在 Task 表中选中已有行，再拖动地图点或朝向手柄进行修正；已有 `.topology`
+侧车点也可通过下拉框快照进任务。鼠标中键拖动可在任意工具下平移，普通查看
 模式也可在地图空白处左键拖动；滚轮或右下角 `+/-` 以光标/视图中心缩放。手动平移或
 缩放会自动取消“跟随机器人”，避免离线地图被拉回机器人位置。窗口默认使用系统边框，
 可从左右边缘调整宽度。顶栏可选择中文或 English，保存后重启 Qt 应用生效。
@@ -339,10 +340,12 @@ ros2 topic hz /agt/chassis/cmd_vel
 MAP_YAML="$(realpath runtime/maps/<map_id>/<map_id>.yaml)"
 ros2 launch agt_navigation waypoint_preview.launch.py \
   map:="$MAP_YAML" \
-  platform_profile:="$(realpath profiles/platforms/bunker.yaml)"
+  platform_profile:="$(realpath profiles/platforms/bunker.yaml)" \
+  preview_segment_timeout_s:=30.0
 ```
 
-Task 第一行作为预览起点，至少添加两行，然后点击“预览离线路径”；路径显示在 `/plan`。
+Task Library 第一行作为预览起点，至少添加两个启用点，然后点击“预览路径”；路径显示在 `/plan`。
+Task Center 同时显示当前段/总段数和成功/失败终态；未启动此专用 launch 时会立即报预览服务不可用。
 该入口同时启动专用 RViz：`Map` 显示静态 PGM，半透明的
 `/global_costmap/costmap` 显示 Nav2 InflationLayer 产生的膨胀代价，红色
 `/agt/navigation/preview_footprint` 显示平台 profile 中的完整多边形

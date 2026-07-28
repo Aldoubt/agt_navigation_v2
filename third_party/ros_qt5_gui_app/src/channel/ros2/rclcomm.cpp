@@ -65,6 +65,12 @@ bool rclcomm::Start() {
   waypoint_preview_publisher_ =
       node->create_publisher<geometry_msgs::msg::PoseArray>(
           "/agt/navigation/waypoint_preview_request", 10);
+  waypoint_preview_status_subscriber_ =
+      node->create_subscription<std_msgs::msg::String>(
+          "/agt/navigation/waypoint_preview_status", 10,
+          std::bind(&rclcomm::waypointPreviewStatusCallback, this,
+                    std::placeholders::_1),
+          sub1_obt);
   reloc_pose_publisher_ =
       node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
           GET_TOPIC_NAME(MSG_ID_SET_RELOC_POSE), 10);
@@ -262,6 +268,16 @@ void rclcomm::QueueTaskChain(const TaskExecutionRequest &request) {
 }
 
 void rclcomm::PreviewTaskChain(const TaskExecutionRequest &request) {
+  if (request.points.size() < 2) {
+    PUBLISH(MSG_ID_WAYPOINT_PREVIEW_STATUS,
+            std::string("rejected:preview requires at least two task points"));
+    return;
+  }
+  if (waypoint_preview_publisher_->get_subscription_count() == 0) {
+    PUBLISH(MSG_ID_WAYPOINT_PREVIEW_STATUS,
+            std::string("unavailable:start waypoint_preview.launch.py first"));
+    return;
+  }
   geometry_msgs::msg::PoseArray poses;
   poses.header.frame_id = "map";
   poses.header.stamp = node->now();
@@ -275,6 +291,11 @@ void rclcomm::PreviewTaskChain(const TaskExecutionRequest &request) {
     poses.poses.push_back(pose);
   }
   waypoint_preview_publisher_->publish(poses);
+}
+
+void rclcomm::waypointPreviewStatusCallback(
+    const std_msgs::msg::String::SharedPtr msg) {
+  PUBLISH(MSG_ID_WAYPOINT_PREVIEW_STATUS, msg->data);
 }
 
 void rclcomm::PublishTaskStatus(const TaskExecutionStatus &status) {

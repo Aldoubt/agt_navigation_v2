@@ -24,7 +24,7 @@ TaskWaypointItem::TaskWaypointItem(int index, QGraphicsItem *parent,
 }
 
 QRectF TaskWaypointItem::boundingRect() const {
-  return QRectF(-18.0, -18.0, 210.0, 54.0);
+  return QRectF(-42.0, -42.0, 252.0, 84.0);
 }
 
 QPointF TaskWaypointItem::headingTip() const {
@@ -37,17 +37,12 @@ void TaskWaypointItem::paint(QPainter *painter,
   painter->setRenderHint(QPainter::Antialiasing, true);
   const QColor color = enabled_ ? QColor(0, 121, 107) : QColor(117, 117, 117);
   painter->setOpacity(enabled_ ? 1.0 : 0.55);
-  painter->setPen(QPen(selected_ ? QColor(255, 193, 7) : Qt::white,
-                       selected_ ? 4.0 : 2.0));
-  painter->setBrush(color);
-  painter->drawEllipse(QPointF(0.0, 0.0), kMarkerRadius, kMarkerRadius);
-  painter->setPen(Qt::white);
-  painter->drawText(QRectF(-10.0, -9.0, 20.0, 18.0), Qt::AlignCenter,
-                    QString::number(index_ + 1));
 
   const QPointF tip = headingTip();
+  const QPointF direction(std::cos(heading_scene_), std::sin(heading_scene_));
+  const QPointF stem_start = direction * (kMarkerRadius + 2.0);
   painter->setPen(QPen(color, selected_ ? 4.0 : 3.0));
-  painter->drawLine(QPointF(0.0, 0.0), tip);
+  painter->drawLine(stem_start, tip);
   const double arrow_angle = std::atan2(tip.y(), tip.x());
   const QPointF left = tip - QPointF(std::cos(arrow_angle - 0.55) * 9.0,
                                      std::sin(arrow_angle - 0.55) * 9.0);
@@ -57,6 +52,19 @@ void TaskWaypointItem::paint(QPainter *painter,
   painter->drawLine(tip, right);
   painter->setBrush(color);
   painter->drawEllipse(tip, editing_ ? 5.0 : 3.0, editing_ ? 5.0 : 3.0);
+
+  // Draw the numbered marker last so every heading remains behind the label.
+  painter->setPen(QPen(selected_ ? QColor(255, 193, 7) : Qt::white,
+                       selected_ ? 4.0 : 2.0));
+  painter->setBrush(color);
+  painter->drawEllipse(QPointF(0.0, 0.0), kMarkerRadius, kMarkerRadius);
+  QFont label_font = painter->font();
+  label_font.setBold(true);
+  label_font.setPixelSize(index_ + 1 >= 100 ? 9 : 11);
+  painter->setFont(label_font);
+  painter->setPen(Qt::white);
+  painter->drawText(QRectF(-10.0, -9.0, 20.0, 18.0), Qt::AlignCenter,
+                    QString::number(index_ + 1));
 
   painter->setPen(QPen(QColor(32, 33, 36), 3.0));
   painter->drawText(QPointF(42.0, 5.0), name_);

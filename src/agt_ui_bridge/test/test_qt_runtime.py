@@ -96,7 +96,10 @@ def test_missing_profile_contract_keys_are_merged_without_overwriting_user_value
         json.dumps(
             {
                 "map_config": {"path": ""},
-                "key_value": {"FixedFrameId": "custom_map"},
+                "key_value": {
+                    "FixedFrameId": "custom_map",
+                    "TaskLineCheckStepRatio": "0.5",
+                },
                 "display_config": [
                     {"display_name": "kGlobalCostMap", "visible": True},
                     {"display_name": "kOccupancyMap", "visible": True},
@@ -155,7 +158,6 @@ def test_task_library_yaml_supplies_versioned_runtime_defaults(tmp_path):
                     "maximum_points": 123,
                     "maximum_loops": 7,
                     "unknown_cell_policy": "warn",
-                    "line_check_step_ratio": 0.25,
                     "autosave_enabled": False,
                     "autosave_interval_s": 12,
                     "backup_count": 3,
@@ -182,3 +184,41 @@ def test_task_library_yaml_supplies_versioned_runtime_defaults(tmp_path):
     runtime = json.loads(config.read_text(encoding="utf-8"))["key_value"]
     assert runtime["TaskMaximumLoops"] == "7"
     assert runtime["TaskLibraryRoot"] == str((tmp_path / "maps").resolve())
+
+
+def test_profile_owned_capabilities_replace_stale_persisted_values(tmp_path):
+    config = tmp_path / "config.json"
+    template = tmp_path / "template.json"
+    config.write_text(
+        json.dumps(
+            {
+                "map_config": {"path": ""},
+                "key_value": {
+                    "EnableBaseMapEditing": "true",
+                    "EnableMapOpen": "true",
+                    "TaskLibraryEnabled": "true",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    template.write_text(
+        json.dumps(
+            {
+                "map_config": {"path": ""},
+                "key_value": {
+                    "EnableBaseMapEditing": "false",
+                    "EnableMapOpen": "false",
+                    "TaskLibraryEnabled": "false",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    prepare_runtime_config(config, template)
+
+    keys = json.loads(config.read_text(encoding="utf-8"))["key_value"]
+    assert keys["EnableBaseMapEditing"] == "false"
+    assert keys["EnableMapOpen"] == "false"
+    assert keys["TaskLibraryEnabled"] == "false"

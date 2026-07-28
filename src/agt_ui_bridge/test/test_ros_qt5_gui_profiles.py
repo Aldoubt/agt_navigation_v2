@@ -26,7 +26,6 @@ def task_library_keys():
         "TaskMaximumPoints": "200",
         "TaskMaximumLoops": "10",
         "TaskUnknownCellPolicy": "reject",
-        "TaskLineCheckStepRatio": "0.5",
         "TaskAutosaveEnabled": "true",
         "TaskAutosaveIntervalS": "30",
         "TaskBackupCount": "5",
@@ -48,10 +47,26 @@ def test_mapping_profile_contract():
         "EnableTaskExecution": "false",
         "EnableCostmapDisplay": "false",
         "EnableOfflinePlanningPreview": "false",
+        "EnableBaseMapEditing": "false",
+        "EnableBaseMapSaveAs": "false",
+        "EnableMapOpen": "false",
+        "EnableLegacyTopologyTasks": "false",
         "UiLanguage": "zh_CN",
         "UseNativeWindowFrame": "true",
-        **task_library_keys(),
+        **{**task_library_keys(), "TaskLibraryEnabled": "false"},
     }
+
+
+def test_candidate_profile_edits_only_the_selected_candidate_in_place():
+    config = load_profile("candidate")
+    assert topics(config)["kOccupancyMap"] == "/agt/map/edited"
+    assert config["key_value"]["EnableTaskExecution"] == "false"
+    assert config["key_value"]["EnableOfflinePlanningPreview"] == "false"
+    assert config["key_value"]["EnableManualControl"] == "false"
+    assert config["key_value"]["EnableBaseMapEditing"] == "true"
+    assert config["key_value"]["EnableBaseMapSaveAs"] == "false"
+    assert config["key_value"]["EnableMapOpen"] == "false"
+    assert config["key_value"]["TaskLibraryEnabled"] == "false"
 
 
 def test_navigation_profile_contract():
@@ -69,6 +84,8 @@ def test_navigation_profile_contract():
         "EnableTaskExecution": "true",
         "EnableCostmapDisplay": "false",
         "EnableOfflinePlanningPreview": "true",
+        "EnableBaseMapEditing": "false",
+        "EnableLegacyTopologyTasks": "false",
         "UiLanguage": "zh_CN",
         "UseNativeWindowFrame": "true",
         **task_library_keys(),
@@ -81,6 +98,8 @@ def test_offline_profile_is_preview_only():
     assert topics(config)["kGlobalPath"] == "/plan"
     assert config["key_value"]["EnableTaskExecution"] == "false"
     assert config["key_value"]["EnableOfflinePlanningPreview"] == "true"
+    assert config["key_value"]["EnableBaseMapEditing"] == "false"
+    assert config["key_value"]["EnableLegacyTopologyTasks"] == "false"
     assert task_library_keys().items() <= config["key_value"].items()
 
 
@@ -101,6 +120,8 @@ def test_teach_profile_is_read_only_and_latched():
     assert config["key_value"]["ShowDashboard"] == "false"
     assert config["key_value"]["ShowSettingsOnStartup"] == "false"
     assert config["key_value"]["TaskLibraryEnabled"] == "false"
+    assert config["key_value"]["EnableBaseMapEditing"] == "false"
+    assert config["key_value"]["EnableLegacyTopologyTasks"] == "false"
 
 
 def test_profiles_have_isolated_runtime_configs():
@@ -117,6 +138,7 @@ def test_profiles_have_isolated_runtime_configs():
 def test_gui_never_targets_chassis_command_topic():
     for profile in (
         load_profile("mapping"),
+        load_profile("candidate"),
         load_profile("navigation"),
         load_profile("offline"),
         load_profile("teach"),

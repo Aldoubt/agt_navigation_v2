@@ -1,17 +1,12 @@
 """HTTP-independent operations surface shared by REST and WebSocket clients."""
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
-import hashlib
 import json
 import os
 from pathlib import Path
 import re
-import shutil
 import threading
-import time
 from typing import Any, Callable, Mapping
-from uuid import uuid4
 
 import yaml
 
@@ -48,7 +43,7 @@ class WebConsoleService:
         mapping_provider: Callable[[], Mapping[str, Any]] | None = None,
         mapping_pointcloud_provider: Callable[[], Mapping[str, Any]] | None = None,
         chassis_provider: Callable[[], Mapping[str, Any]] | None = None,
-        mapping_save_provider: Callable[[str], Mapping[str, Any]] | None = None,
+        mapping_session_controller: Any = None,
         mode_controller: Any = None,
         map_registry: Any = None,
         experiment_manager: Any = None,
@@ -65,7 +60,7 @@ class WebConsoleService:
         self.mapping_provider = mapping_provider or (lambda: {})
         self.mapping_pointcloud_provider = mapping_pointcloud_provider or (lambda: {})
         self.chassis_provider = chassis_provider or (lambda: {})
-        self.mapping_save_provider = mapping_save_provider or (lambda _map_url: {"success": False, "message": "建图保存服务不可用"})
+        self.mapping_session_controller = mapping_session_controller
         self.mode_controller = mode_controller
         self.map_registry = map_registry
         self.experiment_manager = experiment_manager
@@ -77,7 +72,7 @@ class WebConsoleService:
             "mapping_provider": self.mapping_provider,
             "mapping_pointcloud_provider": self.mapping_pointcloud_provider,
             "chassis_provider": self.chassis_provider,
-            "mapping_save_provider": self.mapping_save_provider,
+            "mapping_session_controller": mapping_session_controller,
             "mode_controller": mode_controller,
             "localization_controller": localization_controller,
         }}
@@ -145,7 +140,7 @@ class WebConsoleService:
         self.mapping_provider = option.get("mapping_provider", self.mapping_provider)
         self.mapping_pointcloud_provider = option.get("mapping_pointcloud_provider", self.mapping_pointcloud_provider)
         self.chassis_provider = option.get("chassis_provider", self.chassis_provider)
-        self.mapping_save_provider = option.get("mapping_save_provider", self.mapping_save_provider)
+        self.mapping_session_controller = option.get("mapping_session_controller")
         self.mode_controller = option.get("mode_controller")
         self.localization_controller = option.get("localization_controller")
 
@@ -201,12 +196,6 @@ class WebConsoleService:
     def _mapping_session_root(self) -> Path:
         return Path(self.config.runtime_dir).expanduser().resolve() / "mapping_sessions"
 
-    def _write_mapping_session(self, session: Mapping[str, Any]) -> None:
-        path = Path(str(session["session_file"])).resolve()
-        temporary = path.with_name(path.name + ".tmp")
-        temporary.write_text(yaml.safe_dump(dict(session), sort_keys=False), encoding="utf-8")
-        os.replace(temporary, path)
-
     def _discover_mapping_session(self, backend: str | None = None) -> dict[str, Any] | None:
         expected_offline = backend == "offline" if backend is not None else None
         if self._mapping_session is not None and (
@@ -230,91 +219,29 @@ class WebConsoleService:
                 continue
         return None
 
-    def _mapping_asset_status(self, session: Mapping[str, Any]) -> dict[str, Any]:
-        root = Path(str(session["root"])).resolve()
-        map_name = str(session["map_name"])
-        paths = {
-            "map_pgm": root / f"{map_name}.pgm",
-            "map_yaml": root / f"{map_name}.yaml",
-            "pcd": root / "pcd" / "localization_map.pcd",
-            "processing_record": root / "pcd" / "localization_map.processing.yaml",
-        }
-        assets: dict[str, Any] = {}
-        for name, path in paths.items():
-            try:
-                stat = path.stat()
-                assets[name] = {"path": str(path), "exists": path.is_file(), "bytes": int(stat.st_size)}
-            except OSError:
-                assets[name] = {"path": str(path), "exists": False, "bytes": 0}
-        record_state = ""
-        record_hash = ""
-        record = paths["processing_record"]
-        if record.is_file():
-            try:
-                with open(record, "r", encoding="utf-8") as stream:
-                    data = yaml.safe_load(stream) or {}
-                record_state = str(data.get("state", "")).lower()
-                record_hash = str(data.get("pcd_sha256") or data.get("map_hash") or "")
-            except (OSError, TypeError, yaml.YAMLError):
-                record_state = "invalid"
-        return {
-            "assets": assets,
-            "pgm_ready": assets["map_pgm"]["exists"] and assets["map_yaml"]["exists"],
-            "pcd_ready": assets["pcd"]["exists"] and assets["processing_record"]["exists"] and record_state == "ready",
-            "processing_state": record_state,
-            "pcd_sha256": record_hash,
-        }
-
-    @staticmethod
-    def _sha256_file(path: Path) -> str:
-        digest = hashlib.sha256()
-        with open(path, "rb") as stream:
-            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return "sha256:" + digest.hexdigest()
-
-    def _ensure_processing_record_hash(self, session: Mapping[str, Any]) -> str:
-        """Finalize a managed ready record before immutable version registration."""
-        root = Path(str(session["root"])).resolve()
-        pcd_path = root / "pcd" / "localization_map.pcd"
-        record_path = root / "pcd" / "localization_map.processing.yaml"
-        if not pcd_path.is_file() or not record_path.is_file():
-            raise RuntimeError("PCD processing record或定位点云不存在")
-        try:
-            with open(record_path, "r", encoding="utf-8") as stream:
-                record = yaml.safe_load(stream) or {}
-        except (OSError, TypeError, yaml.YAMLError) as error:
-            raise RuntimeError(f"PCD processing record无法读取：{error}") from error
-        if not isinstance(record, dict) or str(record.get("state", "")).lower() != "ready":
-            raise RuntimeError("PCD processing record不是 ready 状态")
-        actual_hash = self._sha256_file(pcd_path)
-        recorded_hash = str(record.get("pcd_sha256") or record.get("map_hash") or "")
-        if recorded_hash and recorded_hash != actual_hash:
-            raise RuntimeError("PCD processing record哈希与定位点云内容不一致")
-        if not recorded_hash:
-            record["pcd_sha256"] = actual_hash
-            temporary = record_path.with_name(record_path.name + ".tmp")
-            temporary.write_text(yaml.safe_dump(record, sort_keys=False), encoding="utf-8")
-            os.replace(temporary, record_path)
-        return actual_hash
-
     def mapping_session_status(self) -> dict[str, Any]:
+        if self._backend_mode != "offline":
+            if self.mapping_session_controller is None:
+                return {
+                    "state": "IDLE",
+                    "available": False,
+                    "message": "mapping-session Action controller is unavailable",
+                }
+            result = dict(self.mapping_session_controller.manage_mapping_session("status"))
+            self._mapping_session = result if result.get("available") else None
+            return result
         session = self._discover_mapping_session(backend=self._backend_mode)
         if session is None:
             return {"state": "IDLE", "available": False, "message": "尚未创建建图会话"}
         if session.get("offline"):
             return dict(session)
-        status = self._mapping_asset_status(session)
-        active_mode = self.mode_status().get("active_mode", "IDLE")
-        phase = str(session.get("state", "PREPARED"))
-        if phase == "PREPARED" and active_mode == "MAPPING":
-            phase = "MAPPING"
-        elif phase == "WAITING_ASSETS":
-            if status["pgm_ready"] and status["pcd_ready"]:
-                phase = "READY_TO_REGISTER"
-        return {**dict(session), **status, "state": phase, "active_mode": active_mode, "available": True}
+        return dict(session)
 
-    def prepare_mapping_session(self, map_name: str) -> dict[str, Any]:
+    def prepare_mapping_session(
+        self,
+        map_name: str,
+        arguments: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
         map_name = str(map_name).strip()
         if not self._valid_map_name(map_name):
             raise ValueError("建图名称只能包含字母、数字、下划线和短横线")
@@ -350,29 +277,30 @@ class WebConsoleService:
                 "message": "离线模式只模拟建图会话，不写入 PGM、PCD 或地图版本",
             }
             return dict(self._mapping_session)
-        if existing and existing.get("map_name") == map_name and existing.get("state") in {"PREPARED", "MAPPING", "SAVING_MAP", "WAITING_ASSETS"}:
-            return self.mapping_session_status()
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        session_id = f"mapping_{timestamp}_{uuid4().hex[:8]}"
-        root = self._mapping_session_root() / map_name / session_id
-        pcd_dir = root / "pcd"
-        pcd_dir.mkdir(parents=True, exist_ok=False)
-        session = {
-            "schema_version": 1,
-            "session_id": session_id,
-            "map_name": map_name,
-            "root": str(root),
-            "pcd_output_dir": str(pcd_dir),
-            "map_url": str(root / map_name),
-            "state": "PREPARED",
-            "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "version_id": "",
-            "session_file": str(root / "session.yaml"),
-        }
-        self._write_mapping_session(session)
-        self._mapping_session = session
-        self._audit("mapping_session_prepare", {"session_id": session_id, "map_name": map_name})
-        return self.mapping_session_status()
+        if self.mapping_session_controller is None:
+            raise RuntimeError("mapping-session Action controller is unavailable")
+        values = {str(key): str(value) for key, value in (arguments or {}).items()}
+        for owned in (
+            "runtime_dir",
+            "map_name",
+            "mapping_output_dir",
+            "record_bag",
+            "bag_profile",
+        ):
+            values.pop(owned, None)
+        response = dict(
+            self.mapping_session_controller.manage_mapping_session(
+                "start",
+                map_id=map_name,
+                arguments=values,
+            )
+        )
+        self._mapping_session = response
+        self._audit(
+            "mapping_session_start",
+            {"session_id": response.get("session_id", ""), "map_name": map_name},
+        )
+        return response
 
     def _validate_navigation_selection(self, arguments: Mapping[str, Any]) -> None:
         if self.map_registry is None:
@@ -415,6 +343,11 @@ class WebConsoleService:
         if self.mode_controller is None:
             raise RuntimeError("system mode controller is unavailable")
         values = dict(arguments or {})
+        if profile == "mapping" and self._backend_mode != "offline":
+            map_name = str(values.get("map_name", "")).strip()
+            if not map_name:
+                raise ValueError("启动建图前必须提供 map_name")
+            return self.prepare_mapping_session(map_name, values)
         current_mode = self.mode_status().get("active_mode", "IDLE")
         if profile == "sensor_only" and current_mode == "SENSOR_ONLY":
             raise RuntimeError("传感器模式已经运行，不能重复启动")
@@ -432,9 +365,6 @@ class WebConsoleService:
             self._validate_navigation_selection(values)
         result = self.mode_controller.start(profile, values)
         response = dict(result if isinstance(result, Mapping) else {"result": result})
-        if profile == "mapping" and self._mapping_session and not self._mapping_session.get("offline"):
-            self._mapping_session["state"] = "MAPPING"
-            self._write_mapping_session(self._mapping_session)
         self._audit("system_mode_start", {"profile": profile, "arguments": values, "result": response})
         return response
 
@@ -447,12 +377,18 @@ class WebConsoleService:
         return response
 
     def finish_mapping(self, action: str, map_name: str | None = None) -> dict[str, Any]:
-        if action not in {"retain", "delete"}:
-            raise ValueError("建图结束操作只能是 retain 或 delete")
-        session = self._discover_mapping_session(backend=self._backend_mode)
+        if action not in {"retain", "commit", "delete"}:
+            raise ValueError("建图结束操作只能是 retain、commit 或 delete")
+        session = (
+            self._discover_mapping_session(backend=self._backend_mode)
+            if self._backend_mode == "offline"
+            else self.mapping_session_status()
+        )
         if session is None:
             raise RuntimeError("当前没有建图会话")
         if session.get("offline"):
+            if action == "commit":
+                raise RuntimeError("离线模拟地图不能登记为真实地图版本")
             if self.mode_status().get("active_mode") == "MAPPING":
                 self.stop_mode()
             if session.get("state") == "SIMULATED_RETAINED" and action == "retain":
@@ -468,91 +404,28 @@ class WebConsoleService:
                 else "离线模拟地图已删除，未写入任何真实地图文件"
             )
             return dict(session)
-        if action == "delete":
-            if self.mode_status().get("active_mode") == "MAPPING":
-                self.stop_mode()
-            failed_version_id = str(session.get("failed_version_id", "")).strip()
-            if failed_version_id and self.map_registry is not None:
-                self.map_registry.soft_delete(failed_version_id)
-                self.map_registry.purge(failed_version_id)
-            root = Path(str(session["root"])).resolve()
-            staging = self._mapping_session_root().resolve()
-            try:
-                root.relative_to(staging)
-            except ValueError as error:
-                raise RuntimeError("建图会话目录不在受管临时目录内") from error
-            shutil.rmtree(root, ignore_errors=False)
-            session["state"] = "DISCARDED"
-            self._mapping_session = None
-            self._audit("mapping_session_discard", {"session_id": session["session_id"]})
-            return {"state": "DISCARDED", "session_id": session["session_id"], "message": "建图临时文件已删除，未登记地图版本"}
-
-        if self.mode_status().get("active_mode") != "MAPPING":
-            raise RuntimeError("只有正在运行的建图模式可以完成保存；失败会话请使用删除临时文件")
-
+        if not session.get("available", False):
+            raise RuntimeError("当前没有建图会话")
+        if self.mapping_session_controller is None:
+            raise RuntimeError("mapping-session Action controller is unavailable")
         requested_name = str(map_name or "").strip()
-        if requested_name:
-            if not self._valid_map_name(requested_name):
-                raise ValueError("建图名称只能包含字母、数字、下划线和短横线")
-            if requested_name != str(session["map_name"]):
-                root = Path(str(session["root"])).resolve()
-                old_assets = (root / f"{session['map_name']}.pgm", root / f"{session['map_name']}.yaml")
-                if any(path.exists() for path in old_assets):
-                    raise RuntimeError("地图文件已经写入，不能在保存阶段修改建图名称")
-                session["map_name"] = requested_name
-                session["map_url"] = str(root / requested_name)
-                self._write_mapping_session(session)
-
-        session["state"] = "SAVING_MAP"
-        self._write_mapping_session(session)
-        try:
-            save_result = dict(self.mapping_save_provider(str(session["map_url"])))
-            if not save_result.get("success", False):
-                raise RuntimeError(save_result.get("message", "PGM/YAML 保存服务失败"))
-            self.stop_mode()
-            session["state"] = "WAITING_ASSETS"
-            self._write_mapping_session(session)
-            deadline = time.monotonic() + 90.0
-            while time.monotonic() < deadline:
-                status = self._mapping_asset_status(session)
-                if status["pgm_ready"] and status["pcd_ready"]:
-                    break
-                time.sleep(0.25)
-            status = self._mapping_asset_status(session)
-            if not status["pgm_ready"] or not status["pcd_ready"]:
-                raise RuntimeError("地图保存未完成：需要同时存在 PGM/YAML 和 ready PCD processing record")
-            self._ensure_processing_record_hash(session)
-            status = self._mapping_asset_status(session)
-            if self.map_registry is None:
-                raise RuntimeError("地图版本管理器不可用，不能登记保留的建图结果")
-            result = self.map_registry.import_legacy(
-                map_id=str(session["map_name"]),
-                map_yaml=str(Path(session["root"]) / f"{session['map_name']}.yaml"),
-                localization_pcd=str(Path(session["root"]) / "pcd" / "localization_map.pcd"),
-                processing_record=str(Path(session["root"]) / "pcd" / "localization_map.processing.yaml"),
+        if requested_name and requested_name != str(session.get("map_id") or session.get("map_name")):
+            raise ValueError("地图 ID 在会话启动时固定，结束阶段不能重命名")
+        operation = {"retain": "finalize", "commit": "commit", "delete": "discard"}[action]
+        response = dict(
+            self.mapping_session_controller.manage_mapping_session(
+                operation,
+                session_id=str(session["session_id"]),
             )
-            if not result.valid:
-                if result.map_version_id:
-                    session["failed_version_id"] = result.map_version_id
-                raise RuntimeError("地图版本登记失败：" + "；".join(result.errors))
-            session["state"] = "REGISTERED"
-            session["version_id"] = result.map_version_id
-            self._write_mapping_session(session)
-            response = {
-                "state": "REGISTERED",
-                "session_id": session["session_id"],
-                "map_name": session["map_name"],
-                "map_version_id": result.map_version_id,
-                "assets": status["assets"],
-                "message": "PGM、YAML、PCD 已确认并登记为地图版本；请在地图管理中激活后启动导航",
-            }
-            self._audit("mapping_session_registered", response)
-            return response
-        except Exception as error:
-            session["state"] = "ERROR"
-            session["message"] = str(error)
-            self._write_mapping_session(session)
-            raise
+        )
+        self._mapping_session = None if action == "delete" else response
+        audit_action = {
+            "retain": "mapping_session_candidate_ready",
+            "commit": "mapping_session_registered",
+            "delete": "mapping_session_discard",
+        }[action]
+        self._audit(audit_action, response)
+        return response
 
     def maps(self, **filters: Any) -> list[dict[str, Any]]:
         if self.map_registry is None:

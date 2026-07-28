@@ -4,7 +4,6 @@ task_library:
   maximum_points: 200
   maximum_loops: 10
   unknown_cell_policy: reject
-  line_check_step_ratio: 0.5
   autosave_enabled: true
   autosave_interval_s: 30
   backup_count: 5

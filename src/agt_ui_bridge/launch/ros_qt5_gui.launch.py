@@ -12,7 +12,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "profile",
                 default_value="navigation",
-                choices=["mapping", "navigation", "offline", "teach"],
+                choices=["mapping", "candidate", "navigation", "offline", "teach"],
             ),
             DeclareLaunchArgument("start_map_io_bridge", default_value="true"),
             DeclareLaunchArgument("map", default_value=""),

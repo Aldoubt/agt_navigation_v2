@@ -61,6 +61,64 @@ class MappingController(ModeController):
         return {"active_mode": self.active_mode, "processes": []}
 
 
+class MappingSessionController:
+    def __init__(self, root: Path, *, fail_finalize: bool = False):
+        self.root = root
+        self.calls = []
+        self.session = None
+        self.fail_finalize = fail_finalize
+
+    def manage_mapping_session(self, operation, **values):
+        self.calls.append((operation, values))
+        if operation == "status":
+            return dict(self.session) if self.session else {
+                "success": False,
+                "available": False,
+                "state": "IDLE",
+            }
+        if operation == "start":
+            map_id = values["map_id"]
+            self.session = {
+                "success": True,
+                "available": True,
+                "state": "MAPPING",
+                "session_id": "mapping_test_0001",
+                "map_id": map_id,
+                "map_name": map_id,
+                "root": str(self.root),
+                "message": "mapping capture is running",
+            }
+        elif operation == "finalize":
+            if self.fail_finalize:
+                self.session["state"] = "CAPTURE_FAILED"
+                raise RuntimeError("capture assets are incomplete")
+            self.session.update(
+                {
+                    "state": "CANDIDATE_READY",
+                    "candidate_map_yaml": str(self.root / "candidate.yaml"),
+                    "candidate_map_image": str(self.root / "candidate.pgm"),
+                    "localization_pcd": str(self.root / "localization_map.pcd"),
+                    "processing_record": str(self.root / "localization_map.processing.yaml"),
+                    "bag_directory": str(self.root / "rosbag"),
+                    "message": "candidate ready",
+                }
+            )
+        elif operation == "commit":
+            self.session.update(
+                {
+                    "state": "REGISTERED",
+                    "map_version_id": "map_20260727_120000_1234abcd",
+                    "version_id": "map_20260727_120000_1234abcd",
+                    "message": "registered",
+                }
+            )
+        elif operation == "discard":
+            self.session.update(
+                {"state": "DISCARDED", "available": False, "message": "discarded"}
+            )
+        return dict(self.session)
+
+
 def test_remote_listener_requires_token_and_loopback_is_default():
     with pytest.raises(ValueError):
         WebConsoleConfig(host="0.0.0.0").validate()
@@ -249,21 +307,38 @@ def test_service_routes_offline_bag_playback_to_simulator(tmp_path):
 
 def test_console_delegates_only_configured_profile_and_audits_writes(tmp_path):
     controller = ModeController()
+    mapping_sessions = MappingSessionController(tmp_path / "mapping_sessions")
     service = WebConsoleService(
         WebConsoleConfig(runtime_dir=str(tmp_path)),
         health_provider=lambda: {"overall_state": "OK"},
         readiness_provider=lambda: {"ready": False, "blocker_codes": ["MODE_NOT_NAVIGATION"]},
         mode_controller=controller,
+        mapping_session_controller=mapping_sessions,
         experiment_manager=Experiments(),
     )
-    session = service.prepare_mapping_session("greenhouse_01")
-    result = service.set_mode("mapping", {"map_name": "greenhouse_01", "mapping_output_dir": session["pcd_output_dir"]})
-    assert result["started"]
-    assert controller.calls == [("start", "mapping", {"map_name": "greenhouse_01", "mapping_output_dir": session["pcd_output_dir"]})]
+    result = service.prepare_mapping_session(
+        "greenhouse_01",
+        {
+            "start_sensor": "true",
+            "runtime_dir": "/ignored/frontend/path",
+            "record_bag": "false",
+        },
+    )
+    assert result["state"] == "MAPPING"
+    assert mapping_sessions.calls == [
+        (
+            "start",
+            {
+                "map_id": "greenhouse_01",
+                "arguments": {"start_sensor": "true"},
+            },
+        )
+    ]
+    assert controller.calls == []
     assert service.overview()["task_readiness"]["ready"] is False
     service.stop_mode()
     audit = (tmp_path / "logs" / "web_console_audit.jsonl").read_text(encoding="utf-8")
-    assert "system_mode_start" in audit and "system_mode_stop" in audit
+    assert "mapping_session_start" in audit and "system_mode_stop" in audit
 
 
 def test_logs_are_restricted_to_managed_roots(tmp_path):
@@ -349,7 +424,8 @@ def test_static_console_is_chinese_and_exposes_ordered_workflow_controls():
     assert '"/api/v1/mapping/session/prepare"' in javascript
     assert '"/api/v1/mapping/finish"' in javascript
     assert '"/api/v1/mapping/session"' in javascript
-    assert "mapping_output_dir" in javascript
+    assert "mapping_output_dir" not in javascript
+    assert "ManageMappingSession" in bridge_source
     assert "map_version_id" in javascript
     assert "discardableFailedSession" in javascript
     assert "mapping-finish-confirm" in javascript
@@ -424,115 +500,52 @@ def test_navigation_requires_a_selected_ready_version(tmp_path):
         service.set_mode("navigation", {})
 
 
-def test_online_mapping_retain_waits_for_assets_and_registers_version(tmp_path):
-    controller = MappingController()
-    registry = MapRegistry(tmp_path / "maps")
-
-    def save_map(map_url):
-        root = Path(map_url).parent
-        pgm = b"P5\n1 1\n255\n\x00"
-        (root / "online_map.pgm").write_bytes(pgm)
-        (root / "online_map.yaml").write_text(
-            "image: online_map.pgm\nresolution: 0.1\norigin: [0.0, 0.0, 0.0]\n",
-            encoding="utf-8",
-        )
-        pcd = b"# minimal test PCD\n"
-        (root / "pcd" / "localization_map.pcd").write_bytes(pcd)
-        digest = hashlib.sha256(pcd).hexdigest()
-        (root / "pcd" / "localization_map.processing.yaml").write_text(
-            f"state: ready\npcd_sha256: sha256:{digest}\nmap_file: localization_map.pcd\n",
-            encoding="utf-8",
-        )
-        return {"success": True, "message": "PGM/YAML 保存完成"}
-
+def test_online_mapping_finalize_and_commit_are_separate_action_operations(tmp_path):
+    controller = ModeController()
+    mapping_sessions = MappingSessionController(tmp_path / "mapping_sessions")
     service = WebConsoleService(
         WebConsoleConfig(runtime_dir=str(tmp_path)),
         mode_controller=controller,
-        map_registry=registry,
-        mapping_save_provider=save_map,
+        mapping_session_controller=mapping_sessions,
     )
-    session = service.prepare_mapping_session("online_map")
-    service.set_mode("mapping", {"mapping_output_dir": session["pcd_output_dir"]})
-    result = service.finish_mapping("retain")
+    session = service.prepare_mapping_session("online_map", {"start_rviz": "true"})
+    candidate = service.finish_mapping("retain")
+    assert candidate["state"] == "CANDIDATE_READY"
+    assert not candidate.get("map_version_id")
+    registered = service.finish_mapping("commit")
+    assert registered["state"] == "REGISTERED"
+    assert registered["map_version_id"].startswith("map_")
+    assert [call[0] for call in mapping_sessions.calls] == [
+        "start", "status", "finalize", "status", "commit"
+    ]
 
-    assert result["state"] == "REGISTERED"
-    assert result["map_version_id"].startswith("map_")
-    rows = registry.list_versions(map_id="online_map")
-    assert rows and rows[0]["state"] == "READY"
-    assert service.mapping_session_status()["version_id"] == result["map_version_id"]
 
-
-def test_online_mapping_retain_finalizes_missing_hash_and_final_map_name(tmp_path):
-    controller = MappingController()
-    registry = MapRegistry(tmp_path / "maps")
-
-    def save_map(map_url):
-        root = Path(map_url).parent
-        (root / "final_map.pgm").write_bytes(b"P5\n1 1\n255\n\\x00")
-        (root / "final_map.yaml").write_text("image: final_map.pgm\nresolution: 0.1\norigin: [0.0, 0.0, 0.0]\n", encoding="utf-8")
-        (root / "pcd" / "localization_map.pcd").write_bytes(b"# test pcd without hash\n")
-        (root / "pcd" / "localization_map.processing.yaml").write_text("state: ready\n", encoding="utf-8")
-        return {"success": True}
-
+def test_online_mapping_id_is_fixed_when_session_starts(tmp_path):
+    controller = ModeController()
+    mapping_sessions = MappingSessionController(tmp_path / "mapping_sessions")
     service = WebConsoleService(
         WebConsoleConfig(runtime_dir=str(tmp_path)),
         mode_controller=controller,
-        map_registry=registry,
-        mapping_save_provider=save_map,
+        mapping_session_controller=mapping_sessions,
     )
-    session = service.prepare_mapping_session("temporary_name")
-    service.set_mode("mapping", {"mapping_output_dir": session["pcd_output_dir"]})
-
-    result = service.finish_mapping("retain", "final_map")
-
-    assert result["state"] == "REGISTERED"
-    assert result["map_name"] == "final_map"
-    record = yaml.safe_load((Path(session["root"]) / "pcd" / "localization_map.processing.yaml").read_text(encoding="utf-8"))
-    assert record["pcd_sha256"].startswith("sha256:")
-    rows = registry.list_versions(map_id="final_map")
-    assert rows and rows[0]["state"] == "READY"
+    service.prepare_mapping_session("fixed_name")
+    with pytest.raises(ValueError, match="启动时固定"):
+        service.finish_mapping("retain", "renamed_later")
 
 
-def test_failed_online_mapping_can_delete_unregistered_assets_after_mode_stops(tmp_path):
-    controller = MappingController()
-
-    class InvalidRegistry:
-        def __init__(self):
-            self.cleaned = []
-
-        def import_legacy(self, **_kwargs):
-            return SimpleNamespace(valid=False, errors=["test registration failure"], map_version_id="invalid_version")
-
-        def soft_delete(self, version_id):
-            self.cleaned.append(("soft_delete", version_id))
-
-        def purge(self, version_id):
-            self.cleaned.append(("purge", version_id))
-
-    def save_map(map_url):
-        root = Path(map_url).parent
-        (root / "failed_map.pgm").write_bytes(b"P5\n1 1\n255\n\\x00")
-        (root / "failed_map.yaml").write_text("image: failed_map.pgm\n", encoding="utf-8")
-        (root / "pcd" / "localization_map.pcd").write_bytes(b"# test pcd\n")
-        (root / "pcd" / "localization_map.processing.yaml").write_text("state: ready\n", encoding="utf-8")
-        return {"success": True}
-
-    registry = InvalidRegistry()
+def test_failed_online_mapping_is_discarded_through_the_action(tmp_path):
+    controller = ModeController()
+    mapping_sessions = MappingSessionController(
+        tmp_path / "mapping_sessions", fail_finalize=True
+    )
     service = WebConsoleService(
         WebConsoleConfig(runtime_dir=str(tmp_path)),
         mode_controller=controller,
-        map_registry=registry,
-        mapping_save_provider=save_map,
+        mapping_session_controller=mapping_sessions,
     )
-    session = service.prepare_mapping_session("failed_map")
-    service.set_mode("mapping", {"mapping_output_dir": session["pcd_output_dir"]})
-
-    with pytest.raises(RuntimeError, match="地图版本登记失败"):
+    service.prepare_mapping_session("failed_map")
+    with pytest.raises(RuntimeError, match="capture assets"):
         service.finish_mapping("retain")
-    assert controller.active_mode == "IDLE"
-    assert Path(session["root"]).is_dir()
-
     result = service.finish_mapping("delete")
     assert result["state"] == "DISCARDED"
-    assert not Path(session["root"]).exists()
-    assert registry.cleaned == [("soft_delete", "invalid_version"), ("purge", "invalid_version")]
+    assert [call[0] for call in mapping_sessions.calls][-2:] == ["status", "discard"]

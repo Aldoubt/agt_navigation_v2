@@ -432,10 +432,15 @@ function renderMappingSession() {
   const stateText = {
     IDLE: "未启动",
     MAPPING: "建图中",
-    PREPARED: "建图会话已准备",
-    SAVING_MAP: "正在保存二维地图",
-    WAITING_ASSETS: "等待 PCD 写入",
-    READY_TO_REGISTER: "文件已齐全，等待登记",
+    STARTING: "正在启动建图",
+    SAVING_GRID: "正在保存二维地图",
+    STOPPING_MAPPING: "正在正常停止建图",
+    WAITING_ASSETS: "等待 PCD 与 bag 收口",
+    CANDIDATE_READY: "候选地图可编辑",
+    COMMITTING: "正在校验并登记候选",
+    CAPTURE_FAILED: "采集资产不完整",
+    COMMIT_FAILED: "候选校验未通过",
+    START_FAILED: "建图启动失败",
     REGISTERED: "已登记地图版本",
     DISCARDED: "本次建图已删除",
     SIMULATED: "离线模拟中",
@@ -446,13 +451,16 @@ function renderMappingSession() {
   const mappingState = document.querySelector("#mapping-action-state");
   const finish = document.querySelector("#finish-mapping");
   const retain = document.querySelector("#retain-mapping");
+  const commit = document.querySelector("#commit-mapping");
   const retainedOffline = session.offline && session.state === "SIMULATED_RETAINED";
-  const activeMapping = currentMode() === "MAPPING";
-  const discardableFailedSession = !session.offline && !session.version_id && !activeMapping && ["MAPPING", "ERROR", "SAVING_MAP", "WAITING_ASSETS", "READY_TO_REGISTER"].includes(session.state);
+  const activeMapping = currentMode() === "MAPPING" || session.state === "MAPPING";
+  const candidateReady = !session.offline && session.state === "CANDIDATE_READY";
+  const discardableFailedSession = !session.offline && !session.version_id && !activeMapping && ["CAPTURE_FAILED", "COMMIT_FAILED", "START_FAILED"].includes(session.state);
   if (retain) {
-    retain.textContent = session.offline ? "保留一个模拟地图" : "保留并写入地图版本";
-    retain.hidden = retainedOffline || discardableFailedSession;
+    retain.textContent = session.offline ? "保留一个模拟地图" : "完成采集并生成候选";
+    retain.hidden = retainedOffline || discardableFailedSession || candidateReady || !activeMapping;
   }
+  if (commit) commit.hidden = !candidateReady;
   const discard = document.querySelector("#discard-mapping");
   if (discard) discard.textContent = discardableFailedSession ? "删除残留文件" : "删除本次建图";
   if (mappingState) {
@@ -463,23 +471,23 @@ function renderMappingSession() {
     mappingState.textContent = `${stateText}${fileText ? `；${fileText}` : ""}${session.version_id ? `；版本 ${session.version_id}` : ""}`;
   }
   if (finish) {
-    finish.hidden = currentMode() !== "MAPPING" && !retainedOffline && !discardableFailedSession;
-    finish.textContent = retainedOffline ? "删除当前模拟地图" : discardableFailedSession ? "删除未登记建图文件" : "结束建图并选择保存方式";
+    finish.hidden = currentMode() !== "MAPPING" && !retainedOffline && !discardableFailedSession && !candidateReady;
+    finish.textContent = retainedOffline ? "删除当前模拟地图" : candidateReady ? "处理可编辑候选地图" : discardableFailedSession ? "删除未登记建图文件" : "完成建图采集";
   }
   const dialogTitle = document.querySelector("#mapping-finish-title");
-  if (dialogTitle) dialogTitle.textContent = retainedOffline ? "删除当前模拟地图槽位" : discardableFailedSession ? "清理未登记建图结果" : "选择如何处理本次建图";
+  if (dialogTitle) dialogTitle.textContent = retainedOffline ? "删除当前模拟地图槽位" : candidateReady ? "候选地图处理" : discardableFailedSession ? "清理未登记建图结果" : "完成建图采集";
   const detail = document.querySelector("#mapping-finish-detail");
   const nameLabel = document.querySelector("#mapping-finish-map-name-label");
   const nameInput = document.querySelector("#mapping-finish-map-name");
   const confirmationLabel = document.querySelector("#mapping-finish-confirm-label");
-  if (nameLabel) nameLabel.hidden = !activeMapping;
-  if (nameInput) nameInput.hidden = !activeMapping;
+  if (nameLabel) nameLabel.hidden = true;
+  if (nameInput) nameInput.hidden = true;
   if (confirmationLabel) confirmationLabel.hidden = !activeMapping;
   if (detail && session.available) {
     const assets = session.assets || {};
     detail.textContent = session.offline
       ? "离线模式最多保留一个模拟地图槽位。这里的预览不读取 bag 消息，也不会写入真实 PGM、YAML、PCD 或地图版本；要生成可用于语义撰写、实车导航和重定位的资产，请切换 ROS 2 后端，用历史 bag 输入完成真实建图。"
-      : `${activeMapping ? "当前仍在建图。确认采集已经完成后，保留操作会先停止建图链，再保存 PGM/YAML 并等待 PCD。" : ""} 地图名称：${session.map_name || "-"}；PGM/YAML：${session.pgm_ready ? "已完成" : "待保存"}；PCD：${session.pcd_ready ? "已完成" : "待 FAST-LIVO2 正常退出写入"}；目录：${assets.pcd?.path || session.root || "-"}`;
+      : `${activeMapping ? "确认采集完成后，Action 会先保存二维栅格，再正常停止建图以收口 PCD 与 bag。" : candidateReady ? "候选地图允许编辑；登记会重新校验 YAML、PGM 和 PCD 绑定，并生成新的不可变版本。" : ""} 地图 ID：${session.map_id || session.map_name || "-"}；PGM/YAML：${session.pgm_ready ? "已完成" : "待保存"}；PCD：${session.pcd_ready ? "已完成" : "待 FAST-LIVO2 正常退出写入"}；候选：${session.candidate_map_yaml || session.root || "-"}`;
   }
 }
 
@@ -711,19 +719,16 @@ function bindPreviewCanvas(id, key) {
 function profileArguments(profile, mappingSession = {}) {
   const args = {};
   const runtime = field("runtime-dir");
-  if ((profile === "mapping" || profile === "navigation") && runtime) args.runtime_dir = runtime;
+  if (profile === "navigation" && runtime) args.runtime_dir = runtime;
   if ((profile === "mapping" || profile === "navigation") && field("sensor-config")) args.user_config_path = field("sensor-config");
   if (profile === "sensor_only") {
     if (field("sensor-config")) args.user_config_path = field("sensor-config");
     args.use_sim_time = field("use-sim-time") || "false";
   }
   if (profile === "mapping") {
-    if (field("map-name")) args.map_name = field("map-name");
-    if (!mappingSession.offline && mappingSession.pcd_output_dir) args.mapping_output_dir = mappingSession.pcd_output_dir;
     const inputSource = field("mapping-input-source") || "live";
     args.start_sensor = inputSource === "bag" ? "false" : "true";
     args.start_chassis = field("start-chassis") || "false"; args.start_chassis_monitor = field("start-chassis-monitor") || "false"; args.chassis_backend = field("chassis-backend") || "bunker_can"; args.can_interface = field("can-interface") || "can0"; args.start_rviz = "true"; args.start_mapping_gui = "false"; args.use_sim_time = inputSource === "bag" ? "true" : (field("use-sim-time") || "false");
-    const bagProfile = field("record-bag-profile") || "none"; args.record_bag = bagProfile !== "none" ? "true" : "false"; args.bag_profile = bagProfile === "none" ? "full_experiment" : bagProfile;
   }
   if (profile === "navigation") {
     const selected = (state.maps || []).find((item) => item.version_id === state.navigationMapVersion);
@@ -764,15 +769,21 @@ async function startProfile(profile) {
   showToast(messages[profile] || "正在启动模块，请稍候…");
   try {
     let mappingSession = state.mappingSession || {};
+    let result;
     if (profile === "mapping") {
+      const arguments = profileArguments(profile, {});
       mappingSession = await api("/api/v1/mapping/session/prepare", {
         method: "POST",
-        body: JSON.stringify({ map_name: field("map-name") || "mid360_map" }),
+        body: JSON.stringify({ map_name: field("map-name") || "mid360_map", arguments }),
       });
       state.mappingSession = mappingSession;
       renderMappingSession();
+      result = mappingSession.offline
+        ? await api("/api/v1/system/mode", { method: "POST", body: JSON.stringify({ profile, arguments: profileArguments(profile, mappingSession) }) })
+        : mappingSession;
+    } else {
+      result = await api("/api/v1/system/mode", { method: "POST", body: JSON.stringify({ profile, arguments: profileArguments(profile, mappingSession) }) });
     }
-    const result = await api("/api/v1/system/mode", { method: "POST", body: JSON.stringify({ profile, arguments: profileArguments(profile, mappingSession) }) });
     document.querySelector("#control-message").textContent = result.message || "模块启动请求已发送";
     showToast(result.message || "模块启动请求已发送");
     await refresh();
@@ -813,7 +824,7 @@ async function finishMappingAction(action) {
       return;
     }
   }
-  const buttons = [document.querySelector("#retain-mapping"), document.querySelector("#discard-mapping")].filter(Boolean);
+  const buttons = [document.querySelector("#retain-mapping"), document.querySelector("#commit-mapping"), document.querySelector("#discard-mapping")].filter(Boolean);
   buttons.forEach((button) => { button.disabled = true; });
   let polling = true;
   const poller = (async () => {
@@ -828,11 +839,11 @@ async function finishMappingAction(action) {
     }
   })();
   try {
-    const mapName = action === "retain" ? document.querySelector("#mapping-finish-map-name")?.value.trim() : "";
+    const mapName = action === "retain" ? (state.mappingSession?.map_id || state.mappingSession?.map_name || "") : "";
     const result = await api("/api/v1/mapping/finish", { method: "POST", body: JSON.stringify({ action, map_name: mapName }) });
     const dialog = document.querySelector("#mapping-finish-dialog");
     if (dialog?.open) dialog.close();
-    showToast(result.message || (action === "retain" ? "建图已保存" : "建图已删除"), false);
+    showToast(result.message || (action === "retain" ? "候选地图已生成" : action === "commit" ? "候选地图已登记" : "建图已回收"), false);
     await refresh();
   } catch (error) {
     showToast(`建图处理失败：${error.message}`, true);
@@ -932,6 +943,7 @@ document.querySelector("#start-mapping-profile").addEventListener("click", () =>
 document.querySelector("#start-navigation-profile").addEventListener("click", () => startProfile("navigation").catch((error) => showToast(error.message, true)));
 document.querySelector("#finish-mapping").addEventListener("click", () => openMappingFinishDialog().catch(() => {}));
 document.querySelector("#retain-mapping").addEventListener("click", () => finishMappingAction("retain").catch(() => {}));
+document.querySelector("#commit-mapping").addEventListener("click", () => finishMappingAction("commit").catch(() => {}));
 document.querySelector("#discard-mapping").addEventListener("click", () => finishMappingAction("delete").catch(() => {}));
 document.querySelector("#navigation-map-version").addEventListener("change", (event) => { state.navigationMapVersion = event.target.value; renderNavigationMapSelection(); renderControlActions(); });
 document.querySelector("#stop-mode").addEventListener("click", async () => {

@@ -26,7 +26,6 @@ def task_library_runtime_keys(path):
         "maximum_points",
         "maximum_loops",
         "unknown_cell_policy",
-        "line_check_step_ratio",
         "autosave_enabled",
         "autosave_interval_s",
         "backup_count",
@@ -49,14 +48,6 @@ def task_library_runtime_keys(path):
     backup_count = settings["backup_count"]
     if isinstance(backup_count, bool) or not isinstance(backup_count, int) or backup_count < 0:
         raise QtRuntimeError("task library backup_count must be a non-negative integer")
-    step_ratio = settings["line_check_step_ratio"]
-    if (
-        isinstance(step_ratio, bool)
-        or not isinstance(step_ratio, (int, float))
-        or not math.isfinite(step_ratio)
-        or step_ratio <= 0.0
-    ):
-        raise QtRuntimeError("task library line_check_step_ratio must be positive")
     policy = settings["unknown_cell_policy"]
     if policy not in {"reject", "warn", "allow"}:
         raise QtRuntimeError("task library unknown_cell_policy is invalid")
@@ -67,7 +58,6 @@ def task_library_runtime_keys(path):
         "TaskMaximumPoints": str(settings["maximum_points"]),
         "TaskMaximumLoops": str(settings["maximum_loops"]),
         "TaskUnknownCellPolicy": policy,
-        "TaskLineCheckStepRatio": str(step_ratio),
         "TaskAutosaveEnabled": boolean_text(settings["autosave_enabled"]),
         "TaskAutosaveIntervalS": str(settings["autosave_interval_s"]),
         "TaskBackupCount": str(backup_count),
@@ -186,11 +176,28 @@ def prepare_runtime_config(
     # Capability and frame keys are versioned profile contract. Add newly
     # introduced keys without overwriting operator-persisted values.
     runtime_keys = config.setdefault("key_value", {})
+    runtime_keys.pop("TaskLineCheckStepRatio", None)
     defaults = dict(template.get("key_value", {}))
     if task_library_config:
+        task_library_enabled = defaults.get("TaskLibraryEnabled", "true")
         defaults.update(task_library_runtime_keys(task_library_config))
+        defaults["TaskLibraryEnabled"] = task_library_enabled
+    profile_owned_keys = {
+        "EnableTaskExecution",
+        "EnableCostmapDisplay",
+        "EnableOfflinePlanningPreview",
+        "EnableManualControl",
+        "EnableBaseMapEditing",
+        "EnableBaseMapSaveAs",
+        "EnableMapOpen",
+        "EnableLegacyTopologyTasks",
+        "TaskLibraryEnabled",
+    }
     for key, value in defaults.items():
-        runtime_keys.setdefault(key, value)
+        if key in profile_owned_keys:
+            runtime_keys[key] = value
+        else:
+            runtime_keys.setdefault(key, value)
     if runtime_maps_root:
         runtime_keys["TaskLibraryRoot"] = str(Path(runtime_maps_root).expanduser().resolve())
     if runtime_keys.get("EnableCostmapDisplay", "false") != "true":

@@ -103,7 +103,6 @@ class TaskValidator {
                       QString *error);
   static ValidationReport validate(const TaskGroup &task, const MapRaster *raster,
                                    const QString &unknown_policy = "reject",
-                                   double line_step_ratio = 0.5,
                                    int maximum_points = kDefaultMaximumPoints,
                                    int maximum_loops = kDefaultMaximumLoops);
   static bool isSafeComponent(const QString &value);

@@ -45,7 +45,8 @@ TF used for that attempt is queried at the same stamp.
 - `/battery`：`sensor_msgs/msg/BatteryState`，BUNKER 状态桥接提供电压，百分比未知时保持未知。
 - `/agt/experiment/events`
 - `/agt/map/mapping_occupancy`: OctoMap 建图过程中的二维工作图，采用
-  `RELIABLE + TRANSIENT_LOCAL + KEEP_LAST(1)`；它是持久快照，不是固定周期的健康流
+  `RELIABLE + TRANSIENT_LOCAL + KEEP_LAST(1)`；它是持久监看快照，不是固定周期的健康流，
+  也不是受管会话最终候选。FINALIZE 会固定其 PGM/YAML 作为 `online_preview` 后离线重建候选
 - `/agt/map/octomap_occupancy`: 离线静态障碍补全使用的射线/free-space 基图（内部 topic）
 - `/agt/map/static_obstacle_evidence_status`: 离线重复观测障碍补全统计 JSON，仅用于审计
 - `/agt/map/global_occupancy`: 导航模式下由 Nav2 map server 发布的已保存静态地图
@@ -64,6 +65,10 @@ TF used for that attempt is queried at the same stamp.
 `/agt/navigation/cmd_vel_raw -> /agt/navigation/cmd_vel -> /agt/safety/cmd_vel -> /agt/chassis/cmd_vel`。
 CAN 接口的 up/down 配置不属于 ROS/Web 接口，必须由主机管理员预先完成。
 - `/agt/navigation/preview_footprint`: planner-only 离线预览起点处的 canonical 多边形车体
+- `/agt/navigation/waypoint_preview_request`: Qt 提交的 planner-only `PoseArray`；无预览适配器时
+  Qt 必须立即报不可用，不得显示为已经开始规划
+- `/agt/navigation/waypoint_preview_status`: advisory 字符串状态；逐段发布
+  `planning:<current>/<total>`，终态为 `succeeded:*`、`failed:*` 或 `rejected:*`
 - `/agt/map/semantic_markers`: 语义服务器发布的 transient-local 标注可视化
 - `/agt/map/keepout_mask`: 语义服务器发布、与基础地图严格对齐的 transient-local 语义 mask
 - `/agt/map/keepout_filter_info`: Nav2 Costmap Filter Info Server 发布的 transient-local keepout 元数据

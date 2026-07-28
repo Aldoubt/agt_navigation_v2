@@ -26,8 +26,8 @@ mission orchestrator 尚未实现。当前 Qt 直接调用
 
 | 模式 | 默认前端 | 坐标系 | 允许能力 |
 | --- | --- | --- | --- |
-| mapping | RViz；Qt 默认关闭 | `odom` | 采集、点云/二维地图监视、手动输入；禁止导航任务执行 |
-| navigation | Qt 默认开启 | `map` | 重定位、单点/多点 Nav2 Action、状态与诊断 |
+| mapping | RViz；Qt 默认关闭 | `odom` | 采集、点云/二维地图监视、底图编辑兼容、手动输入；禁止导航任务执行 |
+| navigation | Qt 默认开启 | `map` | READY 底图只读、Task Library 任务编排、重定位、单点/多点 Nav2 Action、状态与诊断 |
 | annotation | 项目语义编辑器 | `map` | 编辑、校验、离线预览；禁止运动 |
 | future mission | 可替换前端 | `map` + arm frames | 只通过版本化 Action 编排导航、作业和恢复 |
 
@@ -36,6 +36,14 @@ channel 检查 `EnableTaskExecution=false`；这用于能力隔离，但不替�
 导航点的人工输入是一个带位置和 yaw 的完整 pose：Qt 先点位置、再点朝向，未完成的
 两点交互不得进入任务文件或 Action。代价地图仍由 Nav2 拥有；Qt 大地图 profile 默认不全量渲染，
 规划调试通过 RViz 或显式开启。
+
+任务中相邻 pose 表示有序规划目标，不表示机器人必须沿两点直线运动。保存阶段只验证端点所在的
+基础地图栅格；点间可达性由 Task Library 的 planner-only 预览或运行时 Nav2 Action 判断，因此
+障碍物遮挡显示连线不能成为任务文件保存失败的理由。
+
+navigation/offline profile 的任务中心只保留版本化 Task Library，并隐藏旧拓扑任务保存入口。
+两者也隐藏底图编辑、保存和另存为，避免把加载动作误当成对 READY PGM/YAML 的写权限。
+任务保存只写入当前版本的 `tasks/`；需要修图时回到 mapping 数据链，完成后登记新的不可变地图版本。
 
 ## 当前导航能力
 

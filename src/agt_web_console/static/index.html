@@ -156,16 +156,16 @@
           <select id="chassis-backend"><option value="bunker_can">BUNKER CAN（当前）</option><option value="none">不启用（预留替换）</option></select>
           <label for="can-interface">CAN 接口名</label>
           <input id="can-interface" value="can0" placeholder="can0">
-          <label for="record-bag-profile">录制 rosbag</label>
-          <select id="record-bag-profile"><option value="none">不录制</option><option value="mapping">建图实验</option><option value="localization">定位实验</option><option value="navigation">导航实验</option><option value="full_experiment">完整实验</option></select>
+          <label for="record-bag-profile">建图 rosbag</label>
+          <select id="record-bag-profile" disabled><option value="mapping">由建图会话自动录制并收口</option></select>
         </div>
       </div>
       <div class="main-chain-grid">
         <div class="form-block" id="mapping-chain-control">
           <h3>建图链</h3>
-          <p class="form-hint">ROS 2 真实模式会保存 PGM/YAML/PCD 并登记版本；离线模式只保留一个模拟地图槽位，不能导出真实文件。结束时必须选择保留或删除。</p>
+          <p class="form-hint">ROS 2 真实模式由项目 Action 统一录制 bag、保存 PGM/YAML/PCD，并先生成可编辑候选；候选校验后才登记新版本。</p>
           <button id="start-mapping-profile" class="primary">启动建图链</button>
-          <button id="finish-mapping" class="danger" hidden>结束建图并选择保存方式</button>
+          <button id="finish-mapping" class="danger" hidden>完成建图采集</button>
           <span id="mapping-action-state" class="form-hint">未启动</span>
         </div>
         <div class="form-block" id="navigation-chain-control">
@@ -269,12 +269,13 @@
     <form method="dialog">
       <div class="panel-head"><div><p class="eyebrow">建图完成</p><h2 id="mapping-finish-title">选择如何处理本次建图</h2></div></div>
       <p id="mapping-finish-detail" class="form-hint">正在读取 PGM/YAML 和 PCD 写入状态。</p>
-      <label id="mapping-finish-map-name-label" for="mapping-finish-map-name">地图名称</label>
-      <input id="mapping-finish-map-name" value="mid360_map" pattern="[A-Za-z0-9_-]+" autocomplete="off">
+      <label id="mapping-finish-map-name-label" for="mapping-finish-map-name" hidden>地图 ID（会话启动后固定）</label>
+      <input id="mapping-finish-map-name" value="mid360_map" pattern="[A-Za-z0-9_-]+" autocomplete="off" readonly hidden>
       <label id="mapping-finish-confirm-label" class="finish-confirm"><input id="mapping-finish-confirm" type="checkbox"> 我确认本次采集已经完成，允许结束建图并保存</label>
       <div class="button-row">
         <button id="discard-mapping" type="button" class="danger">删除本次建图</button>
-        <button id="retain-mapping" type="button" class="primary">保留并写入地图版本</button>
+        <button id="retain-mapping" type="button" class="primary">完成采集并生成候选</button>
+        <button id="commit-mapping" type="button" class="primary" hidden>校验并登记候选版本</button>
       </div>
     </form>
   </dialog>

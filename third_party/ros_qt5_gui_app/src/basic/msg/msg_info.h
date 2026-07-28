@@ -11,6 +11,7 @@
                   OneValue(kDiagnostic, ) OneValue(kTopologyMapUpdate, ) \
                   OneValue(kExecuteTaskChain, ) OneValue(kCancelTaskChain, ) \
                   OneValue(kPreviewTaskChain, ) \
+                  OneValue(kWaypointPreviewStatus, ) \
                   OneValue(kTaskChainStatus, ) \
                   OneValue(kTeachRouteAnnotations, )
 
@@ -38,6 +39,7 @@ DEFINE_ENUM(MsgId, SOME_ENUM)
 #define MSG_ID_EXECUTE_TASK_CHAIN ToString(MsgId::kExecuteTaskChain)
 #define MSG_ID_CANCEL_TASK_CHAIN ToString(MsgId::kCancelTaskChain)
 #define MSG_ID_PREVIEW_TASK_CHAIN ToString(MsgId::kPreviewTaskChain)
+#define MSG_ID_WAYPOINT_PREVIEW_STATUS ToString(MsgId::kWaypointPreviewStatus)
 #define MSG_ID_TASK_CHAIN_STATUS ToString(MsgId::kTaskChainStatus)
 #define MSG_ID_TEACH_ROUTE_ANNOTATIONS ToString(MsgId::kTeachRouteAnnotations)
 

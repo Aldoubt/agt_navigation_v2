@@ -9,6 +9,8 @@ ament_python_install_package(${PROJECT_NAME})
 install(PROGRAMS
   scripts/system_health_node.py
   scripts/system_mode_manager.py
+  scripts/mapping_session_manager.py
+  scripts/mapping_session_workflow.py
   scripts/relocalization_mode_controller.py
   scripts/health_smoke.py
   scripts/teach_mapping_workflow.py
@@ -26,6 +28,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_process_manager test/test_process_manager.py)
   ament_add_pytest_test(test_localization_mode test/test_localization_mode.py)
   ament_add_pytest_test(test_teach_mapping test/test_teach_mapping.py)
+  ament_add_pytest_test(test_mapping_session test/test_mapping_session.py)
 endif()
 
 ament_package()

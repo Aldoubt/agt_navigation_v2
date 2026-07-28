@@ -37,8 +37,10 @@ QString yamlPath(QString path) {
 
 }  // namespace
 
-TaskLibraryDock::TaskLibraryDock(bool task_execution_enabled, QWidget *parent)
-    : QWidget(parent), task_execution_enabled_(task_execution_enabled) {
+TaskLibraryDock::TaskLibraryDock(bool task_execution_enabled,
+                                 bool task_preview_enabled, QWidget *parent)
+    : QWidget(parent), task_execution_enabled_(task_execution_enabled),
+      task_preview_enabled_(task_preview_enabled) {
   auto *config = Config::ConfigManager::Instance();
   maximum_points_ = QString::fromStdString(
       config->GetConfigValue("TaskMaximumPoints", "200")).toInt();
@@ -46,8 +48,6 @@ TaskLibraryDock::TaskLibraryDock(bool task_execution_enabled, QWidget *parent)
       config->GetConfigValue("TaskMaximumLoops", "10")).toInt();
   unknown_cell_policy_ = QString::fromStdString(
       config->GetConfigValue("TaskUnknownCellPolicy", "reject"));
-  line_check_step_ratio_ = QString::fromStdString(
-      config->GetConfigValue("TaskLineCheckStepRatio", "0.5")).toDouble();
   backup_count_ = QString::fromStdString(
       config->GetConfigValue("TaskBackupCount", "5")).toInt();
   maximum_points_ = std::max(1, maximum_points_);
@@ -160,7 +160,12 @@ TaskLibraryDock::TaskLibraryDock(bool task_execution_enabled, QWidget *parent)
   add_model_button(UiLanguage::Text("下移", "Down"), &TaskLibraryDock::MoveRowDown);
   add_model_button(UiLanguage::Text("反转", "Reverse"), &TaskLibraryDock::ReverseRows);
   add_model_button(UiLanguage::Text("启用/禁用", "Enable/disable"), &TaskLibraryDock::SetAllEnabled);
-  map_edit_button_ = button(UiLanguage::Text("地图编辑", "Edit on map"), this);
+  map_edit_button_ = button(
+      UiLanguage::Text("布置任务点", "Place waypoints"), this);
+  map_edit_button_->setObjectName("task_waypoint_edit_button");
+  map_edit_button_->setToolTip(UiLanguage::Text(
+      "第一次点击确定位置，第二次点击确定朝向",
+      "First click sets position; second click sets heading"));
   map_edit_button_->setCheckable(true);
   connect(map_edit_button_, &QPushButton::toggled, this,
           &TaskLibraryDock::ToggleMapEditing);
@@ -175,12 +180,16 @@ TaskLibraryDock::TaskLibraryDock(bool task_execution_enabled, QWidget *parent)
   outer->addLayout(row_buttons);
 
   auto *execution_row = new QHBoxLayout();
+  preview_button_ = button(UiLanguage::Text("预览路径", "Preview path"), this);
   execute_button_ = button(UiLanguage::Text("执行任务", "Execute task"), this);
   stop_button_ = button(UiLanguage::Text("取消", "Cancel"), this);
+  preview_button_->setEnabled(false);
   execute_button_->setEnabled(task_execution_enabled_);
   stop_button_->setEnabled(false);
+  connect(preview_button_, &QPushButton::clicked, this, &TaskLibraryDock::PreviewTask);
   connect(execute_button_, &QPushButton::clicked, this, &TaskLibraryDock::ExecuteTask);
   connect(stop_button_, &QPushButton::clicked, this, &TaskLibraryDock::StopTask);
+  execution_row->addWidget(preview_button_);
   execution_row->addWidget(execute_button_);
   execution_row->addWidget(stop_button_);
   outer->addLayout(execution_row);
@@ -207,7 +216,7 @@ TaskLibraryDock::TaskLibraryDock(bool task_execution_enabled, QWidget *parent)
       const auto candidate = DraftTask();
       const auto report = task_group::TaskValidator::validate(
           candidate, &map_raster_, unknown_cell_policy_,
-          line_check_step_ratio_, maximum_points_, maximum_loops_);
+          maximum_points_, maximum_loops_);
       if (report.ok() && report.binding_state == task_group::BindingState::Matched)
         SaveTask();
     });
@@ -255,6 +264,7 @@ void TaskLibraryDock::NewTask() {
   dirty_ = true;
   UpdateValidation();
   UpdateButtons();
+  map_edit_button_->setChecked(true);
 }
 
 void TaskLibraryDock::LoadSelected() {
@@ -274,13 +284,21 @@ void TaskLibraryDock::SaveTask() {
   QString error;
   task_ = DraftTask();
   model_->setTask(task_);
+  if (task_.points.isEmpty()) {
+    ShowError(
+        UiLanguage::Text("无法保存任务", "Cannot save task"),
+        UiLanguage::Text(
+            "任务还没有任务点。请启用“布置任务点”，在地图上先点位置、再点朝向。",
+            "The task has no waypoints. Enable Place waypoints, then click a position and a heading on the map."));
+    return;
+  }
   if (!EnsureRepository(&error)) {
     ShowError(UiLanguage::Text("保存失败", "Save failed"), error);
     return;
   }
   const auto report = task_group::TaskValidator::validate(
       task_, map_loaded_ ? &map_raster_ : nullptr, unknown_cell_policy_,
-      line_check_step_ratio_, maximum_points_, maximum_loops_);
+      maximum_points_, maximum_loops_);
   if (!report.ok() || report.binding_state != task_group::BindingState::Matched) {
     ShowError(UiLanguage::Text("校验未通过", "Validation failed"),
               (report.errors + report.warnings).join("\n"));
@@ -294,6 +312,7 @@ void TaskLibraryDock::SaveTask() {
   dirty_ = false;
   RefreshTasks();
   UpdateValidation();
+  DeactivateMapEditing();
 }
 
 void TaskLibraryDock::SaveAsTask() {
@@ -411,13 +430,26 @@ void TaskLibraryDock::RefreshTasks() {
   UpdateButtons();
 }
 
+void TaskLibraryDock::PreviewTask() {
+  if (!task_preview_enabled_ || task_running_ || preview_running_ ||
+      task_.task_group_id.isEmpty()) return;
+  UpdateValidation();
+  if (!validation_allows_preview_ || DraftTask().enabledPoints().size() < 2)
+    return;
+  preview_running_ = true;
+  validation_label_->setText(
+      UiLanguage::Text("预览：正在检查规划服务...",
+                       "Preview: checking planner service..."));
+  UpdateButtons();
+  emit signalPreviewTask(requestFromCurrent());
+}
+
 void TaskLibraryDock::ExecuteTask() {
   if (!task_execution_enabled_ || task_running_ || dirty_ || task_.task_group_id.isEmpty()) return;
   UpdateValidation();
   const auto report = task_group::TaskValidator::validate(
       DraftTask(), map_loaded_ ? &map_raster_ : nullptr,
-      unknown_cell_policy_, line_check_step_ratio_, maximum_points_,
-      maximum_loops_);
+      unknown_cell_policy_, maximum_points_, maximum_loops_);
   if (!report.ok() || report.binding_state != task_group::BindingState::Matched) return;
   task_running_ = true;
   execute_button_->setEnabled(false);
@@ -432,7 +464,7 @@ void TaskLibraryDock::RebindCurrentMap() {
   task_ = DraftTask();
   const auto report = task_group::TaskValidator::validate(
       model_->task(), &map_raster_, unknown_cell_policy_,
-      line_check_step_ratio_, maximum_points_, maximum_loops_);
+      maximum_points_, maximum_loops_);
   if (report.binding_state != task_group::BindingState::ContentChanged) return;
   task_.map_binding = map_raster_.binding;
   model_->setTask(task_);
@@ -591,6 +623,42 @@ void TaskLibraryDock::UpdateTaskExecutionStatus(const TaskExecutionStatus &statu
   UpdateButtons();
 }
 
+void TaskLibraryDock::UpdateWaypointPreviewStatus(const std::string &status) {
+  const QString value = QString::fromStdString(status);
+  QString message;
+  bool terminal = false;
+  if (value == "planning") {
+    message = UiLanguage::Text("预览：规划器已接收请求",
+                               "Preview: planner accepted request");
+  } else if (value.startsWith("planning:")) {
+    message = UiLanguage::Text("预览：正在规划第 %1 段",
+                               "Preview: planning segment %1")
+                  .arg(value.mid(QString("planning:").size()));
+  } else if (value.startsWith("succeeded:")) {
+    message = UiLanguage::Text("预览完成：%1", "Preview completed: %1")
+                  .arg(value.mid(QString("succeeded:").size()));
+    terminal = true;
+  } else if (value.startsWith("failed:")) {
+    message = UiLanguage::Text("预览失败：%1", "Preview failed: %1")
+                  .arg(value.mid(QString("failed:").size()));
+    terminal = true;
+  } else if (value.startsWith("rejected:")) {
+    message = UiLanguage::Text("预览被拒绝：%1", "Preview rejected: %1")
+                  .arg(value.mid(QString("rejected:").size()));
+    terminal = true;
+  } else if (value.startsWith("unavailable:")) {
+    message = UiLanguage::Text(
+        "预览服务未启动：请使用 waypoint_preview.launch.py 启动",
+        "Preview service is unavailable: start waypoint_preview.launch.py");
+    terminal = true;
+  } else {
+    message = UiLanguage::Text("预览状态：%1", "Preview status: %1").arg(value);
+  }
+  validation_label_->setText(message);
+  if (terminal) preview_running_ = false;
+  UpdateButtons();
+}
+
 bool TaskLibraryDock::EnsureRepository(QString *error) {
   QString root, map_id, version;
   if (!deriveMapVersion(&root, &map_id, &version)) {
@@ -636,6 +704,7 @@ void TaskLibraryDock::SetCurrentTask(const task_group::TaskGroup &task) {
 void TaskLibraryDock::UpdateValidation() {
   if (task_.task_group_id.isEmpty()) {
     geometry_read_only_ = false;
+    validation_allows_preview_ = false;
     validation_allows_execution_ = false;
     binding_state_ = task_group::BindingState::Unverified;
     binding_label_->setText(UiLanguage::Text("地图绑定：无", "Map binding: none"));
@@ -651,8 +720,7 @@ void TaskLibraryDock::UpdateValidation() {
   const auto draft = DraftTask();
   const auto report = task_group::TaskValidator::validate(
       draft, map_loaded_ ? &map_raster_ : nullptr,
-      unknown_cell_policy_, line_check_step_ratio_, maximum_points_,
-      maximum_loops_);
+      unknown_cell_policy_, maximum_points_, maximum_loops_);
   binding_label_->setText(
       UiLanguage::Text("地图绑定：%1（%2）", "Map binding: %1 (%2)")
           .arg(task_group::bindingStateText(report.binding_state),
@@ -677,6 +745,9 @@ void TaskLibraryDock::UpdateValidation() {
   geometry_read_only_ =
       report.binding_state == task_group::BindingState::GeometryMismatch;
   binding_state_ = report.binding_state;
+  validation_allows_preview_ =
+      map_loaded_ && report.ok() &&
+      report.binding_state != task_group::BindingState::GeometryMismatch;
   validation_allows_execution_ =
       report.ok() && report.binding_state == task_group::BindingState::Matched;
   table_->setEditTriggers(geometry_read_only_ ? QAbstractItemView::NoEditTriggers
@@ -697,6 +768,12 @@ void TaskLibraryDock::UpdateValidation() {
 }
 
 void TaskLibraryDock::UpdateButtons() {
+  if (preview_button_) {
+    preview_button_->setEnabled(
+        task_preview_enabled_ && !task_running_ && !preview_running_ &&
+        !task_.task_group_id.isEmpty() && validation_allows_preview_ &&
+        DraftTask().enabledPoints().size() >= 2);
+  }
   execute_button_->setEnabled(task_group::canSubmitTask(
       task_execution_enabled_, task_running_, dirty_,
       !task_.task_group_id.isEmpty(), validation_allows_execution_,
@@ -759,9 +836,10 @@ task_group::TaskGroup TaskLibraryDock::DraftTask() const {
 
 TaskExecutionRequest TaskLibraryDock::requestFromCurrent() const {
   TaskExecutionRequest request;
-  request.loop_count = model_->task().loop ? static_cast<uint32_t>(model_->task().loop_count) : 1U;
-  for (const auto &point : model_->task().enabledPoints()) request.points.emplace_back(point.x, point.y, point.yaw, point.name.toStdString());
-  if (!task_.task_group_id.isEmpty()) {
+  const auto draft = DraftTask();
+  request.loop_count = draft.loop ? static_cast<uint32_t>(draft.loop_count) : 1U;
+  for (const auto &point : draft.enabledPoints()) request.points.emplace_back(point.x, point.y, point.yaw, point.name.toStdString());
+  if (!dirty_ && !task_.task_group_id.isEmpty()) {
     request.task_file = repository_.pathFor(task_.task_group_id).toStdString();
   }
   return request;

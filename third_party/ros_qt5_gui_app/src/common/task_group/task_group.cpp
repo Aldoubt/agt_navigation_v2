@@ -501,13 +501,12 @@ bool TaskValidator::loadMap(const QString &map_yaml, const QString &map_id,
 }
 
 ValidationReport TaskValidator::validate(const TaskGroup &task, const MapRaster *raster,
-                                         const QString &unknown_policy, double line_step_ratio,
+                                         const QString &unknown_policy,
                                          int maximum_points, int maximum_loops) {
   ValidationReport report;
   QString error;
   if (!task.isValid(&error, maximum_points, maximum_loops)) report.errors.push_back(error);
   if (unknown_policy != "reject" && unknown_policy != "warn" && unknown_policy != "allow") report.errors.push_back("unknown_cell_policy must be reject, warn, or allow");
-  if (!(line_step_ratio > 0.0) || !std::isfinite(line_step_ratio)) report.errors.push_back("line check step ratio must be positive");
   if (!raster) {
     report.binding_state = BindingState::Unverified;
     report.warnings.push_back("map was not loaded; raster checks are pending");
@@ -535,18 +534,8 @@ ValidationReport TaskValidator::validate(const TaskGroup &task, const MapRaster 
     }
     return true;
   };
-  for (int index = 0; index < points.size(); ++index) {
-    checkCell(points.at(index).x, points.at(index).y, "waypoint " + points.at(index).id);
-    if (index == 0) continue;
-    const auto &from = points.at(index - 1);
-    const auto &to = points.at(index);
-    const double length = std::hypot(to.x - from.x, to.y - from.y);
-    const int steps = std::max(1, static_cast<int>(std::ceil(length / (raster->binding.resolution * line_step_ratio))));
-    for (int step = 0; step <= steps; ++step) {
-      const double ratio = static_cast<double>(step) / steps;
-      if (!checkCell(from.x + ratio * (to.x - from.x), from.y + ratio * (to.y - from.y),
-                     QString("path %1->%2").arg(from.id, to.id))) break;
-    }
+  for (const auto &point : points) {
+    checkCell(point.x, point.y, "waypoint " + point.id);
   }
   return report;
 }

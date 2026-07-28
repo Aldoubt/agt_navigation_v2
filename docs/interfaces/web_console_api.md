@@ -15,8 +15,8 @@ No endpoint accepts a shell command.
 | GET | `/api/v1/mapping/map` | mode-gated bounded occupancy preview and current mapping robot pose; includes `active_mode` |
 | GET | `/api/v1/mapping/pointcloud` | mode-gated bounded registered-point preview and current mapping robot pose; includes `active_mode` |
 | GET | `/api/v1/mapping/session` | current managed mapping session and PGM/PCD asset evidence |
-| POST | `/api/v1/mapping/session/prepare` | create or reuse a managed temporary mapping session |
-| POST | `/api/v1/mapping/finish` | retain/register or delete the current mapping session; retain may include a validated `map_name` |
+| POST | `/api/v1/mapping/session/prepare` | call ManageMappingSession START with a fixed map ID and allowed mapping arguments |
+| POST | `/api/v1/mapping/finish` | `retain` finalizes capture to an editable candidate, `commit` registers a new version, `delete` discards recoverably |
 | POST | `/api/v1/system/mode` | start a configured profile with declared key/value launch args |
 | POST | `/api/v1/system/stop` | stop manager-owned mode process groups |
 | GET | `/api/v1/maps` | list/filter registered versions |
@@ -40,14 +40,15 @@ with an ordered startup workflow, separate sensor/mapping/navigation controls,
 map lifecycle actions, task-readiness display, experiment recording, and a
 bounded relocalization Action form. It does not expose a velocity or TF control.
 
-Mapping completion is transactional from the operator's point of view: the UI first
-requires confirmation that acquisition is complete and shows the final map name.
-Retain waits for both the map-saver PGM/YAML pair and a ready FAST-LIVO2 PCD
-processing record before importing an immutable map version. For a managed Web
-session, if FAST-LIVO2 reports `state: ready` without `pcd_sha256`, Web computes
-the SHA-256 after the mapping process has stopped and records it in the session
-processing record before import. Navigation accepts only an active READY
-version and derives its three navigation asset paths from that version's manifest.
+Real mapping is delegated entirely to `/agt/mapping/manage_session`; the Web
+service does not create artifact directories, call SaveMap, wait for PCD, or
+register a version. `retain` confirms acquisition and runs FINALIZE_CAPTURE,
+which preserves the online preview, normally closes PCD/bag writers, rebuilds
+the offline ray-traced + `ground_temporal` map, and yields `CANDIDATE_READY` only
+after its production report passes. A retryable offline-build failure must not be
+presented as an editable candidate. `commit` separately validates the possibly edited
+candidate and creates an immutable version. Navigation accepts only an active
+READY version and derives its three navigation asset paths from that version's manifest.
 
 The configured `offline` backend is a deterministic Web-only simulator. It may
 simulate profile state, one bounded relocalization result, and the playback state

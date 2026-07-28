@@ -12,15 +12,27 @@
 - 默认仅把 `0.10 m <= z <= 1.00 m` 的点作为投影障碍候选。
 - 全图投影输入默认节流到 `0.2 Hz`，先以 `0.10 m` 体素和每帧 `8000` 点上限压缩，再通过
   `/agt/mapping/octomap_points` 送入 OctoMap；
+  节流器只保留尚未处理的最新一帧，并用 steady-time timer 取帧；它保留原始
+  `lidar_link` 和点云时间戳，使 OctoMap 使用同一时刻的动态 TF，而不会在处理落后时继续
+  投递已经退出 TF cache 的旧帧；每次投递后还会等待对应 OccupancyGrid 发布完成才释放
+  下一帧，等待上限默认 `60 s`，避免 OctoMap 自身序列化期间形成第二层订阅积压；
   FAST-LIVO2 原始注册点云仍以其正常频率发布，局部障碍链不经过该节流器。该限制用于避免
   大型 OctoMap 序列化速度低于 10 Hz 输入而造成 Message Filter 积压，实际频率应在独立 bag
-  上根据地图更新延迟和峰值内存重新验证。
+上根据地图更新延迟和峰值内存重新验证。
+
+Humble 的 `octomap_server` 2.3.1 使用参数名 `point_cloud_min_z` /
+`point_cloud_max_z`。它的 `incremental_2D_projection=true` 分支在当前源码中不会调用
+`update2DMap`，会得到有尺寸但全 `-1` 的二维图，因此本 baseline 明确使用完整二维投影。
+OctoMap 以 volatile QoS 发布内部 `/agt/map/mapping_occupancy_raw`，节流节点确认投影完成后
+再把同一消息以 transient-local QoS 中继到公共 `/agt/map/mapping_occupancy`；Qt、SaveMap 和
+bag 的公共接口不变。`latch=false` 避免在没有订阅者时仍序列化所有完整 3D 输出。
 
 OctoMap 是持久 3D 八叉树，会同时保存射线经过的 free 节点和终点 occupied 节点；`0.05 m`
 分辨率、`40 m` 最大射线和 MID360 原始点数的组合会让节点数随覆盖区域持续增长。在线 baseline
 已将最大射线改为 `15 m`，启用增量二维投影和压缩发布。`Message Filter queue is full` 或
 `timestamp is earlier than all the data in the transform cache` 表示投影处理/TF 时间轴已经落后，
 不是可以通过增大队列解决的内存泄漏；增大队列只会保留更多待处理点云。
+建图 bag 同时记录 `/agt/mapping/octomap_points`，用于核对进入 OctoMap 的实际帧、header 和 TF。
 
 只需要 FAST-LIVO2 PCD 时关闭全图 3D 投影，避免在长 bag 回放中建立持久 OctoMap：
 
@@ -51,7 +63,7 @@ ros2 launch agt_map_processing octomap_projection.launch.py use_sim_time:=true
 ```
 
 参数集中在 [`config/octomap_projection.yaml`](config/octomap_projection.yaml)。实测前重点根据
-地面位置、机器人高度和作物冠层调整 `pointcloud_min_z`、`pointcloud_max_z`、
+地面位置、机器人高度和作物冠层调整 `point_cloud_min_z`、`point_cloud_max_z`、
 `occupancy_min_z` 和 `occupancy_max_z`。
 
 生成地图后，在仓库根目录执行：
@@ -132,7 +144,7 @@ ros2 run agt_map_processing apply_swept_footprint_to_map.py \
 
 ## 地面、时序动态与高度分层对照
 
-`generate_traversability_variants.py` 只用于离线对照，一次直接读取 bag 并生成：
+`generate_traversability_variants.py` 默认仍只用于离线对照，一次直接读取 bag 并生成：
 
 - `ground_only`：局部约束 RANSAC 地面平面以上的多帧障碍；
 - `ground_temporal`：再要求同一栅格的观测时间跨度至少 `0.5 s`，抑制移动拖影；
@@ -151,6 +163,22 @@ ros2 run agt_map_processing generate_traversability_variants.py \
 `0.08 m`、最大坡度 `20 deg`。障碍层为 `0.10–0.35 m`、`0.35–0.65 m` 和
 `0.65–2.0 m`；每个栅格至少三帧，时序变体还要求跨度 `0.5 s`。所有变体最后应用完整
 canonical footprint 扫掠。
+
+受管建图会话会显式增加 `--rebuild-raytraced-baseline`，此时工具还会：
+
+- 从 bag 的 `/tf_static` 取得 `base_footprint -> lidar_link` 传感器偏移；
+- 按 `/agt/mapping/odometry` 时间插值注册点云位姿，以记录的传感器原点重建二维自由空间射线；
+- 以显式 `maximum_evidence_range` 和 `grid_padding` 扩展画布；扩展像素初始保持 `205` unknown，
+  只有射线经过的栅格才变成 free；
+- 把超范围障碍、源/目标边界、射线帧数、地面拟合、位姿丢失、证据/扫掠裁剪和四边余量写入
+  `comparison_report.json`；
+- 只把保守 `ground_temporal` 标记为可能的 managed candidate。该标记仍固定
+  `eligible_for_execution=false`。
+
+当前受管默认值是已存在离线 OctoMap 基线的 `40 m` 证据/射线范围、`1.0 s` 射线采样间隔和
+`2.0 m` unknown 画布余量。障碍 RANSAC、三帧、`0.5 s` 时序、`0.05 m` 障碍 padding 和
+canonical sweep 参数没有改变。`agt_system_manager` 会额外要求全部注册点云有匹配位姿、全部
+地面平面拟合成功、零裁剪、报告 occupied 数与 PGM 一致，并在通过前保持 Qt candidate 关闭。
 
 高度分层图默认写入报告 `eligible_for_execution=false`。Bunker 产品车体高 `0.4 m`，但
 MID360、支架和线束组成的整车最高点尚未实测，因此 `0.65 m` 只是对比阈值，不能据此

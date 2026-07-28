@@ -180,6 +180,15 @@ void MainWindow::registerChannel() {
           Qt::QueuedConnection);
     }
   });
+  SUBSCRIBE(MSG_ID_WAYPOINT_PREVIEW_STATUS, [this](const std::string &status) {
+    if (!task_library_dock_) return;
+    QMetaObject::invokeMethod(
+        task_library_dock_,
+        [this, status]() {
+          task_library_dock_->UpdateWaypointPreviewStatus(status);
+        },
+        Qt::QueuedConnection);
+  });
 }
 
 
@@ -392,6 +401,13 @@ void MainWindow::setupUi() {
   QIcon icon5;
   icon5.addFile(QString::fromUtf8(":/images/edit.svg"),
                 QSize(32, 32), QIcon::Normal, QIcon::Off);
+  const bool base_map_editing_enabled =
+      GET_CONFIG_VALUE("EnableBaseMapEditing", "true") == "true";
+  const bool base_map_save_as_enabled =
+      base_map_editing_enabled &&
+      GET_CONFIG_VALUE("EnableBaseMapSaveAs", "true") == "true";
+  const bool map_open_enabled =
+      GET_CONFIG_VALUE("EnableMapOpen", "true") == "true";
   QToolButton *edit_map_btn = new QToolButton();
   edit_map_btn->setIcon(icon5);
   edit_map_btn->setText(UiLanguage::Text("编辑地图", "Edit map"));
@@ -433,6 +449,10 @@ void MainWindow::setupUi() {
   re_save_map_btn->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
   re_save_map_btn->setStyleSheet(modernToolButtonStyle);
   horizontalLayout_tools->addWidget(re_save_map_btn);
+  edit_map_btn->setVisible(base_map_editing_enabled);
+  save_map_btn->setVisible(base_map_editing_enabled);
+  re_save_map_btn->setVisible(base_map_save_as_enabled);
+  open_map_btn->setVisible(map_open_enabled);
   center_layout->addWidget(tools_strip);
 
   horizontalLayout_tools->addItem(
@@ -895,13 +915,18 @@ void MainWindow::setupUi() {
 
   const bool task_library_enabled =
       GET_CONFIG_VALUE("TaskLibraryEnabled", "true") == "true";
+  const bool legacy_topology_tasks_enabled =
+      GET_CONFIG_VALUE("EnableLegacyTopologyTasks", "true") == "true";
   auto *task_workspace_tabs = new QTabWidget();
   task_workspace_tabs->setDocumentMode(true);
-  task_workspace_tabs->addTab(
-      task_list_widget, UiLanguage::Text("拓扑任务", "Topology task"));
+  if (legacy_topology_tasks_enabled) {
+    task_workspace_tabs->addTab(
+        task_list_widget, UiLanguage::Text("拓扑任务", "Topology task"));
+  }
   if (task_library_enabled) {
     task_library_dock_ =
-        new TaskLibraryDock(task_execution_enabled, task_workspace_tabs);
+        new TaskLibraryDock(task_execution_enabled, task_preview_enabled,
+                            task_workspace_tabs);
     task_workspace_tabs->addTab(
         task_library_dock_, UiLanguage::Text("任务组库", "Task Library"));
     task_workspace_tabs->setCurrentWidget(task_library_dock_);
@@ -917,7 +942,8 @@ void MainWindow::setupUi() {
   nav_goal_list_dock_widget->setMaximumSize(680, QWIDGETSIZE_MAX);
   dock_manager_->addDockWidget(ads::DockWidgetArea::RightDockWidgetArea,
                                nav_goal_list_dock_widget, center_docker_area_);
-  nav_goal_list_dock_widget->toggleView(task_library_enabled);
+  nav_goal_list_dock_widget->toggleView(task_library_enabled ||
+                                        legacy_topology_tasks_enabled);
   connect(task_workspace_tabs, &QTabWidget::currentChanged, this,
           [this, task_workspace_tabs](int index) {
             if (task_library_dock_ &&
@@ -1023,6 +1049,10 @@ void MainWindow::setupUi() {
 
   //////////////////////////////////////////////////////Task Library
   if (task_library_dock_) {
+    connect(task_library_dock_, &TaskLibraryDock::signalPreviewTask,
+            [this](const TaskExecutionRequest &request) {
+              PUBLISH(MSG_ID_PREVIEW_TASK_CHAIN, request);
+            });
     connect(task_library_dock_, &TaskLibraryDock::signalExecuteTask,
             [this](const TaskExecutionRequest &request) {
               PUBLISH(MSG_ID_EXECUTE_TASK_CHAIN, request);
@@ -1081,7 +1111,9 @@ void MainWindow::setupUi() {
   connect(reloc_btn, &QToolButton::clicked,
           [this]() { display_manager_->StartReloc(); });
 
-  connect(re_save_map_btn, &QToolButton::clicked, [this]() {
+  connect(re_save_map_btn, &QToolButton::clicked,
+          [this, base_map_save_as_enabled]() {
+    if (!base_map_save_as_enabled) return;
     QString fileName = QFileDialog::getSaveFileName(nullptr, "Save Map files",
                                                     "", "Map files (*.yaml,*.pgm,*.pgm.json)",
                                                     nullptr, QFileDialog::DontUseNativeDialog);
@@ -1116,7 +1148,9 @@ void MainWindow::setupUi() {
     }
   });
 
-  connect(save_map_btn, &QToolButton::clicked, [this]() {
+  connect(save_map_btn, &QToolButton::clicked,
+          [this, base_map_editing_enabled]() {
+    if (!base_map_editing_enabled) return;
     
     // 保存占用栅格地图
     auto occ_map = display_manager_->GetOccupancyMap();
@@ -1138,7 +1172,8 @@ void MainWindow::setupUi() {
                             QMessageBox::Ok);
   });
 
-  connect(open_map_btn, &QToolButton::clicked, [this]() {
+  connect(open_map_btn, &QToolButton::clicked, [this, map_open_enabled]() {
+    if (!map_open_enabled) return;
     QStringList filters;
     filters
         << "地图(*.yaml)"
@@ -1156,7 +1191,10 @@ void MainWindow::setupUi() {
   });
 
   
-  connect(edit_map_btn, &QToolButton::clicked, [this, tools_edit_map_widget, edit_map_btn]() {
+  connect(edit_map_btn, &QToolButton::clicked,
+          [this, tools_edit_map_widget, edit_map_btn,
+           base_map_editing_enabled]() {
+    if (!base_map_editing_enabled) return;
     if (edit_map_btn->text() == "编辑地图") {
       display_manager_->SetEditMapMode(Display::MapEditMode::kMoveCursor);
       edit_map_btn->setText("结束编辑");

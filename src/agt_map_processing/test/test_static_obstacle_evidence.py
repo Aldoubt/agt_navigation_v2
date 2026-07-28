@@ -2,6 +2,7 @@ from pathlib import Path
 import sys
 
 import numpy as np
+from PIL import Image, ImageDraw
 
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
@@ -15,7 +16,9 @@ from static_obstacle_evidence import (  # noqa: E402
 )
 from apply_swept_footprint_to_map import apply_swept_cells, read_p5, write_p5  # noqa: E402
 from generate_traversability_variants import (  # noqa: E402
+    expand_baseline,
     fit_ground_plane,
+    raytrace_free_scan,
     select_cells,
     update_cell_statistics,
 )
@@ -162,6 +165,54 @@ def test_temporal_cell_filter_requires_observation_span():
     assert select_cells(
         statistics, minimum_observations=3, minimum_span=0.5
     ) == {(2, 3)}
+
+
+def test_expanded_baseline_preserves_pixels_and_adds_only_unknown_space():
+    baseline = np.asarray([[0, 205], [254, 205]], dtype=np.uint8)
+    expanded, origin_x, origin_y, report = expand_baseline(
+        baseline,
+        origin_x=0.0,
+        origin_y=0.0,
+        resolution=1.0,
+        odometry=[(0.0, 0.5, 0.5, 0.0, 0.0)],
+        evidence_range=2.0,
+        padding=1.0,
+    )
+
+    assert (origin_x, origin_y) == (-3.0, -3.0)
+    assert report["metric_bounds"] == [-3.0, -3.0, 4.0, 4.0]
+    assert expanded.shape == (7, 7)
+    assert np.array_equal(expanded[2:4, 3:5], baseline)
+    preserved = np.zeros_like(expanded, dtype=bool)
+    preserved[2:4, 3:5] = True
+    assert np.all(expanded[~preserved] == 205)
+
+
+def test_raytrace_free_scan_marks_only_observed_wedges():
+    raster = np.full((21, 21), 205, dtype=np.uint8)
+    image = Image.fromarray(raster)
+    statistics = raytrace_free_scan(
+        ImageDraw.Draw(image),
+        np.asarray([[4.0, 0.0, 0.0], [4.0, 0.2, 0.0]], dtype=np.float64),
+        pose=(0.0, 0.0, 0.0, 0.0),
+        sensor_offset_xy=(0.0, 0.0),
+        origin_x=-10.0,
+        origin_y=-10.0,
+        resolution=1.0,
+        width=21,
+        height=21,
+        maximum_range=5.0,
+        angular_resolution=0.1,
+        minimum_relative_height=-1.0,
+        maximum_relative_height=1.0,
+        maximum_gap_bins=2,
+    )
+    output = np.asarray(image)
+
+    assert statistics["rays"] == 2
+    assert np.count_nonzero(output == 254) > 0
+    assert output[10, 10] == 254
+    assert output[0, 0] == 205
 
 
 def test_offline_launch_preserves_recorded_raytraced_baseline_by_default():

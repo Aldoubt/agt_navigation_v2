@@ -10,7 +10,7 @@ profiles:
     mode: MAPPING
     description: Existing modular mapping chain through agt_bringup
     command: [ros2, launch, agt_bringup, system.launch.py, mode:=mapping, start_system_health:=false]
-    allowed_argument_keys: [runtime_dir, user_config_path, map_name, mapping_output_dir, start_sensor, start_chassis, start_chassis_monitor, chassis_backend, can_interface, start_rviz, start_mapping_gui, record_bag, bag_profile, use_sim_time]
+    allowed_argument_keys: [runtime_dir, user_config_path, platform_profile, map_name, mapping_output_dir, start_sensor, start_chassis, start_chassis_monitor, chassis_backend, can_interface, start_rviz, start_mapping_gui, record_bag, bag_profile, use_sim_time]
   navigation:
     mode: NAVIGATION
     description: Existing modular navigation chain through agt_bringup

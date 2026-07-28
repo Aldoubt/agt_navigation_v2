@@ -186,20 +186,22 @@ TEST(TaskEditorState, SubmissionIsFailClosed) {
             "CONTENT_CHANGED");
 }
 
-TEST(TaskValidator, ChecksFreeUnknownOccupiedOutsideAndCrossingCells) {
+TEST(TaskValidator, ChecksWaypointCellsWithoutTreatingChordsAsRoutes) {
   task_group::MapRaster raster;
   raster.binding = binding();
   raster.binding.resolution = 1.0;
-  raster.binding.width = 2;
+  raster.binding.width = 3;
   raster.binding.height = 2;
   raster.binding.origin_x = 10.0;
   raster.binding.origin_y = 20.0;
   raster.binding.origin_yaw = 0.0;
-  raster.image = QImage(2, 2, QImage::Format_Grayscale8);
+  raster.image = QImage(3, 2, QImage::Format_Grayscale8);
   raster.image.setPixelColor(0, 0, QColor(254, 254, 254));
   raster.image.setPixelColor(1, 0, Qt::black);
+  raster.image.setPixelColor(2, 0, QColor(254, 254, 254));
   raster.image.setPixelColor(0, 1, QColor(205, 205, 205));
   raster.image.setPixelColor(1, 1, QColor(254, 254, 254));
+  raster.image.setPixelColor(2, 1, QColor(254, 254, 254));
 
   auto value = task_group::TaskGroup::newTask(raster.binding, "Validation");
   value.task_group_id = "validation";
@@ -210,16 +212,18 @@ TEST(TaskValidator, ChecksFreeUnknownOccupiedOutsideAndCrossingCells) {
   EXPECT_FALSE(task_group::TaskValidator::validate(value, &raster).ok());
   EXPECT_TRUE(task_group::TaskValidator::validate(value, &raster, "warn").ok());
 
-  value.points[0] = {"outside", "outside", 12.0, 20.5, 0.0, true, {}};
+  value.points[0] = {"outside", "outside", 13.0, 20.5, 0.0, true, {}};
+  EXPECT_FALSE(task_group::TaskValidator::validate(value, &raster).ok());
+
+  value.points[0] = {"occupied", "occupied", 11.5, 21.5, 0.0, true, {}};
   EXPECT_FALSE(task_group::TaskValidator::validate(value, &raster).ok());
 
   value.points = {
       {"from", "from", 10.5, 21.5, 0.0, true, {}},
-      {"to", "to", 11.5, 21.5, 0.0, true, {}},
+      {"to", "to", 12.5, 21.5, 0.0, true, {}},
   };
   const auto crossing = task_group::TaskValidator::validate(value, &raster);
-  EXPECT_FALSE(crossing.ok());
-  EXPECT_TRUE(crossing.errors.join(" ").contains("occupied"));
+  EXPECT_TRUE(crossing.ok()) << crossing.errors.join(" ").toStdString();
 }
 
 }  // namespace

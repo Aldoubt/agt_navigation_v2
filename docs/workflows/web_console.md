@@ -96,13 +96,14 @@ systemd/NetworkManager 配置完成接口初始化，之后在网页中只检查
 “启动传感器”按钮会变成禁用的“传感器已启动”，避免重复初始化。建图或导航运行时，另一个主链按钮也会
 被锁定；建图状态不能通过普通停止按钮直接结束，必须点击“完成建图”并选择后续操作。
 
-点击“完成建图”后，Web 会先显示当前会话状态、最终地图名称和“我确认本次采集已经完成”确认项；这一步不会因为误触就立即停止建图。
-选择“保留并写入地图版本”时，Web 会先调用建图 launch 内的 `nav2_map_server/map_saver_server` 保存
-`PGM/YAML`，随后正常停止建图进程，让 FAST-LIVO2 完成 `localization_map.pcd` 和
-`localization_map.processing.yaml` 的落盘。页面持续显示 PGM/YAML、PCD 及 processing record 的状态，
-只有 PCD record 为 `state: ready` 且全部资产存在时，才会调用 `agt_map_manager` 登记不可变地图版本。若受管 Web 会话中的 FAST-LIVO2 record 缺少 `pcd_sha256`，Web 会在建图进程正常停止后按实际 PCD 计算并补写摘要；已有摘要不一致时仍然失败闭环。
-登记结果会提示版本 ID；“删除本次建图”只删除 `runtime/mapping_sessions/` 下的临时会话，不登记版本。
-如果保留流程在登记阶段失败，会话会进入 `ERROR` 并保留证据供检查；此时建图页仍提供“删除残留文件”，它会在未生成 READY 版本的前提下清理临时会话及本次失败产生的无效版本目录。
+点击“完成建图”后，Web 会显示当前会话和“我确认本次采集已经完成”确认项；地图 ID 在 START 时固定。
+真实 ROS 后端只调用 `/agt/mapping/manage_session`，不再直接调用 SaveMap、等待 PCD 或登记版本。
+“完成采集并生成候选”执行 FINALIZE_CAPTURE：后端先保存在线 PGM/YAML，再正常停止建图以收口
+PCD 和强制录制的 mapping bag；随后保存 `online_preview`，从同一 bag 离线重建射线 free/unknown
+基线并叠加 `ground_temporal`。资产/hash、位姿、地面拟合、裁剪、报告和边界全部通过后状态才变为
+`CANDIDATE_READY`；离线失败显示 `CANDIDATE_BUILD_FAILED`，不得回退打开在线预览图。
+候选可以用受限 Qt candidate profile 编辑；“校验并登记候选版本”另行执行 COMMIT，并生成新的
+不可变版本。“删除本次建图”执行可恢复 DISCARD；失败版本只 soft-delete，不永久 purge。
 离线后端可以先启动离线模拟建图、再在实验页选择完整 bag 执行“模拟回放”；建图预览会显示带有“模拟”标记的二维栅格和点云，便于检查拖动、缩放、机器人居中和结束建图按钮，但不会读取 bag 消息。离线保留最多占用一个模拟地图槽位，不能导出真实 PGM/YAML/PCD；删除后才能重新创建离线模拟地图。需要语义撰写、实车导航或重定位使用的真实资产，必须切换 ROS 2 后端按上一段流程生成并登记。
 
 启动导航前，必须在“导航链”面板选择地图版本。下拉框只列出资产完整、状态为 `READY` 且已激活的版本，
