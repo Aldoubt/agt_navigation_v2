@@ -2,6 +2,10 @@
 
 `agt_navigation_v2` 是面向农业机器人导航实验的 ROS 2 模块化平台。
 
+当前业务控制面采用三层架构：Qt5/Web/CLI 是可替换客户端，system/mission/map/experiment
+manager 组成 ROS 2 统一业务后端，建图、定位、Nav2、安全和底盘保留为机器人能力层。接口和
+责任边界见 [`docs/architecture/three_layer_system_architecture.md`](docs/architecture/three_layer_system_architecture.md)。
+
 当前已完成仓库与接口骨架、机器人描述、MID360 驱动、FAST-LIVO2 建图适配、OctoMap
 二维投影、ICP/NDT 重定位、维护版 Qt5 地图与多点 Action 界面、Nav2 waypoint 离线闭环，以及 BUNKER
 底盘通讯和履带安全层。基础 waypoint 导航链已经形成工程集成闭环，但尚未完成完整实车指标验收。

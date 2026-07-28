@@ -1,5 +1,9 @@
 # AGT Navigation Data Stream
 
+统一业务控制流为 `Qt/Web/CLI -> ROS 2 business API -> manager -> robot capability`。正式
+Mission 通过 `/agt/missions/execute` 调用项目 waypoint Action；活动地图、Bag 和 RobotState
+分别由 map、experiment 和 system manager 发布。界面不读取权威资产路径，也不启动 launch。
+
 本文记录当前 Bunker Qt5/FAST-LIO 导航基线的两种启动方式：命令行直接启动，以及 Web 控制台通过系统管理器启动。文档只描述当前代码已经实现的链路，不把语义地图、覆盖规划和实车运动验收描述成默认已开启能力。
 
 ## 1. 启动前环境

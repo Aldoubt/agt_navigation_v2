@@ -20,6 +20,12 @@
   Bunker driver.
 - Semantic-map and coverage-planning launch arguments must default to `false`.
 - Do not modify validated parameters or datasets from the legacy repository without explicit approval.
+- ROS 2 managers are the only real business backend. Qt5 and Web are clients and must not own
+  system mode, mission, active-map, experiment, bag-process, safety, or chassis state.
+- `agt_mission_manager` may sequence only project Actions and finite waits. It must not call Nav2
+  native Actions, start launch files, publish velocity/TF, or infer completion from distance or time.
+- `/agt/system/robot_state` is a read model, not a new business owner. Unknown or stale evidence
+  remains UNKNOWN, and active map identity comes only from `agt_map_manager`.
 - Every change that affects architecture or interfaces must update `docs/`, this file, and `docs/migration/migration_matrix.md`.
 - The raw MID360 `/agt/sensors/lidar/custom` topic is preserved. In the normal baseline FAST-LIVO2
   consumes only the profile-driven `/agt/sensors/lidar/custom_filtered` output from

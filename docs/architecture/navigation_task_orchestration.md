@@ -19,8 +19,8 @@ navigation Actions          future arm Actions
 Nav2 -> agt_safety -> chassis
 ```
 
-mission orchestrator 尚未实现。当前 Qt 直接调用
-`/agt/navigation/execute_waypoint_task` 是第一阶段稳定边界。
+第一版 `agt_mission_manager` 实现有限顺序编排。它只支持版本化 waypoint task、有限时长等待
+和带 timeout 的结构化事件等待；底层 `/agt/navigation/execute_waypoint_task` 继续作为稳定能力边界。
 
 ## 模式合同
 
