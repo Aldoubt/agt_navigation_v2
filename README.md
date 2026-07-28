@@ -429,7 +429,7 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 | `agt_coverage_planning` | TASK-00~15 完成、TASK-16 部分：可取消 Action、总控条件启动、离线预览和路径时间 JSON 报告可用 | 修复零长度 SWATH；增加覆盖率、重叠率、跨行/鱼尾策略和统一任务报告 |
 | `agt_safety` | BUNKER 履带仲裁、急停锁存、限速、超时和合成消息测试已完成 | 架空履带后做低速实车制动距离、急停和进程/通信中断测试 |
 | `agt_chassis` | 官方 bunker_ros2、状态桥接、TF 隔离和双层命令 watchdog 已落地并编译 | 需要 BUNKER CAN 实机验证协议版本、轮速里程计、状态错误码和断连归零 |
-| `agt_ui_bridge` | 维护版 Qt 已接项目多点 Action；错误 YAML、切图旧拓扑和 Snap 环境已有保护；语义 mask 已由 Nav2 消费 | 实机验证地图首次显示、多点成功/失败/取消反馈，以及语义切换和操作门禁 |
+| `agt_ui_bridge` | 维护版 Qt 已有可替换 control-center/legacy 壳层、light/dark 主题、统一 manager/Mission 客户端和 profile fail-closed 门禁；错误 YAML、切图旧拓扑和 Snap 环境已有保护 | 在真实 DDS 图验证 Qt/Web 状态一致与 Mission/manager 反馈；实机验证地图首次显示、任务成功/失败/取消、手动控制与急停门禁 |
 | `agt_system_manager` | RobotState、有限建图会话和业务 manager 组合 launch 已建立；建图会话通过服务委托 map/bag owner | 真实 MID360 验证自动 mapping profile、正常关机、候选导入和错误恢复 |
 | `agt_mission_manager` | 有限 Mission、暂停恢复、事件、审计和重启 INTERRUPTED 已完成离线回归 | 用真实 READY 任务验证 child success/failure/cancel 和双前端一致性 |
 | `agt_map_manager` | 版本 list/manage/active ROS facade、候选导入、依赖保护和受管资产路径已完成 | 用真实地图审计 legacy 导入、切换和保留策略 |
