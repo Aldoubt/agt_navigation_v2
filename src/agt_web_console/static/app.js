@@ -415,13 +415,8 @@ function renderChassis() {
     `ip -details link show ${interfaceName}`,
     "# sudo apt-get install -y can-utils",
     "",
-    "# 终端 2：普通用户启动只读 BUNKER 状态桥接",
-    "source /opt/ros/humble/setup.bash",
-    "export AGT_WS=/absolute/path/to/agt_navigation_v2",
-    'source "$AGT_WS/install/setup.bash"',
-    `ros2 launch agt_chassis bunker.launch.py can_interface:=${interfaceName} operation_mode:=monitor start_safety:=false command_topic:=/agt/chassis/monitor_cmd_vel`,
-    "",
-    `# 可选终端 3：只读观察 CAN 帧\ncandump ${interfaceName}`,
+    "# 只读观察 CAN 帧；底盘状态桥接必须由 ROS 2 系统管理器的白名单 profile 启动",
+    `candump ${interfaceName}`,
   ].join("\n");
   const commandElement = document.querySelector("#chassis-admin-command");
   if (commandElement) commandElement.textContent = command;

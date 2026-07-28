@@ -1,21 +1,20 @@
 # Web 实验与运维控制台架构
 
-状态：P0-P6、P8 离线基线（2026-07-22）；P7 保持未修改维护版 Qt fork。本架构扩展现有模块化导航平台，不替换
-FAST-LIVO2、定位、Nav2、`agt_safety`、BUNKER driver 或维护版 Qt。
+状态：统一 ROS 业务客户端基线（2026-07-28）。本架构扩展现有模块化导航平台，不替换
+FAST-LIVO2、定位、Nav2、`agt_safety` 或 BUNKER driver。
 
 ## Ownership
 
 | Package | Inputs | Outputs | Non-goals |
 | --- | --- | --- | --- |
-| `agt_system_manager` | ROS graph, typed topic observations, TF, lifecycle, active-map pointer | `SystemHealth`, `TaskReadiness`, `ChangeSystemMode`, bounded localization mode service | no velocity, TF, mapping, localization algorithm |
+| `agt_system_manager` | ROS graph, typed manager topics, TF and lifecycle | `SystemHealth`, `TaskReadiness`, `RobotState`, `ChangeSystemMode`, bounded localization mode service | no velocity, TF, mapping, localization algorithm |
 | `agt_map_manager` | version manifest and assets | SQLite index, validation result, atomic active pointer, retention decisions | no map algorithm or online map publisher |
 | `agt_experiment_manager` | operator metadata, health snapshots, structured localization events, bag profile | immutable session files, JSONL event/result streams, summary/report | no arbitrary recorder command and no success fabrication |
 | `agt_chassis` | configured CAN interface and BUNKER driver status | normalized chassis status, connection, odometry and battery topics; safety-protected command output in control mode | no Web-owned CAN provisioning, no direct Web command path |
-| `agt_web_console` | ROS bridge data, optional offline simulator, and project file managers | REST/WebSocket/UI | no direct ROS velocity, TF, or human-readable status parsing |
+| `agt_web_console` | generated ROS interfaces through `RosConsoleBridge`, or explicit offline simulator | REST/WebSocket/UI | no manager construction, manifest/process ownership, direct velocity, TF, or launch |
 
-The maintained Qt fork remains a frontend. It is not patched for this feature and
-must continue to call project Actions. `map -> odom` ownership remains in
-`agt_localization`.
+The maintained Qt fork remains a frontend and must call project Actions/services.
+`map -> odom` ownership remains in `agt_localization`.
 
 ## Runtime states
 
@@ -35,10 +34,10 @@ sensor group. An explicit transition to `SENSOR_ONLY` stops the mapping and
 navigation groups. This avoids repeated sensor initialization while keeping
 normal manager-owned shutdown semantics.
 
-The manager atomically writes its owned process snapshot below the configured
-runtime log root. The Web bridge may read that snapshot after reconnecting, but
-it never scans or terminates arbitrary processes; topic health remains the
-evidence for whether a module is actually working.
+The Web bridge does not read the manager process snapshot. `RobotState` carries
+manager-owned process counts and active profile; local process details exist only
+for the Action response initiated by that bridge. Topic health remains the evidence
+for whether a capability is actually working.
 
 ## Health and task flow
 
@@ -57,13 +56,11 @@ child is running. A stale or blocked message cancels the child.
 ## Data flow
 
 ```text
-ROS topics/TF/lifecycle -> agt_system_manager -> SystemHealth/TaskReadiness
-                                      |                 |
-                                      v                 v
-                              ChangeSystemMode      task Actions
-Web REST/WebSocket -> ROS bridge -----------------> existing Nav2/safety chain
-Web map API -> agt_map_manager -> active_map.yaml -> health/readiness identity
-Web experiment API -> agt_experiment_manager -> manifest/events/report
+manager topics/TF/lifecycle -> RobotState aggregator -> RobotState
+Web REST/WebSocket -> RosConsoleBridge -> project Actions and services
+map REST -> /agt/maps/list,/agt/maps/manage -> agt_map_manager
+experiment/Bag REST -> /agt/data/* -> agt_experiment_manager
+Mission REST -> /agt/missions/* -> agt_mission_manager -> project waypoint Action
 ```
 
 The Web listener defaults to loopback. Non-loopback configuration requires a
@@ -89,10 +86,10 @@ guard and remaps the driver input to the unowned `/agt/chassis/monitor_cmd_vel`.
 The Web process may display `/sys/class/net/<iface>/operstate`, but CAN setup
 requiring root privileges is provisioned by the host administrator.
 
-The Web ROS backend lists and replays only complete rosbag bundles below the
-configured runtime `rosbag` root. It uses a fixed `ros2 bag play --clock` argv and
-does not accept shell fragments or arbitrary recorder flags. While `MAPPING` is
-active, the manager forces the `mapping_inputs` profile containing only
+The Web ROS backend asks `agt_experiment_manager` to list and replay complete
+rosbag bundles. Only that manager resolves the runtime root and owns the fixed
+`ros2 bag play --clock` process. While `MAPPING` is active, the manager forces
+the `mapping_inputs` profile containing only
 `/clock`, `/tf_static`, `/agt/sensors/lidar/custom`, and `/agt/sensors/imu/data`;
 recorded FAST-LIVO2 outputs and recorded `/tf` are excluded. `NAVIGATION` refuses
 bag playback because replayed control, costmap, or TF output could conflict with
@@ -131,4 +128,4 @@ The browser must not expose candidate editing until `CANDIDATE_READY`; offline
 quality failure is reported as retryable and never falls back to the online map.
 COMMIT alone delegates immutable version registration to `agt_map_manager`.
 Navigation startup must supply a selected active READY version; both the browser
-and service validate that the requested assets match its manifest.
+and service validate that the requested assets match the manager-returned version summary.

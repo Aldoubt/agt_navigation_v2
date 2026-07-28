@@ -243,7 +243,10 @@ FAST-LIVO 和它所需的 Vikit 已按固定提交 vendor 在 `third_party/`，�
 `SystemHealth`、共享 `TaskReadiness` 和 `RobotState`，`agt_map_manager` 通过 ROS 服务管理不可变地图版本，
 `agt_experiment_manager` 保存实验 manifest、事件、定位结果、bag profile 和报告，
 `agt_web_console` 提供默认只监听 `127.0.0.1` 的 FastAPI/WebSocket 适配层与轻量静态页面。
-这些模块不重写 FAST-LIVO2、定位、Nav2、Qt 或安全层，也不发布速度或 TF。
+Web 真实后端只通过 `RosConsoleBridge` 调用生成的 ROS topic/service/action，不构造
+`MapRegistry`/`ExperimentManager`，也不读取业务 manifest 或持有 Bag 子进程；WebSocket 以
+`RobotState` 和 `MissionStatus` 为主状态。上述模块不重写 FAST-LIVO2、定位、Nav2、Qt 或安全层，
+也不发布速度或 TF。
 
 先构建新增 ROSIDL 和包：
 
@@ -262,7 +265,7 @@ ros2 launch agt_system_manager system_manager.launch.py \
 
 Web 运行依赖 FastAPI、Starlette 和 Uvicorn（基础 ROS 镜像未预装），启动参数和接口清单见
 [`docs/workflows/web_console.md`](docs/workflows/web_console.md)。没有这些依赖时，纯离线 service、
-地图注册、实验和健康测试仍可运行。
+ROS-independent manager、Web service 和健康测试仍可运行。
 
 ## 第三方项目与致谢
 
@@ -431,6 +434,7 @@ ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
 | `agt_mission_manager` | 有限 Mission、暂停恢复、事件、审计和重启 INTERRUPTED 已完成离线回归 | 用真实 READY 任务验证 child success/failure/cancel 和双前端一致性 |
 | `agt_map_manager` | 版本 list/manage/active ROS facade、候选导入、依赖保护和受管资产路径已完成 | 用真实地图审计 legacy 导入、切换和保留策略 |
 | `agt_experiment_manager` | 实验/Bag ROS facade、显式 profile、配置/Git 快照、失败和重启恢复已完成 | 接入完整任务指标并用真实长包生成统一报告 |
+| `agt_web_console` | 原 REST 已成为 manager ROS API 的 HTTP adapter，RobotState/MissionStatus WebSocket 和离线执行拒绝有回归 | 在带 FastAPI 的目标镜像做 browser smoke，并用真实地图/Bag/Mission 验证双端一致性 |
 | `agt_evaluation` | package 边界与覆盖路径时间估算 baseline 已建立 | 增加覆盖率/重叠率，并用 bag/真值生成定位、导航和资源占用统一报告 |
 
 ## 后续数据与实机准备

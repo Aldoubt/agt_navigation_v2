@@ -125,6 +125,8 @@ Web、Qt bridge 和 Action server 都消费这些机器接口；不得解析旧
 - `/agt/data/bags/list`：`agt_interfaces/srv/ListBagSessions`。
 - `/agt/data/bags/manage`：`agt_interfaces/srv/ManageBagSession`。
 - `/agt/data/bags/status`：`agt_interfaces/msg/BagSessionSummary`，reliable transient-local depth 1。
+- `/agt/data/experiments/list`：`agt_interfaces/srv/ListExperiments`，返回
+  `ExperimentSummary[]`，不向客户端暴露实验 manifest。
 
 完整操作、错误码、路径与 owner 规则见
 [`business_manager_services.md`](business_manager_services.md)。

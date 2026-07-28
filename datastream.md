@@ -20,7 +20,7 @@ source "$AGT_WS/install/setup.bash"
 Web 使用 `.venv-web` 中的 Python，但仍然需要先 source ROS 工作区。否则会出现：
 
 ```text
-ModuleNotFoundError: No module named 'agt_experiment_manager'
+ModuleNotFoundError: No module named 'agt_interfaces'
 ```
 
 FastAPI、Starlette 和 Uvicorn 只负责 Web HTTP/WebSocket 运行时；Node.js 不是当前前端运行依赖。
@@ -247,7 +247,7 @@ backend: ros
 
 | 代码 | 作用 |
 | --- | --- |
-| [web_console.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/scripts/web_console.py:18) | 读取 YAML，建立 instance lock、MapRegistry、ExperimentManager、ROS bridge、FastAPI 和 Uvicorn。 |
+| [web_console.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/scripts/web_console.py:18) | 读取前端配置，建立 instance lock、ROS bridge、离线模拟器、FastAPI 和 Uvicorn；不构造业务 manager。 |
 | [ros_bridge.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/agt_web_console/ros_bridge.py:31) | 创建 ROS Action/SRV/client、订阅健康/地图/点云/里程计/底盘状态。 |
 | [service.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/agt_web_console/service.py:35) | 独立于 HTTP 的业务层，负责 profile、会话、地图登记、bag 回放和状态校验。 |
 | [app.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/agt_web_console/app.py:8) | FastAPI REST/WebSocket 路由，只调用 `WebConsoleService`。 |
@@ -288,7 +288,7 @@ Web 建图不是直接执行一个浏览器传来的命令，而是以下固定�
 1. 页面调用 `/api/v1/mapping/session/prepare`，服务创建 `runtime/mapping_sessions/<map_name>/<session_id>/`，并生成受管 `pcd_output_dir`。
 2. 页面调用 `/api/v1/system/mode`，`profile=mapping`。Web 把 `map_name`、`mapping_output_dir`、`start_sensor`、`use_sim_time` 等声明参数传入 Action。
 3. 系统管理器发现 `start_sensor:=true` 时，先启动独立的 `sensor_only` 进程组，再以 `start_sensor:=false` 启动 mapping 主链；历史 bag 模式本身传入 `start_sensor:=false`。
-4. 页面调用 `/api/v1/bags/play` 时，`ExperimentManager` 只允许相对 `runtime/rosbag` 根目录下的完整 bag，并按状态强制选择 `mapping_inputs`：`/clock`、`/tf_static`、MID360 CustomMsg 和 IMU。
+4. 页面调用 `/api/v1/bags/play` 时，Web 经 `/agt/data/bags/manage` 请求 experiment manager；manager 只允许相对 runtime 根目录下的完整 bag，并按状态强制选择 `mapping_inputs`：`/clock`、`/tf_static`、MID360 CustomMsg 和 IMU。
 5. 页面点“完成建图”后先读取会话状态，要求确认采集完成并输入最终地图名。选择保留时，Web 调用 `/agt_mapping_map_saver/save_map` 保存 PGM/YAML，随后通过 `ChangeSystemMode` 正常停止 mapping。
 6. 服务等待 PGM/YAML 和 `state: ready` 的 FAST-LIVO2 PCD record。受管会话中如果 record 缺少 `pcd_sha256`，服务在进程停止后计算并补写实际 PCD 哈希；已有哈希不匹配则失败闭环。
 7. `agt_map_manager.import_legacy()` 将资产复制到不可变 `runtime/maps/<map_id>/versions/<version_id>/`。只有 READY 版本才可以进一步激活和用于导航。
@@ -298,7 +298,7 @@ Web 建图不是直接执行一个浏览器传来的命令，而是以下固定�
 
 ### 3.4 Web 导航逻辑
 
-Web 导航启动前不会接受浏览器任意地图路径。页面只选择地图版本，`profileArguments()` 从当前 `READY + active` manifest 派生：
+Web 导航启动前不会接受浏览器任意地图路径。页面只选择地图版本，`profileArguments()` 使用 map manager 返回的当前 `READY + active` 资产：
 
 ```text
 map                         -> navigation/map.yaml

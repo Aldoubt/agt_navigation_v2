@@ -1,13 +1,9 @@
-import hashlib
 import threading
 from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
-import yaml
 
-from agt_map_manager.registry import MapRegistry
-from agt_experiment_manager.manager import ExperimentManager
 from agt_web_console.instance_lock import WebConsoleInstanceLock
 from agt_web_console.ros_bridge import RosConsoleBridge
 from agt_web_console.service import WebConsoleConfig, WebConsoleService
@@ -34,13 +30,67 @@ class ModeController:
         return {"success": False, "failure_reason": "test backend"}
 
 
-class Experiments:
-    def create(self, **values):
-        self.values = values
-        return "exp_20260722_120000_trial_ab12cd"
+class BusinessController:
+    def __init__(self):
+        self.calls = []
+        self.map_rows = []
 
-    def list(self, **_filters):
+    def maps(self, **filters):
+        self.calls.append(("maps", filters))
+        return list(self.map_rows)
+
+    def validate_map(self, version_id):
+        self.calls.append(("validate_map", version_id))
+        return {"valid": True, "map_version_id": version_id}
+
+    def activate_map(self, version_id):
+        self.calls.append(("activate_map", version_id))
+        return {"activated": True, "version_id": version_id}
+
+    def map_action(self, version_id, action):
+        self.calls.append(("map_action", version_id, action))
+        return {"version_id": version_id, "action": action}
+
+    def import_map(self, values):
+        self.calls.append(("import_map", dict(values)))
+        return {"valid": True, "map_version_id": "map_v1"}
+
+    def experiments(self, **filters):
+        self.calls.append(("experiments", filters))
         return []
+
+    def bags(self):
+        self.calls.append(("bags",))
+        return {"bags": [], "playback": {"playing": False}}
+
+    def bag_action(self, action, values):
+        self.calls.append(("bag_action", action, dict(values)))
+        return {"state": "PLAYING" if action == "play" else "IDLE"}
+
+    def create_experiment(self, values):
+        self.calls.append(("create_experiment", dict(values)))
+        return {
+            "experiment_id": "exp_20260722_120000_trial_ab12cd",
+            "state": "CREATED",
+        }
+
+    def experiment_action(self, experiment_id, action, values):
+        self.calls.append(
+            ("experiment_action", experiment_id, action, dict(values))
+        )
+        return {"experiment_id": experiment_id, "state": "RUNNING"}
+
+    def execute_mission(self, values):
+        self.calls.append(("execute_mission", dict(values)))
+        return {"accepted": True, **dict(values)}
+
+    def set_mission_run_state(self, mission_id, action):
+        self.calls.append(("mission_state", mission_id, action))
+        return {"mission_id": mission_id, "state": action.upper()}
+
+    def cancel_mission(self, mission_id):
+        self.calls.append(("mission_cancel", mission_id))
+        return {"mission_id": mission_id, "state": "CANCELING"}
 
 
 class MappingController(ModeController):
@@ -267,15 +317,19 @@ def test_service_can_switch_between_configured_backends(tmp_path):
         WebConsoleConfig(runtime_dir=str(tmp_path)),
         mode_controller=ros,
         localization_controller=ros,
-        experiment_manager=Experiments(),
+        business_controller=BusinessController(),
         backends={
-            "ros": {"mode_controller": ros, "localization_controller": ros},
+            "ros": {
+                "mode_controller": ros,
+                "localization_controller": ros,
+                "business_controller": BusinessController(),
+            },
             "offline": {"health_provider": offline.health, "readiness_provider": offline.readiness, "mode_controller": offline, "localization_controller": offline},
         },
     )
     assert service.set_backend("offline")["offline"] is True
     assert service.set_mode("sensor_only", {"use_sim_time": "false"})["offline"] is True
-    with pytest.raises(RuntimeError, match="离线测试模式"):
+    with pytest.raises(RuntimeError, match="离线模式"):
         service.experiment_action("missing", "start_bag")
     service.stop_mode()
     assert service.set_backend("ros")["offline"] is False
@@ -287,11 +341,9 @@ def test_service_routes_offline_bag_playback_to_simulator(tmp_path):
     (bag / "metadata.yaml").write_text("rosbag2_bagfile_information: {}\n", encoding="utf-8")
     ros = ModeController()
     offline = OfflineConsoleBackend({}, runtime_dir=tmp_path)
-    experiments = ExperimentManager(tmp_path / "experiments", rosbag_root=tmp_path / "rosbag")
     service = WebConsoleService(
         WebConsoleConfig(runtime_dir=str(tmp_path)),
         mode_controller=ros,
-        experiment_manager=experiments,
         backends={
             "ros": {"mode_controller": ros},
             "offline": {"mode_controller": offline, "localization_controller": offline},
@@ -314,7 +366,7 @@ def test_console_delegates_only_configured_profile_and_audits_writes(tmp_path):
         readiness_provider=lambda: {"ready": False, "blocker_codes": ["MODE_NOT_NAVIGATION"]},
         mode_controller=controller,
         mapping_session_controller=mapping_sessions,
-        experiment_manager=Experiments(),
+        business_controller=BusinessController(),
     )
     result = service.prepare_mapping_session(
         "greenhouse_01",
@@ -354,6 +406,123 @@ def test_relocalization_is_a_structured_action_request(tmp_path):
     assert result["success"] is False
     assert controller.calls == [("relocalize", {"mode": "AUTO_SEARCH"})]
     assert "localization_relocalize" in (tmp_path / "logs" / "web_console_audit.jsonl").read_text(encoding="utf-8")
+
+
+def test_real_business_operations_delegate_to_ros_bridge(tmp_path):
+    business = BusinessController()
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path)),
+        mode_controller=ModeController(),
+        business_controller=business,
+    )
+    service.maps(map_id="greenhouse")
+    service.validate_map("map_v1")
+    service.activate_map("map_v1")
+    service.map_action("map_v1", "pin")
+    service.import_map(
+        {
+            "map_id": "greenhouse",
+            "map_yaml": "/candidate/map.yaml",
+            "pcd": "/candidate/map.pcd",
+            "processing_record": "/candidate/map.processing.yaml",
+        }
+    )
+    service.experiments(state="RUNNING")
+    service.bags()
+    service.create_experiment({"title": "trial"})
+    service.experiment_action("exp_01", "start")
+    service.execute_mission(
+        {"mission_id": "mission_01", "mission_version": "v1"}
+    )
+    service.mission_action("mission_01", "pause")
+    service.mission_action("mission_01", "cancel")
+
+    assert ("maps", {"map_id": "greenhouse"}) in business.calls
+    assert ("validate_map", "map_v1") in business.calls
+    assert ("activate_map", "map_v1") in business.calls
+    assert ("map_action", "map_v1", "pin") in business.calls
+    assert any(call[0] == "import_map" for call in business.calls)
+    assert ("experiments", {"state": "RUNNING"}) in business.calls
+    assert any(call[0] == "create_experiment" for call in business.calls)
+    assert ("experiment_action", "exp_01", "start", {}) in business.calls
+    assert any(call[0] == "execute_mission" for call in business.calls)
+    assert ("mission_state", "mission_01", "pause") in business.calls
+    assert ("mission_cancel", "mission_01") in business.calls
+
+
+def test_status_event_uses_robot_state_and_mission_as_primary_models():
+    bridge = object.__new__(RosConsoleBridge)
+    bridge._lock = threading.RLock()
+    events = []
+    bridge._status_listeners = [events.append]
+    bridge.robot_state = lambda: {"revision": 7, "system_mode": "NAVIGATION"}
+    bridge.mission_status = lambda: {"state": "RUNNING", "mission_id": "mission_01"}
+    bridge.health = lambda: {"overall_state": "OK"}
+    bridge.readiness = lambda: {"ready": True}
+    bridge.localization = lambda: {"state": 3}
+    bridge.status = lambda: {"active_mode": "NAVIGATION"}
+
+    RosConsoleBridge._notify_status(bridge)
+
+    assert events[0]["robot_state"]["revision"] == 7
+    assert events[0]["mission"]["mission_id"] == "mission_01"
+
+
+def test_offline_backend_never_executes_or_controls_missions(tmp_path):
+    offline = OfflineConsoleBackend({}, runtime_dir=tmp_path)
+    service = WebConsoleService(
+        WebConsoleConfig(runtime_dir=str(tmp_path), backend="offline"),
+        backends={
+            "offline": {
+                "mode_controller": offline,
+                "localization_controller": offline,
+                "robot_state_provider": offline.robot_state,
+                "mission_provider": offline.mission_status,
+            }
+        },
+    )
+    with pytest.raises(RuntimeError, match="离线模式禁止任务执行"):
+        service.execute_mission(
+            {"mission_id": "mission_01", "mission_version": "v1"}
+        )
+    with pytest.raises(RuntimeError, match="离线模式禁止任务控制"):
+        service.mission_action("mission_01", "cancel")
+
+
+def test_web_entry_has_no_direct_business_manager_ownership():
+    package_root = Path(__file__).parents[1]
+    entry_source = (package_root / "scripts" / "web_console.py").read_text(
+        encoding="utf-8"
+    )
+    service_source = (
+        package_root / "agt_web_console" / "service.py"
+    ).read_text(encoding="utf-8")
+    app_source = (package_root / "agt_web_console" / "app.py").read_text(
+        encoding="utf-8"
+    )
+    for forbidden in (
+        "MapRegistry",
+        "ExperimentManager",
+        "map_registry",
+        "experiment_manager",
+        "active_map.yaml",
+        "manifest.yaml",
+    ):
+        assert forbidden not in entry_source
+        assert forbidden not in service_source
+    for route in (
+        "/api/v1/maps",
+        "/api/v1/experiments",
+        "/api/v1/bags",
+        "/api/v1/missions/status",
+        "/api/v1/missions/execute",
+    ):
+        assert route in app_source
+    static_source = (package_root / "static" / "app.js").read_text(
+        encoding="utf-8"
+    )
+    assert "ros2 launch" not in static_source
+    assert "subprocess" not in static_source
 
 
 def test_static_console_is_chinese_and_exposes_ordered_workflow_controls():
@@ -405,7 +574,8 @@ def test_static_console_is_chinese_and_exposes_ordered_workflow_controls():
     assert '"/api/v1/chassis/status"' in javascript
     assert '"/api/v1/bags/play"' in javascript
     assert '"/api/v1/bags/stop"' in javascript
-    assert "operation_mode:=monitor" in javascript
+    assert "candump" in javascript
+    assert "ros2 launch" not in javascript
     assert 'args.start_sensor = inputSource === "bag" ? "false" : "true"' in javascript
     assert "bindPreviewCanvas" in javascript
     assert "centerOnRobot" in javascript
@@ -494,7 +664,7 @@ def test_navigation_requires_a_selected_ready_version(tmp_path):
     service = WebConsoleService(
         WebConsoleConfig(runtime_dir=str(tmp_path)),
         mode_controller=ModeController(),
-        map_registry=object(),
+        business_controller=BusinessController(),
     )
     with pytest.raises(ValueError, match="必须选择一个地图版本"):
         service.set_mode("navigation", {})

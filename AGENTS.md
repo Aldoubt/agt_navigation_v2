@@ -334,6 +334,10 @@
 - Web control may call only generated project ROS interfaces and configured
   map/experiment services. It must never accept or execute arbitrary shell,
   publish final `/cmd_vel`, publish TF, or bypass `agt_safety`.
+- The real Web backend is only an HTTP/WebSocket adapter over `RosConsoleBridge`.
+  It must not instantiate `MapRegistry` or `ExperimentManager`, inspect manager
+  manifests/process snapshots, or own Mission, map, experiment, or Bag state.
+  RobotState and MissionStatus are its primary live WebSocket read models.
 - `ChangeSystemMode` profiles are argv allowlists. Profile arguments are
   validated against declared keys; browser input is never a command string.
   Managed processes use their own process group and only processes created by
@@ -421,7 +425,8 @@
   the session plus any failed version to recoverable trash. Offline
   retain/delete remains simulation-only and writes no real assets.
 - Web navigation startup requires an active `READY` map version and derives
-  `map`, localization PCD, and processing-record arguments from its manifest.
+  `map`, localization PCD, and processing-record arguments from the map manager
+  response.
   Browser-supplied asset paths must match the selected version or the service
   rejects the request.
 - `agt_chassis` currently exposes the `bunker_can` backend. `operation_mode:=monitor`

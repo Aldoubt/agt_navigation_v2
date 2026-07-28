@@ -30,6 +30,7 @@ processing record 和平台 profile；manager 将其复制进新版本，重新�
 | `/agt/data/bags/list` | `ListBagSessions` service | 列出 runtime 内完整 Bag，支持 state/experiment 过滤 |
 | `/agt/data/bags/manage` | `ManageBagSession` service | status、录制/回放启停、实验创建/完成/中断 |
 | `/agt/data/bags/status` | `BagSessionSummary` topic | 当前 recorder/player/experiment 快照；reliable transient-local depth 1 |
+| `/agt/data/experiments/list` | `ListExperiments` service | 按枚举状态列出 manager-owned 实验摘要 |
 
 录制只接受 `bag_profiles.yaml` 中显式、非空、全为绝对 topic 名的 profile；`-a` 无效。回放只接受
 manager 列出的相对 `bag_id`，rate 有界为 `[0.1, 4.0]`，且 `simulation=true`。路径必须保持在
@@ -38,6 +39,13 @@ manager 列出的相对 `bag_id`，rate 有界为 `[0.1, 4.0]`，且 `simulation
 创建实验时可绑定 Mission ID/version/hash、地图 ID/version/hash，并给出 platform、calibration、
 Nav2 配置文件作为快照输入。持久化的 `RUNNING` 实验在进程重启后变为 `INTERRUPTED`。recorder 或
 player 意外退出发布 `STATE_ERROR`，不会显示为完成或正常 IDLE。
+
+`ManageBagSession` 同时承载显式实验生命周期操作：create 可选择是否立即 start；Web create 默认
+保持 `CREATED`，受管建图显式设置 start；start、event、complete、interrupt 和 invalid 都由
+manager 落盘。`metadata_json` 只允许实验 event 的扩展对象，核心状态仍使用枚举。
+`BagSessionSummary` 返回 PID、消息数、storage identifier 以及 mapping/navigation 内容分类，客户端
+无需读取 `metadata.yaml`。`ExperimentSummary` 返回标题、时间、map/mission 绑定、profile 和快照数，
+不暴露 manifest 路径。
 
 稳定错误码为 `ERROR_NONE`、`ERROR_NOT_FOUND`、`ERROR_INVALID_REQUEST`、`ERROR_CONFLICT`、
 `ERROR_PROFILE_INVALID` 和 `ERROR_INTERNAL`。

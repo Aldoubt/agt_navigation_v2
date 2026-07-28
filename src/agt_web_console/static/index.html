@@ -97,7 +97,7 @@
       <p class="form-hint">网页只检查 CAN 和底盘状态，不执行 sudo、ip link 或底盘控制命令。CAN 接口需要由系统预配置或管理员一次性启动。</p>
       <div class="admin-command-panel">
         <div class="panel-head"><div><p class="eyebrow">管理员操作</p><h3>CAN 初始化与底盘通讯</h3></div><button id="copy-chassis-command" class="secondary">复制命令</button></div>
-        <p class="form-hint">请管理员在工控机终端执行。第一段初始化 CAN，第二段启动只读状态监测；真实导航时再按安全流程启用 control 模式。</p>
+        <p class="form-hint">请管理员只在工控机终端初始化和检查 CAN。只读状态桥接及真实导航必须通过 ROS 2 系统管理器的白名单 profile 启动。</p>
         <pre id="chassis-admin-command">正在生成 can0 管理命令…</pre>
       </div>
     </section>

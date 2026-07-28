@@ -222,6 +222,7 @@ class MappingSessionManager(Node):
         profile_id: str = "",
         title: str = "",
         platform_profile: str = "",
+        start_experiment: bool = False,
         timeout_s: float,
     ):
         request = ManageBagSession.Request()
@@ -230,6 +231,7 @@ class MappingSessionManager(Node):
         request.profile_id = profile_id
         request.experiment_title = title
         request.platform_profile = platform_profile
+        request.start_experiment = start_experiment
         response = self._call_service(
             self._bag_client, request, timeout_s, "experiment/bag operation"
         )
@@ -247,6 +249,7 @@ class MappingSessionManager(Node):
             ManageBagSession.Request.OP_CREATE_EXPERIMENT,
             title=f"mapping {session['session_id']}",
             platform_profile=platform_profile,
+            start_experiment=True,
             timeout_s=timeout_s,
         )
         experiment_id = str(created.session.experiment_id)
