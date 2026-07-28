@@ -39,11 +39,11 @@ live topics retain their configured freshness limits.
 | --- | --- | --- |
 | Main mode | `NAVIGATION` | `MODE_NOT_NAVIGATION` |
 | Active map | READY map id/version and non-empty hash | `MAP_NOT_READY`, `MAP_ID_MISSING` |
-| Assets | verified PGM/YAML and ready PCD processing record | `NAV_MAP_INVALID`, `LOCALIZATION_PCD_INVALID` |
+| Assets | `SystemHealth` 从 `active_map.yaml -> manifest` 检查 READY、PGM/YAML/PCD/processing-record 文件存在；`agt_relocalization` 另行解析 processing record 内容和 PCD hash | `NAV_MAP_INVALID`, `LOCALIZATION_PCD_INVALID` |
 | Localization identity | status map id/hash equals active map | `LOCALIZATION_MAP_MISMATCH` |
 | Localization quality | fresh `TRACKING`, `pose_valid`, `localization_accepted` | `LOCALIZATION_NOT_TRACKING`, `POSE_INVALID`, `LOCALIZATION_NOT_ACCEPTED`, `LOCALIZATION_STATUS_STALE` |
-| Safety/chassis | `/agt/safety/status` is fresh, `motion_enabled=true`, authoritative `emergency_stop=false`, connected chassis, safety reports `navigation_ready=true` | `EMERGENCY_STOP`, `CHASSIS_DISCONNECTED`, `SAFETY_NOT_READY` |
-| Nav2/TF | required lifecycle nodes active and fresh `map -> odom -> base_footprint` chain | `NAV2_NOT_ACTIVE`, `TF_NOT_FRESH` |
+| Safety/chassis | `/agt/safety/status` is fresh, `motion_enabled=true`, authoritative `emergency_stop=false`, safety reports `navigation_ready=true`, and `/agt/chassis/connected` is fresh/true | `EMERGENCY_STOP`, `CHASSIS_DISCONNECTED`, `SAFETY_NOT_READY` |
+| Nav2/TF | required lifecycle nodes active and required `map -> odom -> base_footprint` edges are queryable | `NAV2_NOT_ACTIVE`, `TF_NOT_FRESH` |
 | Task validator | current task is revalidated by the existing Action server before child dispatch | `TASK_INVALID` |
 
 The frontend displays blocker codes and messages; it does not reimplement this
@@ -52,16 +52,38 @@ validator protects against malformed or out-of-map waypoints. The health node's
 `task_valid` default means no task-specific request is currently pending; it is
 not permission to skip Action validation.
 
+`SystemHealth` and `TaskReadiness` are not identical outputs. The health contract
+checks all three chassis evidence topics (`/agt/chassis/connected`,
+`/agt/chassis/odometry`, `/agt/chassis/status`). The current readiness evaluator
+only consumes fresh `/agt/chassis/connected` for its chassis condition; odometry
+and status failures can therefore make `SystemHealth` unhealthy without adding a
+dedicated TaskReadiness blocker.
+
 `agt_safety` is the owner of the emergency-stop latch. The health node consumes
 `emergency_stop`/`estop_latched` and `navigation_ready` from its diagnostic status;
 the optional `/agt/safety/emergency_stop` input is not a required health topic.
 This prevents a missing hardware-adapter publisher from being interpreted as an
 active stop after the safety controller has explicitly reported a clear latch.
+`navigation_ready` currently means motion enabled, no physical/latched stop, and
+valid localization. Navigation command freshness is not part of that value: a
+stale `/agt/navigation/cmd_vel` makes the safety controller output zero but may
+leave `navigation_ready=true`.
 
 The baseline localization status is emitted on the 5 s tracking-validation
 period and can spend up to 3 s in registration. Safety, the lifecycle gate, the
 waypoint Action, and the health contract therefore use a 10 s message freshness
 window. The `TaskReadiness` snapshot itself remains a separate 2 s cache gate.
+
+The system health TF check currently calls `lookup_transform(target, source,
+Time())` and records whether each edge can be queried. It does not compare the
+transform header stamp with current time. The existing blocker code remains
+`TF_NOT_FRESH` for compatibility, but its current meaning is missing/unqueryable
+TF rather than an enforced TF age threshold.
+
+The compatibility `/goal_pose` bridge submits Nav2 `NavigateToPose` without
+subscribing to TaskReadiness, active-map identity, or chassis-connected state. It
+still remains subject to Nav2 lifecycle/ localization gating and downstream
+`agt_safety`; it is not the formal version-bound task entry point.
 
 For `MAPPING`, BUNKER chassis telemetry is optional because mapping can be tested
 with MID360 and FAST-LIVO2 while the vehicle is disconnected. The Web console

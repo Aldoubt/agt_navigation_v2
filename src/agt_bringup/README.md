@@ -109,7 +109,13 @@ ros2 launch agt_bringup save_mapping_result.launch.py map_name:=greenhouse_01
 `runtime/maps/<map_name>/pcd/`，rosbag 也会完成元数据写入。导航前必须同时检查
 `localization_map.pcd` 和 `localization_map.processing.yaml`，且处理状态为 `ready`。不要先关闭总控再保存二维地图。
 
+导航命令传入的 `map`、`map_id`、`map_version_id`、PCD 和 processing record 必须与
+`runtime/maps/active_map.yaml` 指向的 READY manifest 一致。`system_health_node` 从 active
+map pointer 读取共享门禁身份，当前不会直接采用导航 launch 的 `map_id`/`map_version_id`。
+
 无雷达或 CAN 时可分别使用 `start_sensor:=false`、`start_chassis:=false`。建图无显示器时
 使用 `start_rviz:=false`；mapping Qt 默认关闭，按需使用 `start_mapping_gui:=true`。导航无
 显示器时使用 `start_gui:=false`。
+`start_sensor` 只控制真实 MID360 驱动；自滤波由 `start_lidar_self_filter` 单独控制。历史
+bag 回放可使用 `start_sensor:=false start_lidar_self_filter:=true`，继续运行正常前置过滤链。
 运行总控后禁止再单独启动 description/chassis launch；真实运动前仍需显式使能安全层。

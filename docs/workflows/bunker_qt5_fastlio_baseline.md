@@ -27,9 +27,9 @@ Qt5 /agt/cmd_vel_manual -> agt_safety -> chassis guard
 
 ```text
 PGM/YAML -> map_server -> /agt/map/global_occupancy
-同源 PCD + 实时点云 -> NDT/ICP -> map -> odom
-FAST-LIVO2 -> odom -> base_footprint + /agt/mapping/odometry
-Qt5 /goal_pose -> goal_pose_bridge -> NavigateToPose
+同源 PCD + 实时注册点云 -> agt_relocalization (NDT/ICP) -> map -> odom
+FAST-LIVO2 backend -> fast_livo2_adapter -> odom -> base_footprint + /agt/mapping/odometry
+Qt5 /goal_pose -> goal_pose_bridge -> NavigateToPose（兼容/调试，不经过 TaskReadiness）
 Nav2 -> /agt/navigation/cmd_vel_raw -> Collision Monitor
      -> /agt/navigation/cmd_vel -> agt_safety -> chassis guard
      -> /agt/chassis/cmd_vel -> Bunker driver
@@ -37,6 +37,8 @@ Nav2 -> /agt/navigation/cmd_vel_raw -> Collision Monitor
 
 FAST-LIVO2 adapter 是 `odom -> base_footprint` 的唯一发布者，NDT/ICP 是
 `map -> odom` 的唯一发布者。Bunker driver 的 odom TF 和 FAST-LIVO2 上游 TF 默认关闭。
+`agt_relocalization` 订阅注册点云并通过 TF Buffer 查询 `odom -> tracking_frame`；它不直接
+订阅 `/agt/mapping/odometry`。
 
 ## 准备
 
@@ -58,6 +60,10 @@ ros2 launch agt_bringup system.launch.py \
   mode:=mapping map_name:=greenhouse_01 \
   start_mapping_gui:=true start_rviz:=true
 ```
+
+命令行选择的地图/PCD/map ID 必须与 `runtime/maps/active_map.yaml` 指向的 READY manifest
+一致；`system_health_node` 的共享地图身份来自该 pointer，而不是直接来自上面的 map launch
+参数。
 
 Qt5 mapping profile 使用 `odom` 固定坐标系，显示 `/agt/map/mapping_occupancy` 和
 `/agt/mapping/odometry`。手动速度发布到 `/agt/cmd_vel_manual`，不能直接发往底盘。
@@ -114,6 +120,8 @@ ros2 launch agt_bringup system.launch.py \
 Qt5 navigation profile 使用 `map` 固定坐标系。先用“设置初始位姿”发布 `/initialpose`，
 等待 NDT/ICP 收敛并确认 `map -> odom -> base_footprint` 连续，再用单点目标工具发布
 `/goal_pose`。`goal_pose_bridge.py` 会把目标转换成 Nav2 `NavigateToPose` action。
+该兼容入口当前不检查 TaskReadiness、active map identity 或 chassis connected；正式实车任务
+必须使用项目 `ExecuteWaypointTask` Action。
 
 确认定位、costmap、Collision Monitor 和安全状态正常后，再显式使能运动：
 

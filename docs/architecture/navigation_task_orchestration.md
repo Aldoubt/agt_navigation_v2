@@ -47,7 +47,8 @@ navigation/offline profile 的任务中心只保留版本化 Task Library，并�
 
 ## 当前导航能力
 
-- 单点兼容入口：`/goal_pose`，由桥接节点转换为 Nav2 `NavigateToPose`；
+- 单点兼容入口：`/goal_pose`，由桥接节点转换为 Nav2 `NavigateToPose`；当前不经过
+  `TaskReadiness`、active map identity 或 chassis-connected 共享门禁，只能作为兼容/调试入口；
 - 多点稳定入口：`/agt/navigation/execute_waypoint_task`；
 - 多点执行权：项目 server 调用 Nav2 `FollowWaypoints`，以 Action 状态和 missed waypoint
   决定结果；

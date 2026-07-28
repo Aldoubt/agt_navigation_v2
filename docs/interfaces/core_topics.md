@@ -140,8 +140,18 @@ Web、Qt bridge 和 Action server 都消费这些机器接口；不得解析旧
 - `/goal_pose`: Qt5/RViz2 的 `geometry_msgs/PoseStamped` 兼容入口
 - `/agt/navigation/cmd_vel_raw -> /agt/navigation/cmd_vel -> /agt/safety/cmd_vel -> /agt/chassis/cmd_vel`
 
+`/goal_pose -> agt_goal_pose_bridge -> NavigateToPose` 当前是兼容/调试路径，不订阅
+`TaskReadiness`，也不执行任务版本绑定和 chassis-connected 共享门禁；正式多点任务必须使用
+`/agt/navigation/execute_waypoint_task`。
+
 ## TF 责任
-- `map -> odom`: 全局定位或全局融合模块唯一发布
-- `odom -> base_footprint`: 连续里程计或融合模块唯一发布
-- `base_footprint -> base_link`: 描述或姿态适配模块维护
-- `base_link -> sensor`: `agt_description` 集中管理
+- `map -> odom`: `agt_relocalization` 唯一发布
+- `odom -> base_footprint`: `agt_mapping_fast_livo2_adapter` 唯一发布
+- `base_footprint -> base_link`、`base_link -> lidar_link/imu_link`: `robot_state_publisher`
+  （`agt_description`）集中管理
+- FAST-LIVO2 backend 的 TF 发布关闭；BUNKER driver 的 odom TF 默认关闭，不能添加第二个
+  publisher
+
+当前 `agt_system_manager` 对这些 edge 使用 `lookup_transform(..., Time())` 判断可查询性，
+尚未比较 transform header 时间戳与当前时间；因此当前门禁语义是“TF 可查询”，不是严格的
+“TF 新鲜”。
