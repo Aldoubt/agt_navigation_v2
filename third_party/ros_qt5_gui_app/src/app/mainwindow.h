@@ -40,6 +40,7 @@
 #include "core/framework/framework.h"
 #include <memory>
 #include <vector>
+#include "msg/business_state.h"
 QT_BEGIN_NAMESPACE
 namespace Ui {
 class MainWindow;
@@ -48,6 +49,15 @@ QT_END_NAMESPACE
 
 class DiagnosticDockWidget;
 class DisplayConfigWidget;
+class ControlCenterShell;
+class MissionViewModel;
+class RobotStateViewModel;
+class SystemModeViewModel;
+class UiCapabilityPolicy;
+class UiLayoutManager;
+class MappingViewModel;
+class RelocalizationViewModel;
+class AssetViewModel;
 
 class MainWindow : public QMainWindow {
   Q_OBJECT
@@ -95,6 +105,16 @@ class MainWindow : public QMainWindow {
   ads::CDockWidget *dashboard_dock_{nullptr};
   DiagnosticDockWidget *diagnostic_dock_widget_{nullptr};
   ads::CDockWidget *diagnostic_dock_{nullptr};
+  ads::CDockWidget *task_center_dock_{nullptr};
+  ControlCenterShell *control_center_shell_{nullptr};
+  RobotStateViewModel *robot_state_view_model_{nullptr};
+  MissionViewModel *mission_view_model_{nullptr};
+  SystemModeViewModel *system_mode_view_model_{nullptr};
+  MappingViewModel *mapping_view_model_{nullptr};
+  RelocalizationViewModel *relocalization_view_model_{nullptr};
+  AssetViewModel *asset_view_model_{nullptr};
+  std::unique_ptr<UiCapabilityPolicy> ui_capabilities_;
+  std::unique_ptr<UiLayoutManager> ui_layout_manager_;
   
  signals:
   void OnRecvChannelData(const MsgId &id, const std::any &data);

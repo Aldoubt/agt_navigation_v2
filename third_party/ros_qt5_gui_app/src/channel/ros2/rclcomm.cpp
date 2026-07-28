@@ -15,7 +15,129 @@
 #include "logger/logger.h"
 #include "core/framework/framework.h"
 #include "msg/diagnostic_snapshot.h"
+#include "msg/business_state.h"
 #include "msg/msg_info.h"
+
+namespace {
+std::string RobotModeName(std::uint8_t state) {
+  switch (state) {
+    case agt_interfaces::msg::RobotState::MODE_IDLE: return "IDLE";
+    case agt_interfaces::msg::RobotState::MODE_SENSOR_ONLY: return "SENSOR_ONLY";
+    case agt_interfaces::msg::RobotState::MODE_MAPPING: return "MAPPING";
+    case agt_interfaces::msg::RobotState::MODE_LOCALIZATION_DEBUG: return "LOCALIZATION_DEBUG";
+    case agt_interfaces::msg::RobotState::MODE_NAVIGATION: return "NAVIGATION";
+    case agt_interfaces::msg::RobotState::MODE_ERROR: return "ERROR";
+    default: return "UNKNOWN";
+  }
+}
+
+std::string LocalizationStateName(std::uint8_t state) {
+  switch (state) {
+    case agt_interfaces::msg::LocalizationStatus::STATE_UNINITIALIZED: return "UNINITIALIZED";
+    case agt_interfaces::msg::LocalizationStatus::STATE_SEARCHING: return "SEARCHING";
+    case agt_interfaces::msg::LocalizationStatus::STATE_VERIFYING: return "VERIFYING";
+    case agt_interfaces::msg::LocalizationStatus::STATE_TRACKING: return "TRACKING";
+    case agt_interfaces::msg::LocalizationStatus::STATE_DEGRADED: return "DEGRADED";
+    case agt_interfaces::msg::LocalizationStatus::STATE_RECOVERING: return "RECOVERING";
+    case agt_interfaces::msg::LocalizationStatus::STATE_LOST: return "LOST";
+    case agt_interfaces::msg::LocalizationStatus::STATE_ERROR: return "ERROR";
+    default: return "UNKNOWN";
+  }
+}
+
+std::string MissionStateName(std::uint8_t state) {
+  switch (state) {
+    case agt_interfaces::msg::MissionStatus::STATE_IDLE: return "IDLE";
+    case agt_interfaces::msg::MissionStatus::STATE_VALIDATING: return "VALIDATING";
+    case agt_interfaces::msg::MissionStatus::STATE_RUNNING: return "RUNNING";
+    case agt_interfaces::msg::MissionStatus::STATE_WAITING_DURATION: return "WAITING_DURATION";
+    case agt_interfaces::msg::MissionStatus::STATE_WAITING_EVENT: return "WAITING_EVENT";
+    case agt_interfaces::msg::MissionStatus::STATE_PAUSING: return "PAUSING";
+    case agt_interfaces::msg::MissionStatus::STATE_PAUSED: return "PAUSED";
+    case agt_interfaces::msg::MissionStatus::STATE_RESUMING: return "RESUMING";
+    case agt_interfaces::msg::MissionStatus::STATE_CANCELING: return "CANCELING";
+    case agt_interfaces::msg::MissionStatus::STATE_SUCCEEDED: return "SUCCEEDED";
+    case agt_interfaces::msg::MissionStatus::STATE_FAILED: return "FAILED";
+    case agt_interfaces::msg::MissionStatus::STATE_CANCELED: return "CANCELED";
+    case agt_interfaces::msg::MissionStatus::STATE_INTERRUPTED: return "INTERRUPTED";
+    default: return "UNKNOWN";
+  }
+}
+
+bool MissionTerminal(std::uint8_t state) {
+  return state == agt_interfaces::msg::MissionStatus::STATE_SUCCEEDED ||
+         state == agt_interfaces::msg::MissionStatus::STATE_FAILED ||
+         state == agt_interfaces::msg::MissionStatus::STATE_CANCELED ||
+         state == agt_interfaces::msg::MissionStatus::STATE_INTERRUPTED;
+}
+
+std::string BagStateName(std::uint8_t state) {
+  switch (state) {
+    case agt_interfaces::msg::BagSessionSummary::STATE_IDLE: return "IDLE";
+    case agt_interfaces::msg::BagSessionSummary::STATE_RECORDING: return "RECORDING";
+    case agt_interfaces::msg::BagSessionSummary::STATE_PLAYING: return "PLAYING";
+    case agt_interfaces::msg::BagSessionSummary::STATE_COMPLETED: return "COMPLETED";
+    case agt_interfaces::msg::BagSessionSummary::STATE_INTERRUPTED: return "INTERRUPTED";
+    case agt_interfaces::msg::BagSessionSummary::STATE_ERROR: return "ERROR";
+    default: return "UNKNOWN";
+  }
+}
+
+std::string ChassisModeName(std::uint8_t state) {
+  switch (state) {
+    case agt_interfaces::msg::RobotState::CHASSIS_MODE_MONITOR: return "MONITOR";
+    case agt_interfaces::msg::RobotState::CHASSIS_MODE_CONTROL: return "CONTROL";
+    default: return "UNKNOWN";
+  }
+}
+
+std::string MapStateName(std::uint8_t state) {
+  switch (state) {
+    case agt_interfaces::msg::MapVersionSummary::STATE_DRAFT: return "DRAFT";
+    case agt_interfaces::msg::MapVersionSummary::STATE_PROCESSING: return "PROCESSING";
+    case agt_interfaces::msg::MapVersionSummary::STATE_READY: return "READY";
+    case agt_interfaces::msg::MapVersionSummary::STATE_INVALID: return "INVALID";
+    case agt_interfaces::msg::MapVersionSummary::STATE_ARCHIVED: return "ARCHIVED";
+    case agt_interfaces::msg::MapVersionSummary::STATE_DELETED: return "DELETED";
+    default: return "UNKNOWN";
+  }
+}
+
+basic::BusinessMapVersion ConvertMapVersion(
+    const agt_interfaces::msg::MapVersionSummary &source) {
+  basic::BusinessMapVersion version;
+  version.map_id = source.map_id;
+  version.map_version_id = source.map_version_id;
+  version.state = MapStateName(source.state);
+  version.active = source.active;
+  version.pinned = source.pinned;
+  version.valid = source.valid;
+  version.map_hash = source.map_hash;
+  version.navigation_yaml = source.navigation_yaml;
+  version.localization_pcd = source.localization_pcd;
+  version.processing_record = source.processing_record;
+  if (!source.validation_errors.empty())
+    version.message = source.validation_errors.front();
+  else if (!source.validation_warnings.empty())
+    version.message = source.validation_warnings.front();
+  return version;
+}
+
+basic::BusinessBagSession ConvertBagSession(
+    const agt_interfaces::msg::BagSessionSummary &source) {
+  basic::BusinessBagSession session;
+  session.bag_id = source.bag_id;
+  session.experiment_id = source.experiment_id;
+  session.profile_id = source.profile_id;
+  session.state = BagStateName(source.state);
+  session.relative_uri = source.relative_uri;
+  session.complete = source.complete;
+  session.simulation = source.simulation;
+  session.message = source.message;
+  return session;
+}
+}  // namespace
+
 rclcomm::rclcomm() {
   SET_DEFAULT_TOPIC_NAME(DISPLAY_GOAL, "/goal_pose")
   SET_DEFAULT_TOPIC_NAME(MSG_ID_SET_RELOC_POSE, "/initialpose")
@@ -26,7 +148,7 @@ rclcomm::rclcomm() {
   SET_DEFAULT_TOPIC_NAME(DISPLAY_GLOBAL_PATH, "/plan")
   SET_DEFAULT_TOPIC_NAME(DISPLAY_LOCAL_PATH, "/local_plan")
   SET_DEFAULT_TOPIC_NAME(DISPLAY_ROBOT, "/odom")
-  SET_DEFAULT_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED, "/cmd_vel")
+  SET_DEFAULT_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED, "/agt/cmd_vel_manual")
   SET_DEFAULT_TOPIC_NAME(MSG_ID_BATTERY_STATE, "/battery")
   SET_DEFAULT_TOPIC_NAME(MSG_ID_DIAGNOSTIC, "/diagnostics")
   SET_DEFAULT_TOPIC_NAME(DISPLAY_ROBOT_FOOTPRINT, "/local_costmap/published_footprint")
@@ -36,6 +158,10 @@ rclcomm::rclcomm() {
   SET_DEFAULT_TOPIC_NAME(MSG_ID_TOPOLOGY_MAP_UPDATE, "/map/topology/update")
   SET_DEFAULT_KEY_VALUE("BaseFrameId", "base_link")
   SET_DEFAULT_KEY_VALUE("FixedFrameId", "map")
+  SET_DEFAULT_KEY_VALUE("EnableMissionExecution", "false")
+  SET_DEFAULT_KEY_VALUE("EnableSystemModeControl", "false")
+  SET_DEFAULT_KEY_VALUE("EnableDebugGoalPose", "false")
+  SET_DEFAULT_KEY_VALUE("EnableLegacyWaypointExecution", "false")
   if (Config::ConfigManager::Instance()->GetRootConfig().images.empty()) {
     Config::ConfigManager::Instance()->GetRootConfig().images.push_back(
         Config::ImageDisplayConfig{.location = "front",
@@ -60,8 +186,10 @@ bool rclcomm::Start() {
   auto sub_laser_obt = rclcpp::SubscriptionOptions();
   sub_laser_obt.callback_group = callback_group_laser;
 
-  nav_goal_publisher_ = node->create_publisher<geometry_msgs::msg::PoseStamped>(
-      GET_TOPIC_NAME(DISPLAY_GOAL), 10);
+  if (GET_CONFIG_VALUE("EnableDebugGoalPose", "false") == "true") {
+    nav_goal_publisher_ = node->create_publisher<geometry_msgs::msg::PoseStamped>(
+        GET_TOPIC_NAME(DISPLAY_GOAL), 10);
+  }
   waypoint_preview_publisher_ =
       node->create_publisher<geometry_msgs::msg::PoseArray>(
           "/agt/navigation/waypoint_preview_request", 10);
@@ -75,7 +203,7 @@ bool rclcomm::Start() {
       node->create_publisher<geometry_msgs::msg::PoseWithCovarianceStamped>(
           GET_TOPIC_NAME(MSG_ID_SET_RELOC_POSE), 10);
   const bool enable_manual_control =
-      GET_CONFIG_VALUE("EnableManualControl", "true") == "true";
+      GET_CONFIG_VALUE("EnableManualControl", "false") == "true";
   if (enable_manual_control) {
     speed_publisher_ = node->create_publisher<geometry_msgs::msg::Twist>(
         GET_TOPIC_NAME(MSG_ID_SET_ROBOT_SPEED), 10);
@@ -155,6 +283,59 @@ bool rclcomm::Start() {
       rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
   waypoint_task_client_ = rclcpp_action::create_client<WaypointTask>(
       node, "/agt/navigation/execute_waypoint_task");
+  auto business_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+  robot_state_subscriber_ =
+      node->create_subscription<agt_interfaces::msg::RobotState>(
+          "/agt/system/robot_state", business_qos,
+          std::bind(&rclcomm::robotStateCallback, this, std::placeholders::_1),
+          sub1_obt);
+  mission_status_subscriber_ =
+      node->create_subscription<agt_interfaces::msg::MissionStatus>(
+          "/agt/missions/status", business_qos,
+          std::bind(&rclcomm::missionStatusCallback, this,
+                    std::placeholders::_1),
+          sub1_obt);
+  mission_client_ = rclcpp_action::create_client<Mission>(
+      node, "/agt/missions/execute", callback_group_other);
+  change_mode_client_ = rclcpp_action::create_client<ChangeMode>(
+      node, "/agt/system/change_mode", callback_group_other);
+  mission_run_state_client_ =
+      node->create_client<agt_interfaces::srv::SetMissionRunState>(
+          "/agt/missions/set_run_state", rmw_qos_profile_services_default,
+          callback_group_other);
+  mapping_session_client_ = rclcpp_action::create_client<MappingSession>(
+      node, "/agt/mapping/manage_session", callback_group_other);
+  relocalize_client_ = rclcpp_action::create_client<Relocalize>(
+      node, "/agt/localization/relocalize", callback_group_other);
+  list_maps_client_ = node->create_client<agt_interfaces::srv::ListMapVersions>(
+      "/agt/maps/list", rmw_qos_profile_services_default, callback_group_other);
+  manage_map_client_ = node->create_client<agt_interfaces::srv::ManageMapVersion>(
+      "/agt/maps/manage", rmw_qos_profile_services_default, callback_group_other);
+  list_bags_client_ = node->create_client<agt_interfaces::srv::ListBagSessions>(
+      "/agt/data/bags/list", rmw_qos_profile_services_default, callback_group_other);
+  manage_bag_client_ = node->create_client<agt_interfaces::srv::ManageBagSession>(
+      "/agt/data/bags/manage", rmw_qos_profile_services_default, callback_group_other);
+  SUBSCRIBE(MSG_ID_MISSION_COMMAND,
+            [this](const basic::MissionCommand &command) {
+              QueueMissionCommand(command);
+            });
+  SUBSCRIBE(MSG_ID_SYSTEM_MODE_COMMAND,
+            [this](const basic::SystemModeCommand &command) {
+              QueueSystemModeCommand(command);
+            });
+  SUBSCRIBE(MSG_ID_MAPPING_COMMAND, [this](const basic::MappingCommand &command) {
+    QueueMappingCommand(command);
+  });
+  SUBSCRIBE(MSG_ID_RELOCALIZATION_COMMAND,
+            [this](const basic::RelocalizationCommand &command) {
+              QueueRelocalizationCommand(command);
+            });
+  SUBSCRIBE(MSG_ID_MAP_COMMAND, [this](const basic::MapCommand &command) {
+    QueueMapCommand(command);
+  });
+  SUBSCRIBE(MSG_ID_BAG_COMMAND, [this](const basic::BagCommand &command) {
+    QueueBagCommand(command);
+  });
   for (auto one_image_display : Config::ConfigManager::Instance()->GetRootConfig().images) {
     LOG_INFO("image location:" << one_image_display.location << "topic:" << one_image_display.topic);
     image_subscriber_list_.emplace_back(
@@ -302,10 +483,588 @@ void rclcomm::PublishTaskStatus(const TaskExecutionStatus &status) {
   PUBLISH(MSG_ID_TASK_CHAIN_STATUS, status);
 }
 
+void rclcomm::robotStateCallback(
+    const agt_interfaces::msg::RobotState::SharedPtr msg) {
+  basic::BusinessRobotState state;
+  state.revision = msg->revision;
+  state.system_mode = RobotModeName(msg->system_mode);
+  state.active_profile = msg->active_profile;
+  if (msg->active_map_known) {
+    state.map_id = msg->active_map.map_id;
+    state.map_version_id = msg->active_map.map_version_id;
+    state.map_hash = msg->active_map.map_hash;
+    state.navigation_yaml = msg->active_map.navigation_yaml;
+    state.localization_pcd = msg->active_map.localization_pcd;
+    state.processing_record = msg->active_map.processing_record;
+  }
+  state.localization_state = msg->localization_status_known
+                                  ? LocalizationStateName(msg->localization.state)
+                                  : "UNKNOWN";
+  state.mission_state = msg->mission_status_known
+                            ? MissionStateName(msg->mission.state)
+                            : "UNKNOWN";
+  state.safety_known = msg->safety_status_known;
+  state.motion_enabled = msg->safety_motion_enabled;
+  state.emergency_stop = msg->emergency_stop || msg->estop_latched;
+  state.navigation_ready = msg->navigation_ready;
+  state.chassis_known = msg->chassis_status_known;
+  state.chassis_connected = msg->chassis_connected;
+  state.chassis_mode = ChassisModeName(msg->chassis_control_mode);
+  state.bag_state = msg->bag_status_known ? BagStateName(msg->bag_session.state)
+                                         : "UNKNOWN";
+  state.blocker_codes = msg->blocker_codes;
+  state.blocker_messages = msg->blocker_messages;
+  state.message = msg->message;
+  PUBLISH(MSG_ID_BUSINESS_ROBOT_STATE, state);
+}
+
+void rclcomm::missionStatusCallback(
+    const agt_interfaces::msg::MissionStatus::SharedPtr msg) {
+  basic::BusinessMissionStatus status;
+  status.state = MissionStateName(msg->state);
+  status.mission_id = msg->mission_id;
+  status.mission_version = msg->mission_version;
+  status.content_sha256 = msg->content_sha256;
+  status.current_step_index = msg->current_step_index;
+  status.total_steps = msg->total_steps;
+  status.current_step_id = msg->current_step_id;
+  status.current_waypoint = msg->current_waypoint;
+  status.total_waypoints = msg->total_waypoints;
+  status.step_remaining_s = msg->step_remaining_s;
+  status.error_code = msg->error_code;
+  status.blocker_codes = msg->blocker_codes;
+  status.blocker_messages = msg->blocker_messages;
+  status.message = msg->message;
+  status.terminal = MissionTerminal(msg->state);
+  PUBLISH(MSG_ID_BUSINESS_MISSION_STATUS, status);
+}
+
+void rclcomm::PublishMissionMessage(const std::string &state,
+                                    const std::string &message,
+                                    bool terminal) {
+  basic::BusinessMissionStatus status;
+  status.state = state;
+  status.message = message;
+  status.terminal = terminal;
+  PUBLISH(MSG_ID_BUSINESS_MISSION_STATUS, status);
+}
+
+void rclcomm::QueueMissionCommand(const basic::MissionCommand &command) {
+  std::lock_guard<std::mutex> lock(business_request_mutex_);
+  mission_request_timer_ = node->create_wall_timer(
+      std::chrono::milliseconds(1),
+      [this, command]() {
+        {
+          std::lock_guard<std::mutex> callback_lock(business_request_mutex_);
+          if (mission_request_timer_) mission_request_timer_->cancel();
+        }
+        ExecuteMissionCommand(command);
+      },
+      callback_group_other);
+}
+
+void rclcomm::ExecuteMissionCommand(const basic::MissionCommand &command) {
+  if (GET_CONFIG_VALUE("EnableMissionExecution", "false") != "true") {
+    PublishMissionMessage("REJECTED",
+                          "mission execution is disabled by the active GUI profile",
+                          true);
+    return;
+  }
+  if (command.type == basic::MissionCommand::Type::kCancel) {
+    if (!mission_goal_handle_) {
+      PublishMissionMessage("REJECTED", "no active mission goal to cancel", true);
+      return;
+    }
+    mission_client_->async_cancel_goal(mission_goal_handle_);
+    PublishMissionMessage("CANCELING", "mission cancellation requested");
+    return;
+  }
+  if (command.type == basic::MissionCommand::Type::kPause ||
+      command.type == basic::MissionCommand::Type::kResume) {
+    if (!mission_run_state_client_->service_is_ready()) {
+      PublishMissionMessage("FAILED", "mission run-state service is unavailable", true);
+      return;
+    }
+    auto request =
+        std::make_shared<agt_interfaces::srv::SetMissionRunState::Request>();
+    request->command = command.type == basic::MissionCommand::Type::kPause
+                           ? agt_interfaces::srv::SetMissionRunState::Request::COMMAND_PAUSE
+                           : agt_interfaces::srv::SetMissionRunState::Request::COMMAND_RESUME;
+    request->mission_id = command.mission_id;
+    mission_run_state_client_->async_send_request(
+        request,
+        [this](rclcpp::Client<agt_interfaces::srv::SetMissionRunState>::SharedFuture future) {
+          const auto response = future.get();
+          if (!response->success) {
+            PublishMissionMessage("FAILED", response->message, true);
+            return;
+          }
+          missionStatusCallback(
+              std::make_shared<agt_interfaces::msg::MissionStatus>(response->status));
+        });
+    return;
+  }
+  if (command.mission_id.empty() || command.mission_version.empty()) {
+    PublishMissionMessage("REJECTED", "mission id and version are required", true);
+    return;
+  }
+  if (!mission_client_->action_server_is_ready()) {
+    PublishMissionMessage("FAILED", "ExecuteMission action server is unavailable", true);
+    return;
+  }
+  Mission::Goal goal;
+  goal.mission_id = command.mission_id;
+  goal.mission_version = command.mission_version;
+  goal.expected_content_sha256 = command.expected_content_sha256;
+  auto options = rclcpp_action::Client<Mission>::SendGoalOptions();
+  options.goal_response_callback = [this](MissionGoalHandle::SharedPtr handle) {
+    if (!handle) {
+      PublishMissionMessage("REJECTED", "ExecuteMission goal was rejected", true);
+      return;
+    }
+    mission_goal_handle_ = handle;
+    PublishMissionMessage("VALIDATING", "mission goal accepted");
+  };
+  options.feedback_callback =
+      [this](MissionGoalHandle::SharedPtr,
+             const std::shared_ptr<const Mission::Feedback> feedback) {
+        missionStatusCallback(
+            std::make_shared<agt_interfaces::msg::MissionStatus>(feedback->status));
+      };
+  options.result_callback =
+      [this](const MissionGoalHandle::WrappedResult &result) {
+        mission_goal_handle_.reset();
+        if (result.result) {
+          missionStatusCallback(std::make_shared<agt_interfaces::msg::MissionStatus>(
+              result.result->final_status));
+        } else {
+          PublishMissionMessage("FAILED", "mission returned no result", true);
+        }
+      };
+  mission_client_->async_send_goal(goal, options);
+}
+
+void rclcomm::QueueSystemModeCommand(
+    const basic::SystemModeCommand &command) {
+  std::lock_guard<std::mutex> lock(business_request_mutex_);
+  system_mode_request_timer_ = node->create_wall_timer(
+      std::chrono::milliseconds(1),
+      [this, command]() {
+        {
+          std::lock_guard<std::mutex> callback_lock(business_request_mutex_);
+          if (system_mode_request_timer_)
+            system_mode_request_timer_->cancel();
+        }
+        ExecuteSystemModeCommand(command);
+      },
+      callback_group_other);
+}
+
+void rclcomm::ExecuteSystemModeCommand(
+    const basic::SystemModeCommand &command) {
+  if (GET_CONFIG_VALUE("EnableSystemModeControl", "false") != "true") return;
+  if (!change_mode_client_->action_server_is_ready()) {
+    LOG_ERROR("ChangeSystemMode action server is unavailable");
+    return;
+  }
+  ChangeMode::Goal goal;
+  if (command.mode == "IDLE") goal.mode = ChangeMode::Goal::MODE_IDLE;
+  else if (command.mode == "SENSOR_ONLY") goal.mode = ChangeMode::Goal::MODE_SENSOR_ONLY;
+  else if (command.mode == "MAPPING") goal.mode = ChangeMode::Goal::MODE_MAPPING;
+  else if (command.mode == "NAVIGATION") goal.mode = ChangeMode::Goal::MODE_NAVIGATION;
+  else {
+    LOG_ERROR("unsupported system mode request: " << command.mode);
+    return;
+  }
+  goal.profile = command.profile;
+  goal.argument_keys = command.argument_keys;
+  goal.argument_values = command.argument_values;
+  goal.wait_for_health = true;
+  goal.startup_timeout_s = 30.0;
+  auto options = rclcpp_action::Client<ChangeMode>::SendGoalOptions();
+  options.goal_response_callback = [](auto handle) {
+    if (!handle) LOG_ERROR("ChangeSystemMode rejected the request");
+  };
+  options.result_callback = [](const auto &result) {
+    if (!result.result || !result.result->success)
+      LOG_ERROR("ChangeSystemMode failed");
+  };
+  change_mode_client_->async_send_goal(goal, options);
+}
+
+void rclcomm::QueueMappingCommand(const basic::MappingCommand &command) {
+  std::lock_guard<std::mutex> lock(business_request_mutex_);
+  mapping_request_timer_ = node->create_wall_timer(
+      std::chrono::milliseconds(1),
+      [this, command]() {
+        {
+          std::lock_guard<std::mutex> callback_lock(business_request_mutex_);
+          if (mapping_request_timer_) mapping_request_timer_->cancel();
+        }
+        ExecuteMappingCommand(command);
+      },
+      callback_group_other);
+}
+
+void rclcomm::ExecuteMappingCommand(const basic::MappingCommand &command) {
+  basic::BusinessMappingStatus status;
+  if (GET_CONFIG_VALUE("EnableMappingSessionControl", "false") != "true") {
+    status.state = "REJECTED";
+    status.message = "mapping session control is disabled by the active GUI profile";
+    status.terminal = true;
+    PUBLISH(MSG_ID_BUSINESS_MAPPING_STATUS, status);
+    return;
+  }
+  if (!mapping_session_client_->action_server_is_ready()) {
+    status.state = "FAILED";
+    status.message = "ManageMappingSession action server is unavailable";
+    status.terminal = true;
+    PUBLISH(MSG_ID_BUSINESS_MAPPING_STATUS, status);
+    return;
+  }
+  MappingSession::Goal goal;
+  switch (command.type) {
+    case basic::MappingCommand::Type::kStatus:
+      goal.operation = MappingSession::Goal::OP_STATUS;
+      break;
+    case basic::MappingCommand::Type::kStart:
+      goal.operation = MappingSession::Goal::OP_START;
+      break;
+    case basic::MappingCommand::Type::kFinalize:
+      goal.operation = MappingSession::Goal::OP_FINALIZE_CAPTURE;
+      break;
+    case basic::MappingCommand::Type::kCommit:
+      goal.operation = MappingSession::Goal::OP_COMMIT;
+      break;
+    case basic::MappingCommand::Type::kDiscard:
+      goal.operation = MappingSession::Goal::OP_DISCARD;
+      break;
+  }
+  goal.map_id = command.map_id;
+  goal.session_id = command.session_id;
+  goal.activate_after_commit = command.activate_after_commit;
+  goal.timeout_s = command.timeout_s;
+  auto options = rclcpp_action::Client<MappingSession>::SendGoalOptions();
+  options.goal_response_callback = [](MappingSessionGoalHandle::SharedPtr handle) {
+    if (!handle) {
+      basic::BusinessMappingStatus rejected;
+      rejected.state = "REJECTED";
+      rejected.message = "ManageMappingSession rejected the request";
+      rejected.terminal = true;
+      PUBLISH(MSG_ID_BUSINESS_MAPPING_STATUS, rejected);
+    }
+  };
+  options.feedback_callback = [](
+      MappingSessionGoalHandle::SharedPtr,
+      const std::shared_ptr<const MappingSession::Feedback> feedback) {
+    basic::BusinessMappingStatus update;
+    update.state = feedback->state;
+    update.message = feedback->message;
+    update.progress = feedback->progress;
+    PUBLISH(MSG_ID_BUSINESS_MAPPING_STATUS, update);
+  };
+  options.result_callback = [](
+      const MappingSessionGoalHandle::WrappedResult &wrapped) {
+    basic::BusinessMappingStatus result;
+    result.terminal = true;
+    if (!wrapped.result) {
+      result.state = "FAILED";
+      result.message = "ManageMappingSession returned no result";
+      PUBLISH(MSG_ID_BUSINESS_MAPPING_STATUS, result);
+      return;
+    }
+    result.success = wrapped.result->success;
+    result.error_code = wrapped.result->error_code;
+    result.state = wrapped.result->state;
+    result.session_id = wrapped.result->session_id;
+    result.map_id = wrapped.result->map_id;
+    result.map_version_id = wrapped.result->map_version_id;
+    result.candidate_map_yaml = wrapped.result->candidate_map_yaml;
+    result.bag_directory = wrapped.result->bag_directory;
+    result.message = wrapped.result->message;
+    PUBLISH(MSG_ID_BUSINESS_MAPPING_STATUS, result);
+  };
+  mapping_session_client_->async_send_goal(goal, options);
+}
+
+void rclcomm::QueueRelocalizationCommand(
+    const basic::RelocalizationCommand &command) {
+  std::lock_guard<std::mutex> lock(business_request_mutex_);
+  relocalization_request_timer_ = node->create_wall_timer(
+      std::chrono::milliseconds(1),
+      [this, command]() {
+        {
+          std::lock_guard<std::mutex> callback_lock(business_request_mutex_);
+          if (relocalization_request_timer_)
+            relocalization_request_timer_->cancel();
+        }
+        ExecuteRelocalizationCommand(command);
+      },
+      callback_group_other);
+}
+
+void rclcomm::ExecuteRelocalizationCommand(
+    const basic::RelocalizationCommand &command) {
+  basic::BusinessRelocalizationStatus status;
+  if (GET_CONFIG_VALUE("EnableRelocalization", "false") != "true") {
+    status.state = "REJECTED";
+    status.message = "relocalization is disabled by the active GUI profile";
+    status.terminal = true;
+    PUBLISH(MSG_ID_BUSINESS_RELOCALIZATION_STATUS, status);
+    return;
+  }
+  if (!relocalize_client_->action_server_is_ready()) {
+    status.state = "FAILED";
+    status.message = "Relocalize action server is unavailable";
+    status.terminal = true;
+    PUBLISH(MSG_ID_BUSINESS_RELOCALIZATION_STATUS, status);
+    return;
+  }
+  Relocalize::Goal goal;
+  goal.mode = Relocalize::Goal::MODE_AUTO_SEARCH;
+  goal.use_last_valid_pose = true;
+  goal.use_configured_candidates = true;
+  goal.max_candidates = command.max_candidates;
+  goal.timeout_s = command.timeout_s;
+  auto options = rclcpp_action::Client<Relocalize>::SendGoalOptions();
+  options.goal_response_callback = [](RelocalizeGoalHandle::SharedPtr handle) {
+    if (!handle) {
+      basic::BusinessRelocalizationStatus rejected;
+      rejected.state = "REJECTED";
+      rejected.message = "Relocalize rejected the request";
+      rejected.terminal = true;
+      PUBLISH(MSG_ID_BUSINESS_RELOCALIZATION_STATUS, rejected);
+    }
+  };
+  options.feedback_callback = [](
+      RelocalizeGoalHandle::SharedPtr,
+      const std::shared_ptr<const Relocalize::Feedback> feedback) {
+    basic::BusinessRelocalizationStatus update;
+    update.state = LocalizationStateName(feedback->state);
+    update.total_candidates = feedback->total_candidates;
+    update.tested_candidates = feedback->tested_candidates;
+    update.best_fitness_score = feedback->best_fitness_score;
+    update.elapsed_s = feedback->elapsed_s;
+    PUBLISH(MSG_ID_BUSINESS_RELOCALIZATION_STATUS, update);
+  };
+  options.result_callback = [](
+      const RelocalizeGoalHandle::WrappedResult &wrapped) {
+    basic::BusinessRelocalizationStatus result;
+    result.terminal = true;
+    if (!wrapped.result) {
+      result.state = "FAILED";
+      result.message = "Relocalize returned no result";
+    } else {
+      result.success = wrapped.result->success;
+      result.error_code = wrapped.result->error_code;
+      result.state = LocalizationStateName(wrapped.result->final_status.state);
+      result.message = wrapped.result->success
+                           ? wrapped.result->final_status.message
+                           : wrapped.result->failure_reason;
+    }
+    PUBLISH(MSG_ID_BUSINESS_RELOCALIZATION_STATUS, result);
+  };
+  relocalize_client_->async_send_goal(goal, options);
+}
+
+void rclcomm::QueueMapCommand(const basic::MapCommand &command) {
+  std::lock_guard<std::mutex> lock(business_request_mutex_);
+  map_request_timer_ = node->create_wall_timer(
+      std::chrono::milliseconds(1),
+      [this, command]() {
+        {
+          std::lock_guard<std::mutex> callback_lock(business_request_mutex_);
+          if (map_request_timer_) map_request_timer_->cancel();
+        }
+        ExecuteMapCommand(command);
+      },
+      callback_group_other);
+}
+
+void rclcomm::ExecuteMapCommand(const basic::MapCommand &command) {
+  basic::BusinessMapCatalog catalog;
+  if (GET_CONFIG_VALUE("EnableMapManager", "false") != "true") {
+    catalog.message = "map manager access is disabled by the active GUI profile";
+    PUBLISH(MSG_ID_BUSINESS_MAP_CATALOG, catalog);
+    return;
+  }
+  if (command.type == basic::MapCommand::Type::kList) {
+    if (!list_maps_client_->service_is_ready()) {
+      catalog.message = "map list service is unavailable";
+      PUBLISH(MSG_ID_BUSINESS_MAP_CATALOG, catalog);
+      return;
+    }
+    auto request = std::make_shared<agt_interfaces::srv::ListMapVersions::Request>();
+    request->state = agt_interfaces::msg::MapVersionSummary::STATE_UNKNOWN;
+    request->include_deleted = command.include_deleted;
+    list_maps_client_->async_send_request(
+        request,
+        [](rclcpp::Client<agt_interfaces::srv::ListMapVersions>::SharedFuture future) {
+          const auto response = future.get();
+          basic::BusinessMapCatalog result;
+          result.success = response->success;
+          result.error_code = response->error_code;
+          result.message = response->message;
+          for (const auto &version : response->versions)
+            result.versions.push_back(ConvertMapVersion(version));
+          PUBLISH(MSG_ID_BUSINESS_MAP_CATALOG, result);
+        });
+    return;
+  }
+  if (command.map_version_id.empty()) {
+    catalog.message = "a map version must be selected";
+    PUBLISH(MSG_ID_BUSINESS_MAP_CATALOG, catalog);
+    return;
+  }
+  if (!manage_map_client_->service_is_ready()) {
+    catalog.message = "map manager service is unavailable";
+    PUBLISH(MSG_ID_BUSINESS_MAP_CATALOG, catalog);
+    return;
+  }
+  auto request = std::make_shared<agt_interfaces::srv::ManageMapVersion::Request>();
+  request->map_version_id = command.map_version_id;
+  request->confirm_destructive = command.confirm_destructive;
+  switch (command.type) {
+    case basic::MapCommand::Type::kValidate:
+      request->operation = request->OP_VALIDATE;
+      break;
+    case basic::MapCommand::Type::kActivate:
+      request->operation = request->OP_ACTIVATE;
+      break;
+    case basic::MapCommand::Type::kPin:
+      request->operation = request->OP_PIN;
+      break;
+    case basic::MapCommand::Type::kUnpin:
+      request->operation = request->OP_UNPIN;
+      break;
+    case basic::MapCommand::Type::kArchive:
+      request->operation = request->OP_ARCHIVE;
+      break;
+    case basic::MapCommand::Type::kSoftDelete:
+      request->operation = request->OP_SOFT_DELETE;
+      break;
+    case basic::MapCommand::Type::kPurge:
+      request->operation = request->OP_PURGE;
+      break;
+    case basic::MapCommand::Type::kList:
+      return;
+  }
+  manage_map_client_->async_send_request(
+      request,
+      [this](rclcpp::Client<agt_interfaces::srv::ManageMapVersion>::SharedFuture future) {
+        const auto response = future.get();
+        if (!response->success) {
+          basic::BusinessMapCatalog failed;
+          failed.error_code = response->error_code;
+          failed.message = response->message;
+          PUBLISH(MSG_ID_BUSINESS_MAP_CATALOG, failed);
+          return;
+        }
+        ExecuteMapCommand(basic::MapCommand{});
+      });
+}
+
+void rclcomm::QueueBagCommand(const basic::BagCommand &command) {
+  std::lock_guard<std::mutex> lock(business_request_mutex_);
+  bag_request_timer_ = node->create_wall_timer(
+      std::chrono::milliseconds(1),
+      [this, command]() {
+        {
+          std::lock_guard<std::mutex> callback_lock(business_request_mutex_);
+          if (bag_request_timer_) bag_request_timer_->cancel();
+        }
+        ExecuteBagCommand(command);
+      },
+      callback_group_other);
+}
+
+void rclcomm::ExecuteBagCommand(const basic::BagCommand &command) {
+  basic::BusinessBagCatalog catalog;
+  if (GET_CONFIG_VALUE("EnableBagManager", "false") != "true") {
+    catalog.message = "bag manager access is disabled by the active GUI profile";
+    PUBLISH(MSG_ID_BUSINESS_BAG_CATALOG, catalog);
+    return;
+  }
+  if (command.type == basic::BagCommand::Type::kList) {
+    if (!list_bags_client_->service_is_ready()) {
+      catalog.message = "bag list service is unavailable";
+      PUBLISH(MSG_ID_BUSINESS_BAG_CATALOG, catalog);
+      return;
+    }
+    auto request = std::make_shared<agt_interfaces::srv::ListBagSessions::Request>();
+    list_bags_client_->async_send_request(
+        request,
+        [](rclcpp::Client<agt_interfaces::srv::ListBagSessions>::SharedFuture future) {
+          const auto response = future.get();
+          basic::BusinessBagCatalog result;
+          result.success = response->success;
+          result.error_code = response->error_code;
+          result.message = response->message;
+          for (const auto &session : response->sessions)
+            result.sessions.push_back(ConvertBagSession(session));
+          PUBLISH(MSG_ID_BUSINESS_BAG_CATALOG, result);
+        });
+    return;
+  }
+  if (!manage_bag_client_->service_is_ready()) {
+    catalog.message = "bag manager service is unavailable";
+    PUBLISH(MSG_ID_BUSINESS_BAG_CATALOG, catalog);
+    return;
+  }
+  auto request = std::make_shared<agt_interfaces::srv::ManageBagSession::Request>();
+  request->bag_id = command.bag_id;
+  request->experiment_id = command.experiment_id;
+  request->experiment_title = command.experiment_title;
+  request->profile_id = command.profile_id;
+  request->playback_rate = command.playback_rate;
+  switch (command.type) {
+    case basic::BagCommand::Type::kStatus:
+      request->operation = request->OP_STATUS;
+      break;
+    case basic::BagCommand::Type::kStartRecording:
+      request->operation = request->OP_START_RECORDING;
+      break;
+    case basic::BagCommand::Type::kStopRecording:
+      request->operation = request->OP_STOP_RECORDING;
+      break;
+    case basic::BagCommand::Type::kStartPlayback:
+      request->operation = request->OP_START_PLAYBACK;
+      break;
+    case basic::BagCommand::Type::kStopPlayback:
+      request->operation = request->OP_STOP_PLAYBACK;
+      break;
+    case basic::BagCommand::Type::kCreateExperiment:
+      request->operation = request->OP_CREATE_EXPERIMENT;
+      break;
+    case basic::BagCommand::Type::kCompleteExperiment:
+      request->operation = request->OP_COMPLETE_EXPERIMENT;
+      break;
+    case basic::BagCommand::Type::kInterruptExperiment:
+      request->operation = request->OP_INTERRUPT_EXPERIMENT;
+      break;
+    case basic::BagCommand::Type::kList:
+      return;
+  }
+  manage_bag_client_->async_send_request(
+      request,
+      [this](rclcpp::Client<agt_interfaces::srv::ManageBagSession>::SharedFuture future) {
+        const auto response = future.get();
+        if (!response->success) {
+          basic::BusinessBagCatalog failed;
+          failed.error_code = response->error_code;
+          failed.message = response->message;
+          PUBLISH(MSG_ID_BUSINESS_BAG_CATALOG, failed);
+          return;
+        }
+        ExecuteBagCommand(basic::BagCommand{});
+      });
+}
+
 void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
   TaskExecutionStatus status;
   status.total_waypoints = request.points.size();
-  if (GET_CONFIG_VALUE("EnableTaskExecution", "false") != "true") {
+  if (GET_CONFIG_VALUE("EnableTaskExecution", "false") != "true" ||
+      GET_CONFIG_VALUE("EnableLegacyWaypointExecution", "false") != "true") {
     status.state = "REJECTED";
     status.message = "task execution is disabled by the active GUI profile";
     status.terminal = true;
@@ -452,6 +1211,21 @@ bool rclcomm::Stop() {
     std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
     if (task_request_timer_) task_request_timer_->cancel();
     task_request_timer_.reset();
+  }
+  {
+    std::lock_guard<std::mutex> lock(business_request_mutex_);
+    if (mission_request_timer_) mission_request_timer_->cancel();
+    if (system_mode_request_timer_) system_mode_request_timer_->cancel();
+    if (mapping_request_timer_) mapping_request_timer_->cancel();
+    if (relocalization_request_timer_) relocalization_request_timer_->cancel();
+    if (map_request_timer_) map_request_timer_->cancel();
+    if (bag_request_timer_) bag_request_timer_->cancel();
+    mission_request_timer_.reset();
+    system_mode_request_timer_.reset();
+    mapping_request_timer_.reset();
+    relocalization_request_timer_.reset();
+    map_request_timer_.reset();
+    bag_request_timer_.reset();
   }
   if (rclcpp::ok()) {
     rclcpp::shutdown();
@@ -807,6 +1581,10 @@ void rclcomm::PubRelocPose(const basic::RobotPose &pose) {
   reloc_pose_publisher_->publish(geo_pose);
 }
 void rclcomm::PubNavGoal(const basic::RobotPose &pose) {
+  if (!nav_goal_publisher_) {
+    LOG_WARN("direct /goal_pose publication is disabled by the active GUI profile");
+    return;
+  }
   geometry_msgs::msg::PoseStamped geo_pose;
   geo_pose.header.frame_id = "map";
   geo_pose.header.stamp = node->get_clock()->now();

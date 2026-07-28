@@ -13,7 +13,19 @@
                   OneValue(kPreviewTaskChain, ) \
                   OneValue(kWaypointPreviewStatus, ) \
                   OneValue(kTaskChainStatus, ) \
-                  OneValue(kTeachRouteAnnotations, )
+                  OneValue(kTeachRouteAnnotations, ) \
+                  OneValue(kBusinessRobotState, ) \
+                  OneValue(kBusinessMissionStatus, ) \
+                  OneValue(kMissionCommand, ) \
+                  OneValue(kSystemModeCommand, ) \
+                  OneValue(kBusinessMappingStatus, ) \
+                  OneValue(kMappingCommand, ) \
+                  OneValue(kBusinessRelocalizationStatus, ) \
+                  OneValue(kRelocalizationCommand, ) \
+                  OneValue(kBusinessMapCatalog, ) \
+                  OneValue(kMapCommand, ) \
+                  OneValue(kBusinessBagCatalog, ) \
+                  OneValue(kBagCommand, )
 
 DECLARE_ENUM(MsgId, SOME_ENUM)
 DEFINE_ENUM(MsgId, SOME_ENUM)
@@ -42,6 +54,19 @@ DEFINE_ENUM(MsgId, SOME_ENUM)
 #define MSG_ID_WAYPOINT_PREVIEW_STATUS ToString(MsgId::kWaypointPreviewStatus)
 #define MSG_ID_TASK_CHAIN_STATUS ToString(MsgId::kTaskChainStatus)
 #define MSG_ID_TEACH_ROUTE_ANNOTATIONS ToString(MsgId::kTeachRouteAnnotations)
+#define MSG_ID_BUSINESS_ROBOT_STATE ToString(MsgId::kBusinessRobotState)
+#define MSG_ID_BUSINESS_MISSION_STATUS ToString(MsgId::kBusinessMissionStatus)
+#define MSG_ID_MISSION_COMMAND ToString(MsgId::kMissionCommand)
+#define MSG_ID_SYSTEM_MODE_COMMAND ToString(MsgId::kSystemModeCommand)
+#define MSG_ID_BUSINESS_MAPPING_STATUS ToString(MsgId::kBusinessMappingStatus)
+#define MSG_ID_MAPPING_COMMAND ToString(MsgId::kMappingCommand)
+#define MSG_ID_BUSINESS_RELOCALIZATION_STATUS \
+  ToString(MsgId::kBusinessRelocalizationStatus)
+#define MSG_ID_RELOCALIZATION_COMMAND ToString(MsgId::kRelocalizationCommand)
+#define MSG_ID_BUSINESS_MAP_CATALOG ToString(MsgId::kBusinessMapCatalog)
+#define MSG_ID_MAP_COMMAND ToString(MsgId::kMapCommand)
+#define MSG_ID_BUSINESS_BAG_CATALOG ToString(MsgId::kBusinessBagCatalog)
+#define MSG_ID_BAG_COMMAND ToString(MsgId::kBagCommand)
 
 #define DISPLAY_ROBOT ToString(MsgId::kRobotPose)
 #define DISPLAY_MAP ToString(MsgId::kOccupancyMap)

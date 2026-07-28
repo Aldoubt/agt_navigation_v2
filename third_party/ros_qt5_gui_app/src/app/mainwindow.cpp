@@ -40,6 +40,17 @@
 #include "msg/diagnostic_snapshot.h"
 #include "display/manager/view_manager.h"
 #include "ui_language.h"
+#include "ui/pages/navigation_mission_page.h"
+#include "ui/pages/mapping_page.h"
+#include "ui/pages/map_asset_page.h"
+#include "ui/pages/experiment_page.h"
+#include "ui/shell/control_center_shell.h"
+#include "ui/shell/ui_layout_manager.h"
+#include "ui/ui_capability_policy.h"
+#include "ui/view_models/mission_view_model.h"
+#include "ui/view_models/robot_state_view_model.h"
+#include "ui/view_models/system_mode_view_model.h"
+#include "ui/view_models/business_operations_view_model.h"
 #include <QTimer>
 using namespace ads;
 MainWindow::MainWindow(QWidget *parent)
@@ -60,6 +71,28 @@ MainWindow::MainWindow(QWidget *parent)
   qRegisterMetaType<std::any>("std::any");
   qRegisterMetaType<TopologyMap>("TopologyMap");
   qRegisterMetaType<TopologyMap::PointInfo>("TopologyMap::PointInfo");
+  qRegisterMetaType<basic::BusinessRobotState>("basic::BusinessRobotState");
+  qRegisterMetaType<basic::BusinessMissionStatus>("basic::BusinessMissionStatus");
+  qRegisterMetaType<basic::BusinessMappingStatus>("basic::BusinessMappingStatus");
+  qRegisterMetaType<basic::BusinessRelocalizationStatus>(
+      "basic::BusinessRelocalizationStatus");
+  qRegisterMetaType<basic::BusinessMapCatalog>("basic::BusinessMapCatalog");
+  qRegisterMetaType<basic::BusinessBagCatalog>("basic::BusinessBagCatalog");
+  ui_capabilities_ =
+      std::make_unique<UiCapabilityPolicy>(UiCapabilityPolicy::FromConfig());
+  ui_layout_manager_ = std::make_unique<UiLayoutManager>(
+      QString::fromStdString(GET_CONFIG_VALUE("UiLayoutId", "control-center-v1")));
+  robot_state_view_model_ = new RobotStateViewModel(this);
+  mission_view_model_ =
+      new MissionViewModel(ui_capabilities_->missionExecution(), this);
+  system_mode_view_model_ =
+      new SystemModeViewModel(ui_capabilities_->systemModeControl(), this);
+  mapping_view_model_ =
+      new MappingViewModel(ui_capabilities_->mappingSessionControl(), this);
+  relocalization_view_model_ =
+      new RelocalizationViewModel(ui_capabilities_->relocalization(), this);
+  asset_view_model_ = new AssetViewModel(ui_capabilities_->mapManager(),
+                                         ui_capabilities_->bagManager(), this);
   setupUi();
   QTimer::singleShot(30, this, [this]() { openChannel(); });
   QTimer::singleShot(50, [=]() { 
@@ -236,59 +269,7 @@ void MainWindow::setupUi() {
   uiFont.setStyleStrategy(QFont::PreferAntialias);
   this->setFont(uiFont);
   
-  // 设置主窗体现代化样式
-  this->setStyleSheet(R"(
-    QMainWindow {
-      background-color: #f5f5f5;
-      color: #333333;
-    }
-    
-    QToolBar {
-      background-color: #ffffff;
-      border: none;
-      spacing: 8px;
-      padding: 4px;
-    }
-    
-    QStatusBar {
-      background-color: #ffffff;
-      border-top: 1px solid #e0e0e0;
-    }
-    
-    QMenuBar {
-      background-color: #ffffff;
-      border-bottom: 1px solid #e0e0e0;
-      color: #333333;
-    }
-    
-    QMenuBar::item {
-      background-color: transparent;
-      padding: 8px 12px;
-      border-radius: 4px;
-    }
-    
-    QMenuBar::item:selected {
-      background-color: #e3f2fd;
-      color: #1976d2;
-    }
-    
-    QMenu {
-      background-color: #ffffff;
-      border: 1px solid #e0e0e0;
-      border-radius: 6px;
-      padding: 4px;
-    }
-    
-    QMenu::item {
-      padding: 8px 16px;
-      border-radius: 4px;
-    }
-    
-    QMenu::item:selected {
-      background-color: #e3f2fd;
-      color: #1976d2;
-    }
-  )");
+  setProperty("agtSurface", true);
   
   CDockManager::setConfigFlag(CDockManager::OpaqueSplitterResize, true);
   CDockManager::setConfigFlag(CDockManager::XmlCompressionEnabled, false);
@@ -299,7 +280,20 @@ void MainWindow::setupUi() {
   CDockManager::setConfigFlag(CDockManager::EqualSplitOnInsertion, true);
   CDockManager::setConfigFlag(CDockManager::ShowTabTextOnlyForActiveTab, true);
   CDockManager::setAutoHideConfigFlags(CDockManager::DefaultAutoHideConfig);
-  dock_manager_ = new CDockManager(this);
+  if (ui_layout_manager_->usesControlCenter()) {
+    control_center_shell_ = new ControlCenterShell(
+        *ui_capabilities_, robot_state_view_model_, mission_view_model_,
+        system_mode_view_model_, ui->centralwidget);
+    ui->verticalLayout->setContentsMargins(0, 0, 0, 0);
+    ui->verticalLayout->addWidget(control_center_shell_);
+    auto *workspace_layout =
+        new QVBoxLayout(control_center_shell_->workspaceHost());
+    workspace_layout->setContentsMargins(0, 0, 0, 0);
+    dock_manager_ = new CDockManager(control_center_shell_->workspaceHost());
+    workspace_layout->addWidget(dock_manager_);
+  } else {
+    dock_manager_ = new CDockManager(this);
+  }
   QVBoxLayout *center_layout = new QVBoxLayout();    //垂直
   QHBoxLayout *center_h_layout = new QHBoxLayout();  //水平
 
@@ -402,12 +396,11 @@ void MainWindow::setupUi() {
   icon5.addFile(QString::fromUtf8(":/images/edit.svg"),
                 QSize(32, 32), QIcon::Normal, QIcon::Off);
   const bool base_map_editing_enabled =
-      GET_CONFIG_VALUE("EnableBaseMapEditing", "true") == "true";
+      ui_capabilities_->baseMapEditing();
   const bool base_map_save_as_enabled =
-      base_map_editing_enabled &&
-      GET_CONFIG_VALUE("EnableBaseMapSaveAs", "true") == "true";
+      ui_capabilities_->baseMapSaveAs();
   const bool map_open_enabled =
-      GET_CONFIG_VALUE("EnableMapOpen", "true") == "true";
+      ui_capabilities_->mapOpen();
   QToolButton *edit_map_btn = new QToolButton();
   edit_map_btn->setIcon(icon5);
   edit_map_btn->setText(UiLanguage::Text("编辑地图", "Edit map"));
@@ -766,7 +759,7 @@ void MainWindow::setupUi() {
       GET_CONFIG_VALUE("ShowDashboard", "true") == "true");
 
   ////////////////////////////////////////////////////////速度控制
-  if (GET_CONFIG_VALUE("EnableManualControl", "true") == "true") {
+  if (ui_capabilities_->manualControl()) {
     speed_ctrl_widget_ = new SpeedCtrlWidget();
     connect(speed_ctrl_widget_, &SpeedCtrlWidget::signalControlSpeed,
             [this](const RobotSpeed &speed) {
@@ -853,9 +846,9 @@ void MainWindow::setupUi() {
   QCheckBox *loop_task_checkbox = new QCheckBox(
       UiLanguage::Text("有限重复两遍", "Repeat twice (finite)"));
   const bool task_execution_enabled =
-      GET_CONFIG_VALUE("EnableTaskExecution", "false") == "true";
+      ui_capabilities_->legacyWaypointExecution();
   const bool task_preview_enabled =
-      GET_CONFIG_VALUE("EnableOfflinePlanningPreview", "false") == "true";
+      ui_capabilities_->offlinePlanningPreview();
   btn_start_task_chain->setEnabled(task_execution_enabled);
   btn_preview_task_chain->setEnabled(task_preview_enabled);
   loop_task_checkbox->setEnabled(task_execution_enabled);
@@ -884,11 +877,6 @@ void MainWindow::setupUi() {
     QCheckBox::indicator:checked {
       background-color: #1976d2;
       border-color: #1976d2;
-    }
-    QCheckBox::indicator:checked::after {
-      content: "✓";
-      color: #ffffff;
-      font-weight: bold;
     }
   )");
   
@@ -919,6 +907,33 @@ void MainWindow::setupUi() {
       GET_CONFIG_VALUE("EnableLegacyTopologyTasks", "true") == "true";
   auto *task_workspace_tabs = new QTabWidget();
   task_workspace_tabs->setDocumentMode(true);
+  NavigationMissionPage *mission_page = nullptr;
+  MappingPage *mapping_page = nullptr;
+  MapAssetPage *map_asset_page = nullptr;
+  ExperimentPage *experiment_page = nullptr;
+  if (ui_capabilities_->pageEnabled("mapping")) {
+    mapping_page = new MappingPage(mapping_view_model_, task_workspace_tabs);
+    task_workspace_tabs->addTab(
+        mapping_page, UiLanguage::Text("建图会话", "Mapping session"));
+  }
+  if (ui_capabilities_->pageEnabled("teach_tuning")) {
+    experiment_page = new ExperimentPage(asset_view_model_, task_workspace_tabs);
+    task_workspace_tabs->addTab(
+        experiment_page, UiLanguage::Text("Bag 与实验", "Bags & experiments"));
+  }
+  if (ui_capabilities_->pageEnabled("navigation_mission")) {
+    mission_page = new NavigationMissionPage(
+        mission_view_model_, relocalization_view_model_, task_workspace_tabs);
+    task_workspace_tabs->addTab(
+        mission_page,
+        UiLanguage::Text("Mission 执行", "Mission execution"));
+  }
+  if (ui_capabilities_->pageEnabled("map_task") &&
+      ui_capabilities_->mapManager()) {
+    map_asset_page = new MapAssetPage(asset_view_model_, task_workspace_tabs);
+    task_workspace_tabs->addTab(
+        map_asset_page, UiLanguage::Text("地图资产", "Map assets"));
+  }
   if (legacy_topology_tasks_enabled) {
     task_workspace_tabs->addTab(
         task_list_widget, UiLanguage::Text("拓扑任务", "Topology task"));
@@ -932,18 +947,20 @@ void MainWindow::setupUi() {
     task_workspace_tabs->setCurrentWidget(task_library_dock_);
   }
 
-  ads::CDockWidget *nav_goal_list_dock_widget =
+  task_center_dock_ =
       new ads::CDockWidget(UiLanguage::Text("任务中心", "Task Center"));
-  nav_goal_list_dock_widget->setWidget(task_workspace_tabs);
-  nav_goal_list_dock_widget->setMinimumSizeHintMode(
+  task_center_dock_->setWidget(task_workspace_tabs);
+  task_center_dock_->setMinimumSizeHintMode(
       CDockWidget::MinimumSizeHintFromDockWidget);
-  nav_goal_list_dock_widget->setMinimumSize(
+  task_center_dock_->setMinimumSize(
       task_library_enabled ? 420 : 200, task_library_enabled ? 300 : 150);
-  nav_goal_list_dock_widget->setMaximumSize(680, QWIDGETSIZE_MAX);
+  task_center_dock_->setMaximumSize(680, QWIDGETSIZE_MAX);
   dock_manager_->addDockWidget(ads::DockWidgetArea::RightDockWidgetArea,
-                               nav_goal_list_dock_widget, center_docker_area_);
-  nav_goal_list_dock_widget->toggleView(task_library_enabled ||
-                                        legacy_topology_tasks_enabled);
+                               task_center_dock_, center_docker_area_);
+  task_center_dock_->toggleView(task_library_enabled ||
+                                legacy_topology_tasks_enabled ||
+                                mapping_page || experiment_page || mission_page ||
+                                map_asset_page);
   connect(task_workspace_tabs, &QTabWidget::currentChanged, this,
           [this, task_workspace_tabs](int index) {
             if (task_library_dock_ &&
@@ -951,7 +968,7 @@ void MainWindow::setupUi() {
               task_library_dock_->DeactivateMapEditing();
             }
           });
-  connect(nav_goal_list_dock_widget, &ads::CDockWidget::viewToggled, this,
+  connect(task_center_dock_, &ads::CDockWidget::viewToggled, this,
           [this](bool open) {
             if (!open && task_library_dock_)
               task_library_dock_->DeactivateMapEditing();
@@ -1010,7 +1027,7 @@ void MainWindow::setupUi() {
   });
 
   // nav_goal_list_dock_widget->toggleView(false);
-  ui->menuView->addAction(nav_goal_list_dock_widget->toggleViewAction());
+  ui->menuView->addAction(task_center_dock_->toggleViewAction());
   connect(
       btn_add_one_goal, &QPushButton::clicked,
       [this]() { nav_goal_table_view_->AddItem(); });
@@ -1273,6 +1290,39 @@ void MainWindow::setupUi() {
   connect(display_manager_->GetDisplay(DISPLAY_MAP),
           SIGNAL(signalCursorPose(QPointF)), this,
           SLOT(signalCursorPose(QPointF)));
+  if (control_center_shell_) {
+    connect(control_center_shell_, &ControlCenterShell::pageSelected, this,
+            [this, task_workspace_tabs, mission_page, mapping_page,
+             map_asset_page, experiment_page](const QString &page_id) {
+              if (page_id == QStringLiteral("platform") && dashboard_dock_)
+                dashboard_dock_->toggleView(true);
+              if (page_id == QStringLiteral("diagnostics") && diagnostic_dock_)
+                diagnostic_dock_->toggleView(true);
+              if (page_id == QStringLiteral("navigation_mission") &&
+                  task_center_dock_) {
+                task_center_dock_->toggleView(true);
+                if (mission_page) task_workspace_tabs->setCurrentWidget(mission_page);
+              }
+              if (page_id == QStringLiteral("map_task") && task_center_dock_) {
+                task_center_dock_->toggleView(true);
+                if (map_asset_page)
+                  task_workspace_tabs->setCurrentWidget(map_asset_page);
+                else if (task_library_dock_)
+                  task_workspace_tabs->setCurrentWidget(task_library_dock_);
+              }
+              if (page_id == QStringLiteral("mapping") && task_center_dock_) {
+                task_center_dock_->toggleView(true);
+                if (mapping_page)
+                  task_workspace_tabs->setCurrentWidget(mapping_page);
+              }
+              if (page_id == QStringLiteral("teach_tuning") &&
+                  task_center_dock_) {
+                task_center_dock_->toggleView(true);
+                if (experiment_page)
+                  task_workspace_tabs->setCurrentWidget(experiment_page);
+              }
+            });
+  }
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event) {

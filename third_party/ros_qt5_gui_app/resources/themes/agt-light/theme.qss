@@ -1,0 +1,35 @@
+QWidget {
+  color: @text;
+  background: @background;
+  letter-spacing: 0;
+}
+QMainWindow, QDialog, QMenu, QToolBar, QStatusBar, QFrame[agtSurface="true"] {
+  background: @surface;
+}
+QPushButton, QToolButton, QComboBox, QLineEdit {
+  min-height: 36px;
+  padding: @controlPadding;
+  border: 1px solid @border;
+  border-radius: 4px;
+  background: @surface;
+}
+QPushButton:hover, QToolButton:hover { border-color: @accent; }
+QPushButton:disabled, QToolButton:disabled { color: @mutedText; }
+QPushButton[primary="true"] { background: @accent; color: @surface; border-color: @accent; }
+QPushButton[danger="true"] { background: @danger; color: @surface; border-color: @danger; }
+QLabel[muted="true"] { color: @mutedText; }
+QLabel[state="ok"] { color: @success; }
+QLabel[state="warning"] { color: @warning; }
+QLabel[state="error"] { color: @danger; }
+QListWidget[agtNavigation="true"] {
+  background: @surface;
+  border: 0;
+  border-right: 1px solid @border;
+  outline: 0;
+}
+QListWidget[agtNavigation="true"]::item { min-height: 40px; padding: 4px 12px; }
+QListWidget[agtNavigation="true"]::item:selected { color: @surface; background: @accent; }
+QFrame[agtStatusBar="true"] { background: @surface; border-bottom: 1px solid @border; }
+QFrame[agtContext="true"] { background: @surface; border-left: 1px solid @border; }
+QProgressBar { border: 1px solid @border; border-radius: 4px; text-align: center; background: @surface; }
+QProgressBar::chunk { background: @accent; }

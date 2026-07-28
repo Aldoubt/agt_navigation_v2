@@ -37,6 +37,18 @@
 #include "topology_msgs/msg/topology_map.hpp"
 #include "visualization_msgs/msg/marker_array.hpp"
 #include "agt_interfaces/action/execute_waypoint_task.hpp"
+#include "agt_interfaces/action/change_system_mode.hpp"
+#include "agt_interfaces/action/execute_mission.hpp"
+#include "agt_interfaces/action/manage_mapping_session.hpp"
+#include "agt_interfaces/action/relocalize.hpp"
+#include "agt_interfaces/msg/mission_status.hpp"
+#include "agt_interfaces/msg/robot_state.hpp"
+#include "agt_interfaces/srv/set_mission_run_state.hpp"
+#include "agt_interfaces/srv/list_bag_sessions.hpp"
+#include "agt_interfaces/srv/list_map_versions.hpp"
+#include "agt_interfaces/srv/manage_bag_session.hpp"
+#include "agt_interfaces/srv/manage_map_version.hpp"
+#include "msg/business_state.h"
 #include "config/task_chain.h"
 #include "core/framework/framework.h"
 #include <mutex>
@@ -44,6 +56,14 @@
 class rclcomm : public VirtualChannelNode {
   using WaypointTask = agt_interfaces::action::ExecuteWaypointTask;
   using WaypointTaskGoalHandle = rclcpp_action::ClientGoalHandle<WaypointTask>;
+  using Mission = agt_interfaces::action::ExecuteMission;
+  using MissionGoalHandle = rclcpp_action::ClientGoalHandle<Mission>;
+  using ChangeMode = agt_interfaces::action::ChangeSystemMode;
+  using MappingSession = agt_interfaces::action::ManageMappingSession;
+  using MappingSessionGoalHandle =
+      rclcpp_action::ClientGoalHandle<MappingSession>;
+  using Relocalize = agt_interfaces::action::Relocalize;
+  using RelocalizeGoalHandle = rclcpp_action::ClientGoalHandle<Relocalize>;
  public:
   rclcomm();
   ~rclcomm() override = default;
@@ -66,6 +86,8 @@ class rclcomm : public VirtualChannelNode {
       const visualization_msgs::msg::MarkerArray::SharedPtr msg);
   void waypointPreviewStatusCallback(
       const std_msgs::msg::String::SharedPtr msg);
+  void robotStateCallback(const agt_interfaces::msg::RobotState::SharedPtr msg);
+  void missionStatusCallback(const agt_interfaces::msg::MissionStatus::SharedPtr msg);
 
  public:
   bool Start() override;
@@ -83,6 +105,12 @@ class rclcomm : public VirtualChannelNode {
   void PreviewTaskChain(const TaskExecutionRequest &request);
   void CancelTaskChain();
   void PublishTaskStatus(const TaskExecutionStatus &status);
+  void QueueMissionCommand(const basic::MissionCommand &command);
+  void QueueSystemModeCommand(const basic::SystemModeCommand &command);
+  void QueueMappingCommand(const basic::MappingCommand &command);
+  void QueueRelocalizationCommand(const basic::RelocalizationCommand &command);
+  void QueueMapCommand(const basic::MapCommand &command);
+  void QueueBagCommand(const basic::BagCommand &command);
 
  private:
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr speed_publisher_;
@@ -122,6 +150,32 @@ class rclcomm : public VirtualChannelNode {
   bool waypoint_task_cancel_requested_{false};
   std::mutex waypoint_task_mutex_;
   rclcpp::TimerBase::SharedPtr task_request_timer_;
+  rclcpp::Subscription<agt_interfaces::msg::RobotState>::SharedPtr
+      robot_state_subscriber_;
+  rclcpp::Subscription<agt_interfaces::msg::MissionStatus>::SharedPtr
+      mission_status_subscriber_;
+  rclcpp_action::Client<Mission>::SharedPtr mission_client_;
+  MissionGoalHandle::SharedPtr mission_goal_handle_;
+  rclcpp_action::Client<ChangeMode>::SharedPtr change_mode_client_;
+  rclcpp::Client<agt_interfaces::srv::SetMissionRunState>::SharedPtr
+      mission_run_state_client_;
+  rclcpp::TimerBase::SharedPtr mission_request_timer_;
+  rclcpp::TimerBase::SharedPtr system_mode_request_timer_;
+  rclcpp_action::Client<MappingSession>::SharedPtr mapping_session_client_;
+  rclcpp_action::Client<Relocalize>::SharedPtr relocalize_client_;
+  rclcpp::Client<agt_interfaces::srv::ListMapVersions>::SharedPtr
+      list_maps_client_;
+  rclcpp::Client<agt_interfaces::srv::ManageMapVersion>::SharedPtr
+      manage_map_client_;
+  rclcpp::Client<agt_interfaces::srv::ListBagSessions>::SharedPtr
+      list_bags_client_;
+  rclcpp::Client<agt_interfaces::srv::ManageBagSession>::SharedPtr
+      manage_bag_client_;
+  rclcpp::TimerBase::SharedPtr mapping_request_timer_;
+  rclcpp::TimerBase::SharedPtr relocalization_request_timer_;
+  rclcpp::TimerBase::SharedPtr map_request_timer_;
+  rclcpp::TimerBase::SharedPtr bag_request_timer_;
+  std::mutex business_request_mutex_;
   std::vector<rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr> image_subscriber_list_;
   std::unique_ptr<tf2_ros::Buffer> tf_buffer_;
   std::shared_ptr<tf2_ros::TransformListener> transform_listener_;
@@ -134,6 +188,15 @@ class rclcomm : public VirtualChannelNode {
   std::atomic_bool init_flag_{false};
 
  private:
+  void ExecuteMissionCommand(const basic::MissionCommand &command);
+  void ExecuteSystemModeCommand(const basic::SystemModeCommand &command);
+  void ExecuteMappingCommand(const basic::MappingCommand &command);
+  void ExecuteRelocalizationCommand(
+      const basic::RelocalizationCommand &command);
+  void ExecuteMapCommand(const basic::MapCommand &command);
+  void ExecuteBagCommand(const basic::BagCommand &command);
+  void PublishMissionMessage(const std::string &state,
+                             const std::string &message, bool terminal = false);
 };
 
 #endif  // RCLCOMM_H
