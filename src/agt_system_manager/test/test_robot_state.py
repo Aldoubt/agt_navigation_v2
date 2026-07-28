@@ -59,4 +59,3 @@ def test_nav2_active_requires_lifecycle_component_evidence():
     component.lifecycle_failures = ["planner_server=inactive"]
     assert nav2_state_from_health(health, "NAVIGATION") == 3
     assert nav2_state_from_health(health, "IDLE") == 1
-
