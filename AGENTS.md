@@ -338,6 +338,15 @@
 - `TaskReadiness` is the shared fail-closed gate. Waypoint and future task
   servers must check it at goal acceptance and again during execution; a GUI
   button is never an authorization boundary.
+- `agt_mission_manager` sequences only finite `WAYPOINT_TASK`, `WAIT_DURATION`,
+  and `WAIT_EVENT` steps. It calls only the project waypoint Action, never Nav2
+  native Actions, launch files, TF, safety enablement, or velocity topics. Parent
+  pause/cancel waits for child cancel confirmation; resume revalidates active-map,
+  localization, and TaskReadiness evidence.
+- `/agt/system/robot_state` is a freshness-aware read model for clients, not a
+  business owner. Active-map identity comes only from `/agt/maps/active`; missing
+  or stale lifecycle, safety, chassis, localization, readiness, and mission
+  evidence remains UNKNOWN or blocked.
 - Runtime map versions are immutable bundles under
   `runtime/maps/<map_id>/versions/<map_version_id>/`. `manifest.yaml` is the
   portable source of truth; SQLite is rebuildable index data. Activation

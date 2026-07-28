@@ -10,6 +10,15 @@ The node does not own any TF edge, velocity topic, map algorithm, or safety
 enable service. Start it with `system_manager.launch.py`; configure `runtime_dir`
 and the profile/health contract paths explicitly for deployment.
 
+`robot_state_aggregator.py` publishes reliable transient-local
+`/agt/system/robot_state` at 2 Hz and immediately after authoritative inputs
+change. `/agt/system/get_robot_state` returns the same read model. It consumes
+`/agt/maps/active` instead of reading map pointers or manifests, and preserves
+UNKNOWN/blocker state when health, readiness, localization, Mission, lifecycle,
+safety, chassis, odometry, or Bag evidence is missing or stale. It does not own
+any field it aggregates. `system_manager.launch.py` also starts the separate
+`agt_mission_manager` business owner.
+
 `mapping_session_manager.py` owns the finite real-mapping artifact sequence at
 `/agt/mapping/manage_session`. `mapping_session_workflow.py run` turns one
 operator Ctrl+C into save-grid, normal process stop, ready-PCD/hash and bag

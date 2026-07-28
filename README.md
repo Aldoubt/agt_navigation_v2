@@ -347,11 +347,17 @@ NOTICE 机制；它也与当前全部 `agt_*` package 声明一致。但它不�
 - `agt_chassis`
 - `agt_ui_bridge`
 - `agt_system_manager`
+- `agt_mission_manager`
 - `agt_map_manager`
 - `agt_experiment_manager`
 - `agt_teach_repeat`
 - `agt_web_console`
 - `agt_evaluation`
+
+第一版统一业务后端已增加 `agt_mission_manager` 和 `robot_state_aggregator`。Mission 只支持有限
+顺序 waypoint/时长等待/事件等待，waypoint 步骤只调用项目 `ExecuteWaypointTask` Action；
+`/agt/system/robot_state` 以 2 Hz 和输入变化即时发布模式、地图、定位、Mission、Nav2、安全、
+底盘和 Bag 的 freshness-aware 只读快照。两者都不发布 TF 或速度，也不启动 launch。
 
 自动重定位接口已在 `agt_interfaces` 生成：`LocalizationStatus.msg` 提供机器可解析状态，
 `Relocalize.action` 提供统一请求边界；`agt_localization` 已接入候选加载/展开、外部 coarse

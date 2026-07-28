@@ -8,6 +8,7 @@
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
   <exec_depend>agt_interfaces</exec_depend>
+  <exec_depend>agt_mission_manager</exec_depend>
   <exec_depend>agt_map_processing</exec_depend>
   <exec_depend>agt_map_manager</exec_depend>
   <exec_depend>agt_coverage_planning</exec_depend>

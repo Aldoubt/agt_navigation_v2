@@ -47,6 +47,20 @@ def generate_launch_description():
         ),
         Node(
             package="agt_system_manager",
+            executable="robot_state_aggregator.py",
+            name="agt_robot_state_aggregator",
+            output="screen",
+            parameters=[{"runtime_dir": LaunchConfiguration("runtime_dir")}],
+        ),
+        Node(
+            package="agt_mission_manager",
+            executable="mission_manager_node.py",
+            name="agt_mission_manager",
+            output="screen",
+            parameters=[{"runtime_dir": LaunchConfiguration("runtime_dir")}],
+        ),
+        Node(
+            package="agt_system_manager",
             executable="mapping_session_manager.py",
             name="agt_mapping_session_manager",
             output="screen",

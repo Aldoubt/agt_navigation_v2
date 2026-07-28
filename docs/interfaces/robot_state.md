@@ -8,6 +8,8 @@
 
 - 每个快照有 ROS 时间戳和单调 revision；默认 2 Hz，并在权威输入变化时立即发布。
 - 未收到或已过 freshness 窗口的数据保持 unknown/stale，不能伪造成健康。
+- health、TaskReadiness、活动地图、定位、Mission 和 Bag 均提供独立 `known` 与 freshness；
+  不能用各自消息的默认值代替缺失证据。
 - 活动地图来自 `/agt/maps/active`，聚合器不读取 `active_map.yaml` 或 manifest。
 - safety 的 motion enabled、急停和 navigation ready 来自权威 safety diagnostics。
 - chassis connected 与 odometry freshness 分别保留；连接 topic 不代表里程计新鲜。
