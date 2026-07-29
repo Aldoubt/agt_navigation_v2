@@ -186,6 +186,11 @@
   segment and a terminal success/failure on its advisory status topic; every
   ComputePathToPose segment has a positive finite timeout and failure clears
   `/plan`.
+- Offline multi-segment preview must start each later ComputePathToPose request
+  from the previous segment's actual returned endpoint. A planner tolerance may
+  adjust an intermediate task point; restarting from the original point may
+  create a disconnected preview or a false lethal-start failure. This continuity
+  rule must not mutate saved task points or convert preview into execution approval.
 - Consecutive waypoint poses are ordered Nav2 goals, not a required straight-line
   path. Save-time validation checks each enabled endpoint against the base raster
   but must not reject a task because the visual chord crosses occupied or unknown
