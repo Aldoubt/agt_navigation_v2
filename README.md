@@ -636,8 +636,10 @@ QoS 和 OctoMap 二维栅格输出链路均已通过。新旧轨迹与点云数�
 ## 系统总控
 
 BUNKER 平台统一使用 `agt_bringup/system.launch.py`。总控已包含 BUNKER 描述、传感器、
-FAST-LIVO2、地图处理、RViz、导航、安全层、底盘、Qt5、语义服务器和覆盖规划的条件启动。建图模式默认打开
-RViz，导航模式默认打开 Qt5。运行总控时不要再单独启动
+FAST-LIVO2、地图处理、RViz、导航、安全层、底盘、Qt5、语义服务器和覆盖规划的条件启动；
+直接启动总控时也会启动 `agt_map_manager`、`agt_robot_state_aggregator` 和
+`agt_mission_manager`，使 Qt5 与 TaskReadiness 使用同一 `/agt/maps/active` 活动地图上下文。
+建图模式默认打开 RViz，导航模式默认打开 Qt5。运行总控时不要再单独启动
 `description.launch.py`、`bunker_description.launch.py` 或 `bunker.launch.py`，否则会重复
 启动 robot_state_publisher、固定 TF 或同名节点。
 
@@ -714,12 +716,22 @@ ros2 launch agt_bringup system.launch.py \
   map:="$MAP_DIR/greenhouse_01.yaml" \
   global_map_pcd:="$MAP_DIR/pcd/localization_map.pcd" \
   global_map_processing_record:="$MAP_DIR/pcd/localization_map.processing.yaml" \
+  map_id:=greenhouse_01 \
+  map_version_id:=<ready_map_version_id> \
   record_bag:=true
 ```
 
 导航模式强制设置 `save_pcd:=false`：FAST-LIVO2 只提供稳定的
 `/agt/mapping/odometry` 和当前帧点云，不积累或覆盖建图 PCD。ICP/NDT 发布 `map -> odom`，
-Nav2、Collision Monitor、安全层与 BUNKER 底盘依次启动，Qt5 默认自动打开。
+Nav2、Collision Monitor、安全层与 BUNKER 底盘依次启动，Qt5 默认自动打开。`map_id` 和
+`map_version_id` 必须对应 `agt_map_manager` 当前发布的 READY `/agt/maps/active`；否则任务库
+保存、路径预览和执行会 fail-closed。
+
+Qt5 正式 waypoint 执行不再传本机 `task_file` 绝对路径。前端只提交 map/task ID、revision、
+content hash 和 `client_request_id`；机器人端 `agt_task_registry` 从 READY map version 的
+`tasks/` 目录解析任务 JSON，`agt_waypoint_task_server` 校验活动地图、定位、TaskReadiness、
+`agt_safety` 后才调用 Nav2 `FollowWaypoints`。`/agt/navigation/session_status` 是可靠持久的
+任务会话读模型，Qt 断联不会自动取消任务，重连后按该 session 恢复状态。
 
 完整覆盖作业模式增加以下参数；启动前还必须 source TASK-08 外部覆盖依赖工作区：
 

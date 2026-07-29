@@ -42,7 +42,11 @@
 #include "agt_interfaces/action/manage_mapping_session.hpp"
 #include "agt_interfaces/action/relocalize.hpp"
 #include "agt_interfaces/msg/mission_status.hpp"
+#include "agt_interfaces/msg/navigation_session_status.hpp"
 #include "agt_interfaces/msg/robot_state.hpp"
+#include "agt_interfaces/srv/get_task_group.hpp"
+#include "agt_interfaces/srv/get_navigation_session.hpp"
+#include "agt_interfaces/srv/put_task_group.hpp"
 #include "agt_interfaces/srv/set_mission_run_state.hpp"
 #include "agt_interfaces/srv/list_bag_sessions.hpp"
 #include "agt_interfaces/srv/list_map_versions.hpp"
@@ -88,6 +92,8 @@ class rclcomm : public VirtualChannelNode {
       const std_msgs::msg::String::SharedPtr msg);
   void robotStateCallback(const agt_interfaces::msg::RobotState::SharedPtr msg);
   void missionStatusCallback(const agt_interfaces::msg::MissionStatus::SharedPtr msg);
+  void navigationSessionStatusCallback(
+      const agt_interfaces::msg::NavigationSessionStatus::SharedPtr msg);
 
  public:
   bool Start() override;
@@ -105,6 +111,7 @@ class rclcomm : public VirtualChannelNode {
   void PreviewTaskChain(const TaskExecutionRequest &request);
   void CancelTaskChain();
   void PublishTaskStatus(const TaskExecutionStatus &status);
+  void RequestNavigationSessionStatus();
   void QueueMissionCommand(const basic::MissionCommand &command);
   void QueueSystemModeCommand(const basic::SystemModeCommand &command);
   void QueueMappingCommand(const basic::MappingCommand &command);
@@ -145,11 +152,20 @@ class rclcomm : public VirtualChannelNode {
   rclcpp::Publisher<geometry_msgs::msg::PoseArray>::SharedPtr
       waypoint_preview_publisher_;
   rclcpp_action::Client<WaypointTask>::SharedPtr waypoint_task_client_;
+  rclcpp::Client<agt_interfaces::srv::PutTaskGroup>::SharedPtr
+      put_task_group_client_;
+  rclcpp::Client<agt_interfaces::srv::GetTaskGroup>::SharedPtr
+      get_task_group_client_;
+  rclcpp::Client<agt_interfaces::srv::GetNavigationSession>::SharedPtr
+      get_navigation_session_client_;
+  rclcpp::Subscription<agt_interfaces::msg::NavigationSessionStatus>::SharedPtr
+      navigation_session_status_subscriber_;
   WaypointTaskGoalHandle::SharedPtr waypoint_task_goal_handle_;
   bool waypoint_task_pending_{false};
   bool waypoint_task_cancel_requested_{false};
   std::mutex waypoint_task_mutex_;
   rclcpp::TimerBase::SharedPtr task_request_timer_;
+  rclcpp::TimerBase::SharedPtr session_request_timer_;
   rclcpp::Subscription<agt_interfaces::msg::RobotState>::SharedPtr
       robot_state_subscriber_;
   rclcpp::Subscription<agt_interfaces::msg::MissionStatus>::SharedPtr

@@ -155,12 +155,18 @@ ros2 launch agt_bringup system.launch.py \
 和地图 I/O，不启动项目 Action server、Nav2、定位或安全执行链。
 
 执行按钮只在 profile 允许、任务已保存、绑定为 `MATCHED` 且离线校验通过时启用。点击执行后，
-Qt 把已保存任务文件的绝对路径和有限循环参数发送到
-`/agt/navigation/execute_waypoint_task`。反馈显示当前点、最终结果和 `missed_waypoints`；取消会
-请求项目 Action 取消 Nav2 child。Qt 不调用运动使能服务，也不发布底盘速度。
+Qt 只把 `map_id`、`map_version_id`、`task_group_id`、`task_revision`、
+`expected_content_sha256`、有限循环参数和 UUID `client_request_id` 发送到
+`/agt/navigation/execute_waypoint_task`。机器人端 Task Registry 根据 ID 解析任务 JSON，
+并校验 revision 与内容 hash；Qt 不再发送本机绝对 `task_file` 路径。任务未保存、仍有脏改动、
+缺少 content hash 或机器人端尚未同步时，界面显示 `任务尚未同步到机器人`，不会退回到本地路径执行。
+反馈显示当前点、最终结果和 `missed_waypoints`；取消会请求项目 Action 取消 Nav2 child。
+Qt 不调用运动使能服务，也不发布底盘速度。
 
 服务端再次检查 schema、当前 OccupancyGrid、地图 ID/version、YAML/image/PCD 内容身份、新鲜已接受
 定位状态、TaskReadiness 与 `agt_safety`。mapping 和 offline profile 均保持执行禁用。
+`/agt/navigation/session_status` 是机器人端权威会话状态，使用 reliable + transient-local。
+Qt 断联不会取消当前任务；重连后客户端应读取最近 session，而不是根据本地 Action handle 推断任务已停止。
 
 ## 常见错误
 
@@ -168,8 +174,9 @@ Qt 把已保存任务文件的绝对路径和有限循环参数发送到
 - `CONTENT_CHANGED`：显式重校验并更新内容绑定，不要直接执行旧文件。
 - `GEOMETRY_MISMATCH`：复制为新任务并人工迁移，不要修改旧任务坐标。
 - `occupied / unknown / outside`：调整点或地图策略；unknown 默认为拒绝。
-- `active map_id ... required`：运行时 TaskReadiness 没有提供激活地图身份。
-- `active map content hashes are not configured`：导航启动或定位状态未提供完整 YAML/image/PCD 身份。
+- `任务尚未同步到机器人`：任务仍是本地草稿，或机器人端 Task Registry 没有相同 ID/revision/hash。
+- `NO_ACTIVE_MAP`：运行时 map manager 没有发布 READY 活动地图身份。
+- `LOCALIZATION_PCD_HASH_MISSING`：活动地图缺少可验证定位 PCD hash。
 - Action 被拒绝或执行中止：检查定位、TaskReadiness、`agt_safety`、Nav2 lifecycle 和 missed waypoint。
 
 JSON 字段合同见 [task_group_schema.md](../interfaces/task_group_schema.md)，Action 合同见

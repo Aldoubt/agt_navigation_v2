@@ -146,7 +146,14 @@ def generate_launch_description():
                 ),
                 description="Livox MID360 network configuration JSON",
             ),
-            DeclareLaunchArgument("start_system_health", default_value="true"),
+            DeclareLaunchArgument(
+                "start_system_health",
+                default_value="true",
+                description=(
+                    "Start the direct-launch system read model: health/readiness, "
+                    "active map publication, RobotState, and Mission manager"
+                ),
+            ),
             DeclareLaunchArgument("health_contract", default_value=str(Path(get_package_share_directory("agt_system_manager")) / "config" / "health_contracts.yaml")),
             DeclareLaunchArgument("active_map_pointer", default_value=""),
             DeclareLaunchArgument("start_sensor", default_value="true"),
@@ -234,6 +241,14 @@ def generate_launch_description():
             OpaqueFunction(function=validate_mode_arguments),
             LogInfo(msg=["AGT system mode: ", LaunchConfiguration("mode")]),
             Node(
+                package="agt_map_manager",
+                executable="map_manager_node.py",
+                name="agt_map_manager",
+                output="screen",
+                parameters=[{"runtime_dir": LaunchConfiguration("runtime_dir")}],
+                condition=IfCondition(LaunchConfiguration("start_system_health")),
+            ),
+            Node(
                 package="agt_system_manager",
                 executable="system_health_node.py",
                 name="agt_system_manager_health",
@@ -248,6 +263,22 @@ def generate_launch_description():
                     ),
                     "task_valid": True,
                 }],
+                condition=IfCondition(LaunchConfiguration("start_system_health")),
+            ),
+            Node(
+                package="agt_system_manager",
+                executable="robot_state_aggregator.py",
+                name="agt_robot_state_aggregator",
+                output="screen",
+                parameters=[{"runtime_dir": LaunchConfiguration("runtime_dir")}],
+                condition=IfCondition(LaunchConfiguration("start_system_health")),
+            ),
+            Node(
+                package="agt_mission_manager",
+                executable="mission_manager_node.py",
+                name="agt_mission_manager",
+                output="screen",
+                parameters=[{"runtime_dir": LaunchConfiguration("runtime_dir")}],
                 condition=IfCondition(LaunchConfiguration("start_system_health")),
             ),
             IncludeLaunchDescription(

@@ -77,6 +77,18 @@ def test_system_passes_gui_to_both_modes_and_keeps_optional_features_off():
     assert 'DeclareLaunchArgument("can_interface", default_value="can0")' in source
 
 
+def test_direct_system_launch_starts_business_read_model_backends():
+    source = read("src/agt_bringup/launch/system.launch.py")
+    assert 'package="agt_map_manager"' in source
+    assert 'executable="map_manager_node.py"' in source
+    assert 'name="agt_map_manager"' in source
+    assert 'executable="robot_state_aggregator.py"' in source
+    assert 'name="agt_robot_state_aggregator"' in source
+    assert 'package="agt_mission_manager"' in source
+    assert 'executable="mission_manager_node.py"' in source
+    assert source.count('condition=IfCondition(LaunchConfiguration("start_system_health"))') >= 4
+
+
 def test_nav_velocity_passes_collision_monitor_and_safety():
     nav_launch = read("src/agt_navigation/launch/navigation.launch.py")
     nav_config = read("src/agt_navigation/config/nav2_bunker.yaml")

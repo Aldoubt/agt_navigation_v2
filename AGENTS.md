@@ -32,6 +32,10 @@
   native Actions, start launch files, publish velocity/TF, or infer completion from distance or time.
 - `/agt/system/robot_state` is a read model, not a new business owner. Unknown or stale evidence
   remains UNKNOWN, and active map identity comes only from `agt_map_manager`.
+- Direct `agt_bringup/system.launch.py` mapping/navigation starts must include the shared business
+  read-model backends needed by Qt/Web clients: `agt_map_manager` for `/agt/maps/active`,
+  `agt_system_manager` health/readiness, `agt_robot_state_aggregator`, and `agt_mission_manager`.
+  Disabling this group is only for an outer manager profile that already owns those nodes.
 - Every change that affects architecture or interfaces must update `docs/`, this file, and `docs/migration/migration_matrix.md`.
 - The raw MID360 `/agt/sensors/lidar/custom` topic is preserved. In the normal baseline FAST-LIVO2
   consumes only the profile-driven `/agt/sensors/lidar/custom_filtered` output from
@@ -148,6 +152,15 @@
 - The maintained Qt fork is a frontend only. Its native Start/Stop controls must call the project Action and display Action feedback/result; pose-distance polling is forbidden as an execution-success test.
 - Qt-compatible task JSON is operator input only. Portable frontends may submit `map`-frame PoseStamped arrays instead. Project-owned execution must validate finite coordinates, point count, repeated append patterns, and every waypoint against the currently published OccupancyGrid before sending motion goals.
 - `/agt/navigation/execute_waypoint_task` is the project-owned `ExecuteWaypointTask` action. It may dispatch only Nav2 `FollowWaypoints`; it must not publish velocity or enable `agt_safety`.
+- Formal waypoint execution uses robot-side task identity, not frontend file paths:
+  clients submit `map_id`, `map_version_id`, `task_group_id`, `task_revision`,
+  `expected_content_sha256`, finite `loop_count`, and `client_request_id`.
+  `agt_navigation` Task Registry resolves `runtime/maps/<map_id>/versions/<map_version_id>/tasks/`
+  and verifies revision/content hash before Nav2 dispatch.
+- `/agt/navigation/session_status` and `/agt/navigation/session/get` are the robot-side
+  waypoint execution session authority. Qt/Web disconnects must not cancel a running task;
+  reconnecting clients recover current point, total points, missed waypoints, and terminal blocker from the session.
+- Deprecated `task_file` execution is same-machine CLI/debug only, disabled by default, and when enabled must stay below the configured `runtime/maps` root.
 - A task succeeds only when the Nav2 child Action succeeds with no missed waypoints. Rejection, abort, missed waypoints, stale safety state, map mismatch, cancellation, and unexpected exceptions are terminal failures.
 - Looping must be explicit and finite. Zero-count or unbounded loops are forbidden.
 - Parent cancellation and loss of recent `agt_safety` motion readiness must cancel the active Nav2 child before the project task finishes.

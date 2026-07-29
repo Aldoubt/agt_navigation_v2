@@ -36,7 +36,10 @@ guard，因此 `TaskReadiness` 不会变为 ready。要运行真实导航，需�
 flowchart TD
     A[ros2 launch agt_bringup system.launch.py mode:=navigation] --> B{Launch 参数校验}
     B -->|失败| X[launch 终止: 缺失文件或非法参数组合]
+    B -->|通过| MM[agt_map_manager<br/>/agt/maps/active]
     B -->|通过| H[agt_system_manager_health]
+    B -->|通过| RS[robot_state_aggregator<br/>/agt/system/robot_state]
+    B -->|通过| MS[agt_mission_manager<br/>/agt/missions/status]
     B --> D[agt_description: 静态机器人与传感器 TF]
     B -->|start_sensor=true| S[agt_sensor_mid360_driver]
     B -->|start_lidar_self_filter=true| SF[agt_livox_self_filter]
@@ -77,8 +80,12 @@ flowchart TD
     V --> K[/agt/navigation/cmd_vel/]
     Z --> K
     CH --> K
+    MM --> H
     H --> RD
     H -->|发布状态| HR[/agt/system/health + /agt/system/task_readiness/]
+    H --> RS
+    MM --> RS
+    MS --> RS
     T --> H
     R --> H
     CH --> H
@@ -92,6 +99,9 @@ flowchart TD
 2. 定位门控只负责 Nav2 lifecycle 的启动/暂停/恢复，不负责打开安全运动使能。
 3. `TaskReadiness` 是任务执行门禁；它要求安全状态允许导航、底盘 connected 新鲜、8 个
    Nav2 节点 active、所需 TF 可查询、地图身份匹配，并且 `motion_enabled=true`。
+4. 直接启动总控时也会启动 `agt_map_manager`、`robot_state_aggregator` 和
+   `agt_mission_manager`。如果 `/agt/maps/active` 缺失，Qt5 仍可能显示本地地图文件，
+   但任务保存、预览和执行都会保持 fail-closed。
 
 ## 系统框图
 
@@ -103,7 +113,7 @@ flowchart TB
     subgraph ASSET[地图与启动资产]
         MAPY[READY 地图 YAML/PGM]
         PCD[READY 定位 PCD + processing record]
-        ACTIVE[runtime/maps/active_map.yaml<br/>-> manifest identity]
+        ACTIVE[agt_map_manager<br/>/agt/maps/active]
         PROFILE[平台 profile / 车辆几何]
     end
 
@@ -117,7 +127,9 @@ flowchart TB
     end
 
     subgraph GATE[系统管理与门禁层]
+        MAPMGR[agt_map_manager<br/>active map owner]
         HEALTH[system_health_node<br/>health + TaskReadiness]
+        ROBOTSTATE[robot_state_aggregator<br/>RobotState read model]
         LGATE[localization_navigation_gate<br/>Nav2 lifecycle 控制]
         SAFESTATE[agt_safety/status<br/>权威急停与导航许可]
     end
@@ -144,7 +156,8 @@ flowchart TB
 
     MAPY --> MAPSERVER
     PCD --> LOCAL
-    ACTIVE --> HEALTH
+    ACTIVE --> MAPMGR --> HEALTH
+    MAPMGR --> ROBOTSTATE
     PROFILE --> FILTER
     LIDARIN --> FILTER --> LIO
     IMUIN --> LIO
@@ -172,6 +185,7 @@ flowchart TB
     SAFETY -. status/estop/navigation_ready .-> SAFESTATE
     SAFESTATE -. authoritative safety state .-> HEALTH
     HEALTH -. readiness/blockers/diagnostics .-> QT
+    ROBOTSTATE -. unified state .-> QT
     MAPSERVER -. map .-> QT
     COSTMAP -. costmap/plan .-> QT
     ADAPTER -. odometry .-> QT
@@ -217,23 +231,19 @@ flowchart TB
 顶层 launch 不解析 processing record 内容，也不校验其中的 hash。因此“文件存在”只表示
 可以尝试启动，不表示定位地图 ready。
 
-### 地图身份的两个输入面
+### 地图身份输入面
 
 导航 launch 参数中的 `map`、`map_id`、`map_version_id`、`global_map_pcd` 和
-`global_map_processing_record` 会配置 map server、定位节点和 waypoint task server，
-但顶层当前没有把 `map_id`/`map_version_id` 直接传给 `system_health_node`。健康节点每次
-从以下位置刷新共享门禁身份：
+`global_map_processing_record` 会配置 map server、定位节点和 waypoint task server。
+共享门禁身份不从这些参数或 Qt 本地配置重建，而只来自 `agt_map_manager` 发布的
+`/agt/maps/active`。`agt_map_manager` 以 `runtime/maps/map_registry.sqlite3` 中的 active
+READY 版本为索引，并用 manifest、导航 YAML/PGM、定位 PCD 和 processing record 重新校验
+后发布 `MapVersionSummary`。
 
-```text
-runtime/maps/active_map.yaml
-    -> manifest.yaml
-    -> map_id / map_version_id / map_hash / assets / READY state
-```
-
-也可以用 launch 参数 `active_map_pointer` 指定另一个 pointer。导航启动参数选择的地图版本
-必须与该 pointer 指向的版本一致；否则即使 YAML、PCD 路径本身正确，TaskReadiness 仍会
-产生 `MAP_ID_MISSING`、`MAP_NOT_READY` 或 `LOCALIZATION_MAP_MISMATCH`。这是当前的双重
-输入面，后续应收敛为单一地图选择真源。
+导航启动参数选择的地图版本必须与 `/agt/maps/active` 指向的版本一致；否则即使 YAML、PCD
+路径本身正确，`TaskReadiness` 仍会产生 `MAP_ID_MISSING`、`MAP_NOT_READY` 或
+`LOCALIZATION_MAP_MISMATCH`。直接使用 `agt_bringup system.launch.py` 时，总控会随
+health/readiness 一起启动 `agt_map_manager`，确保 Qt5、RobotState 和任务门禁都消费同一活动地图。
 
 ### SystemHealth 与 TaskReadiness
 
@@ -355,7 +365,10 @@ Qt5 不得发布 `/agt/chassis/cmd_vel`，也不直接调用底盘驱动。Qt5 �
 
 | 层 | 节点/进程 | 主要输入 | 主要输出 |
 | --- | --- | --- | --- |
-| 系统管理 | `agt_system_manager_health` | 全部健康 topic、TF、lifecycle 状态 | `/agt/system/health`、`/agt/system/task_readiness` |
+| 地图管理 | `agt_map_manager` | `runtime/maps` registry 与 manifest 资产 | `/agt/maps/active`、`/agt/maps/list`、`/agt/maps/manage` |
+| 系统管理 | `agt_system_manager_health` | 全部健康 topic、TF、lifecycle 状态、`/agt/maps/active` | `/agt/system/health`、`/agt/system/task_readiness` |
+| 统一读模型 | `agt_robot_state_aggregator` | health、readiness、active map、定位、Mission、安全、底盘 | `/agt/system/robot_state` |
+| Mission 管理 | `agt_mission_manager` | 版本化有限 Mission | `/agt/missions/status`、`/agt/missions/execute`、`/agt/missions/set_run_state` |
 | 机器人描述 | `robot_state_publisher`（`agt_description`） | URDF/参数 | `tf_static`，`base_footprint -> base_link -> lidar_link/imu_link` |
 | 传感器 | `agt_sensor_mid360_driver` | MID360 网络 | `/agt/sensors/lidar/custom`、`/agt/sensors/imu/data` |
 | 自滤波 | `agt_livox_self_filter` | raw CustomMsg、TF、平台 profile | `/agt/sensors/lidar/custom_filtered` |

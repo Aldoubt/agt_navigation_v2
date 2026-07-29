@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agt_interfaces.msg import MapVersionSummary
-from agt_interfaces.srv import ListMapVersions, ManageMapVersion
+from agt_interfaces.srv import ActivateMapVersion, ListMapVersions, ManageMapVersion
 import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
@@ -55,6 +55,12 @@ class MapManagerNode(Node):
         self.create_service(
             ManageMapVersion, "/agt/maps/manage", self._manage, callback_group=group
         )
+        self.create_service(
+            ActivateMapVersion,
+            "/agt/maps/activate",
+            self._activate,
+            callback_group=group,
+        )
         self._timer = self.create_timer(
             period, self._publish_active, callback_group=group
         )
@@ -83,6 +89,15 @@ class MapManagerNode(Node):
             message.valid = validation.valid
             message.map_hash = validation.map_hash
             message.manifest_sha256 = assets["manifest_sha256"]
+            message.navigation_yaml_sha256 = validation.asset_hashes.get(
+                "navigation_yaml", ""
+            )
+            message.navigation_image_sha256 = validation.asset_hashes.get(
+                "navigation_pgm", ""
+            )
+            message.localization_pcd_sha256 = validation.asset_hashes.get(
+                "localization_pcd", ""
+            )
             message.navigation_yaml = assets["navigation_yaml"]
             message.localization_pcd = assets["localization_pcd"]
             message.processing_record = assets["processing_record"]
@@ -170,6 +185,92 @@ class MapManagerNode(Node):
             response.success = False
             response.error_code = ManageMapVersion.Response.ERROR_INTERNAL
             response.message = str(exc)
+        return response
+
+    @staticmethod
+    def _state_name(value: int) -> str:
+        return {
+            MapVersionSummary.STATE_DRAFT: "DRAFT",
+            MapVersionSummary.STATE_PROCESSING: "PROCESSING",
+            MapVersionSummary.STATE_READY: "READY",
+            MapVersionSummary.STATE_INVALID: "INVALID",
+            MapVersionSummary.STATE_ARCHIVED: "ARCHIVED",
+            MapVersionSummary.STATE_DELETED: "DELETED",
+        }.get(int(value), "UNKNOWN")
+
+    def _activate(self, request, response):
+        requested_map_id = str(request.map_id).strip()
+        requested_version_id = str(request.map_version_id).strip()
+        if not requested_map_id or not requested_version_id:
+            response.success = False
+            response.error_code = ActivateMapVersion.Response.ERROR_INVALID_REQUEST
+            response.map_id = requested_map_id
+            response.map_version_id = requested_version_id
+            response.state = "UNKNOWN"
+            response.blocker_codes = ["NO_ACTIVE_MAP"]
+            response.blocker_messages = ["map_id and map_version_id are required"]
+            response.operator_messages = ["请选择要激活的 READY 地图版本。"]
+            response.technical_messages = ["ActivateMapVersion requires map_id and map_version_id"]
+            return response
+        try:
+            rows = self._facade.list_rows(map_id=requested_map_id, include_deleted=False)
+            row = next(
+                (item for item in rows if str(item.get("version_id", "")) == requested_version_id),
+                None,
+            )
+            if row is None:
+                response.success = False
+                response.error_code = ActivateMapVersion.Response.ERROR_NOT_FOUND
+                response.map_id = requested_map_id
+                response.map_version_id = requested_version_id
+                response.state = "UNKNOWN"
+                response.blocker_codes = ["NO_ACTIVE_MAP"]
+                response.blocker_messages = ["map version was not found"]
+                response.operator_messages = ["未找到该地图版本。"]
+                response.technical_messages = ["requested map_id/map_version_id is not registered"]
+                return response
+            if str(row.get("state", "")).upper() != "READY":
+                summary = self._summary(row)
+                response.success = False
+                response.error_code = ActivateMapVersion.Response.ERROR_VALIDATION_FAILED
+                response.map_id = requested_map_id
+                response.map_version_id = requested_version_id
+                response.state = self._state_name(summary.state)
+                response.version = summary
+                response.blocker_codes = ["MAP_NOT_READY"]
+                response.blocker_messages = ["only READY map versions may be activated"]
+                response.operator_messages = ["地图版本尚未 READY，不能用于导航。"]
+                response.technical_messages = ["requested map version state is not READY"]
+                return response
+            result = self._registry.activate(requested_version_id)
+            row = self._registry._row(requested_version_id)
+            summary = self._summary(row)
+            response.version = summary
+            response.map_id = summary.map_id
+            response.map_version_id = summary.map_version_id
+            response.state = self._state_name(summary.state)
+            response.success = bool(result.valid)
+            response.error_code = (
+                ActivateMapVersion.Response.ERROR_NONE
+                if result.valid
+                else ActivateMapVersion.Response.ERROR_VALIDATION_FAILED
+            )
+            if not result.valid:
+                response.blocker_codes = ["MAP_NOT_READY"]
+                response.blocker_messages = list(result.errors)
+                response.operator_messages = ["地图版本校验未通过，不能激活。"]
+                response.technical_messages = list(result.errors)
+            self._publish_active()
+        except Exception as exc:
+            response.success = False
+            response.error_code = ActivateMapVersion.Response.ERROR_INTERNAL
+            response.map_id = requested_map_id
+            response.map_version_id = requested_version_id
+            response.state = "UNKNOWN"
+            response.blocker_codes = ["MAP_NOT_READY"]
+            response.blocker_messages = [str(exc)]
+            response.operator_messages = ["地图激活失败，请查看诊断。"]
+            response.technical_messages = [str(exc)]
         return response
 
     def destroy_node(self):

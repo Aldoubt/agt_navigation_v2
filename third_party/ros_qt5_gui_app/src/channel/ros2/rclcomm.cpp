@@ -71,6 +71,43 @@ bool MissionTerminal(std::uint8_t state) {
          state == agt_interfaces::msg::MissionStatus::STATE_INTERRUPTED;
 }
 
+std::string NavigationSessionStateName(std::uint8_t state) {
+  switch (state) {
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_IDLE: return "IDLE";
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_VALIDATING: return "VALIDATING";
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_REJECTED: return "REJECTED";
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_ACCEPTED: return "ACCEPTED";
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_RUNNING: return "RUNNING";
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_CANCELING: return "CANCELING";
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_SUCCEEDED: return "SUCCEEDED";
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_FAILED: return "FAILED";
+    case agt_interfaces::msg::NavigationSessionStatus::STATE_CANCELED: return "CANCELED";
+    default: return "UNKNOWN";
+  }
+}
+
+TaskExecutionStatus ConvertNavigationSessionStatus(
+    const agt_interfaces::msg::NavigationSessionStatus &source) {
+  TaskExecutionStatus status;
+  status.session_id = source.session_id;
+  status.client_request_id = source.client_request_id;
+  status.map_id = source.map_id;
+  status.map_version_id = source.map_version_id;
+  status.task_group_id = source.task_group_id;
+  status.state = NavigationSessionStateName(source.state);
+  status.current_waypoint = source.current_waypoint;
+  status.total_waypoints = source.total_waypoints;
+  status.message = source.operator_message.empty() ? source.technical_message
+                                                   : source.operator_message;
+  status.blocker_code = source.blocker_code;
+  status.technical_message = source.technical_message;
+  status.terminal = source.terminal;
+  status.success = source.success;
+  status.missed_waypoints.assign(source.missed_waypoints.begin(),
+                                 source.missed_waypoints.end());
+  return status;
+}
+
 std::string BagStateName(std::uint8_t state) {
   switch (state) {
     case agt_interfaces::msg::BagSessionSummary::STATE_IDLE: return "IDLE";
@@ -283,7 +320,23 @@ bool rclcomm::Start() {
       rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local());
   waypoint_task_client_ = rclcpp_action::create_client<WaypointTask>(
       node, "/agt/navigation/execute_waypoint_task");
+  put_task_group_client_ = node->create_client<agt_interfaces::srv::PutTaskGroup>(
+      "/agt/navigation/tasks/put", rmw_qos_profile_services_default,
+      callback_group_other);
+  get_task_group_client_ = node->create_client<agt_interfaces::srv::GetTaskGroup>(
+      "/agt/navigation/tasks/get", rmw_qos_profile_services_default,
+      callback_group_other);
+  get_navigation_session_client_ =
+      node->create_client<agt_interfaces::srv::GetNavigationSession>(
+          "/agt/navigation/session/get", rmw_qos_profile_services_default,
+          callback_group_other);
   auto business_qos = rclcpp::QoS(rclcpp::KeepLast(1)).reliable().transient_local();
+  navigation_session_status_subscriber_ =
+      node->create_subscription<agt_interfaces::msg::NavigationSessionStatus>(
+          "/agt/navigation/session_status", business_qos,
+          std::bind(&rclcomm::navigationSessionStatusCallback, this,
+                    std::placeholders::_1),
+          sub1_obt);
   robot_state_subscriber_ =
       node->create_subscription<agt_interfaces::msg::RobotState>(
           "/agt/system/robot_state", business_qos,
@@ -428,6 +481,7 @@ bool rclcomm::Start() {
   });
   
   init_flag_ = true;
+  RequestNavigationSessionStatus();
   return true;
 }
 
@@ -481,6 +535,36 @@ void rclcomm::waypointPreviewStatusCallback(
 
 void rclcomm::PublishTaskStatus(const TaskExecutionStatus &status) {
   PUBLISH(MSG_ID_TASK_CHAIN_STATUS, status);
+}
+
+void rclcomm::navigationSessionStatusCallback(
+    const agt_interfaces::msg::NavigationSessionStatus::SharedPtr msg) {
+  PublishTaskStatus(ConvertNavigationSessionStatus(*msg));
+}
+
+void rclcomm::RequestNavigationSessionStatus() {
+  if (!get_navigation_session_client_ ||
+      !get_navigation_session_client_->service_is_ready()) {
+    std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+    session_request_timer_ = node->create_wall_timer(
+        std::chrono::seconds(1),
+        [this]() {
+          {
+            std::lock_guard<std::mutex> callback_lock(waypoint_task_mutex_);
+            if (session_request_timer_) session_request_timer_->cancel();
+          }
+          RequestNavigationSessionStatus();
+        },
+        callback_group_other);
+    return;
+  }
+  auto request = std::make_shared<agt_interfaces::srv::GetNavigationSession::Request>();
+  get_navigation_session_client_->async_send_request(
+      request,
+      [this](rclcpp::Client<agt_interfaces::srv::GetNavigationSession>::SharedFuture future) {
+        const auto response = future.get();
+        if (response->success) PublishTaskStatus(ConvertNavigationSessionStatus(response->status));
+      });
 }
 
 void rclcomm::robotStateCallback(
@@ -1063,10 +1147,24 @@ void rclcomm::ExecuteBagCommand(const basic::BagCommand &command) {
 void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
   TaskExecutionStatus status;
   status.total_waypoints = request.points.size();
-  if (GET_CONFIG_VALUE("EnableTaskExecution", "false") != "true" ||
-      GET_CONFIG_VALUE("EnableLegacyWaypointExecution", "false") != "true") {
+  const bool has_task_identity = !request.map_id.empty() &&
+                                 !request.map_version_id.empty() &&
+                                 !request.task_group_id.empty() &&
+                                 request.task_revision > 0 &&
+                                 !request.expected_content_sha256.empty() &&
+                                 !request.client_request_id.empty();
+  const bool has_task_payload = has_task_identity && !request.task_json.empty();
+  if (GET_CONFIG_VALUE("EnableTaskExecution", "false") != "true") {
     status.state = "REJECTED";
     status.message = "task execution is disabled by the active GUI profile";
+    status.terminal = true;
+    PublishTaskStatus(status);
+    return;
+  }
+  if ((!has_task_identity || !has_task_payload) &&
+      GET_CONFIG_VALUE("EnableLegacyWaypointExecution", "false") != "true") {
+    status.state = "REJECTED";
+    status.message = "任务尚未同步到机器人";
     status.terminal = true;
     PublishTaskStatus(status);
     return;
@@ -1088,41 +1186,77 @@ void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
       return;
     }
   }
-  if (!waypoint_task_client_->action_server_is_ready()) {
-    status.state = "FAILED";
-    status.message = "ExecuteWaypointTask action server is unavailable";
-    status.terminal = true;
-    PublishTaskStatus(status);
-    return;
-  }
   {
     std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
     waypoint_task_pending_ = true;
     waypoint_task_cancel_requested_ = false;
   }
 
-  WaypointTask::Goal goal;
-  goal.loop = request.loop_count > 1;
-  goal.loop_count = request.loop_count;
-  if (!request.task_file.empty()) {
-    goal.task_file = request.task_file;
-  } else {
-    for (const auto &point : request.points) {
-      geometry_msgs::msg::PoseStamped pose;
-      pose.header.frame_id = "map";
-      pose.header.stamp = node->now();
-      pose.pose.position.x = point.x;
-      pose.pose.position.y = point.y;
-      tf2::Quaternion quaternion;
-      quaternion.setRPY(0.0, 0.0, point.theta);
-      pose.pose.orientation = tf2::toMsg(quaternion);
-      goal.poses.push_back(pose);
+  const auto reject_request = [this](TaskExecutionStatus rejected) {
+    {
+      std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+      waypoint_task_pending_ = false;
+      waypoint_task_cancel_requested_ = false;
     }
-  }
+    rejected.terminal = true;
+    PublishTaskStatus(rejected);
+  };
 
-  auto options = rclcpp_action::Client<WaypointTask>::SendGoalOptions();
-  options.goal_response_callback =
-      [this, total = request.points.size()](WaypointTaskGoalHandle::SharedPtr handle) {
+  const auto dispatch_goal = [this](const TaskExecutionRequest &synced_request) {
+    {
+      std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+      if (waypoint_task_cancel_requested_) {
+        waypoint_task_pending_ = false;
+        waypoint_task_cancel_requested_ = false;
+        TaskExecutionStatus canceled;
+        canceled.state = "CANCELED";
+        canceled.message = "waypoint task canceled before dispatch";
+        canceled.terminal = true;
+        PublishTaskStatus(canceled);
+        return;
+      }
+    }
+    if (!waypoint_task_client_->action_server_is_ready()) {
+      TaskExecutionStatus unavailable;
+      unavailable.state = "FAILED";
+      unavailable.message = "ExecuteWaypointTask action server is unavailable";
+      unavailable.terminal = true;
+      {
+        std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
+        waypoint_task_pending_ = false;
+        waypoint_task_cancel_requested_ = false;
+      }
+      PublishTaskStatus(unavailable);
+      return;
+    }
+
+    WaypointTask::Goal goal;
+    goal.loop = synced_request.loop_count > 1;
+    goal.loop_count = synced_request.loop_count;
+    if (!synced_request.map_id.empty()) {
+      goal.map_id = synced_request.map_id;
+      goal.map_version_id = synced_request.map_version_id;
+      goal.task_group_id = synced_request.task_group_id;
+      goal.task_revision = synced_request.task_revision;
+      goal.expected_content_sha256 = synced_request.expected_content_sha256;
+      goal.client_request_id = synced_request.client_request_id;
+    } else {
+      for (const auto &point : synced_request.points) {
+        geometry_msgs::msg::PoseStamped pose;
+        pose.header.frame_id = "map";
+        pose.header.stamp = node->now();
+        pose.pose.position.x = point.x;
+        pose.pose.position.y = point.y;
+        tf2::Quaternion quaternion;
+        quaternion.setRPY(0.0, 0.0, point.theta);
+        pose.pose.orientation = tf2::toMsg(quaternion);
+        goal.poses.push_back(pose);
+      }
+    }
+
+    auto options = rclcpp_action::Client<WaypointTask>::SendGoalOptions();
+    options.goal_response_callback =
+      [this, total = synced_request.points.size()](WaypointTaskGoalHandle::SharedPtr handle) {
         TaskExecutionStatus response;
         response.total_waypoints = total;
         if (!handle) {
@@ -1154,17 +1288,21 @@ void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
         }
         PublishTaskStatus(response);
       };
-  options.feedback_callback =
+    options.feedback_callback =
       [this](WaypointTaskGoalHandle::SharedPtr,
              const std::shared_ptr<const WaypointTask::Feedback> feedback) {
         TaskExecutionStatus update;
         update.state = feedback->state;
         update.current_waypoint = feedback->current_waypoint;
         update.total_waypoints = feedback->total_waypoints;
+        if (feedback->status.total_waypoints > 0) {
+          update.total_waypoints = feedback->status.total_waypoints;
+          update.current_waypoint = feedback->status.current_waypoint;
+        }
         PublishTaskStatus(update);
       };
-  options.result_callback =
-      [this, total = request.points.size()](const WaypointTaskGoalHandle::WrappedResult &result) {
+    options.result_callback =
+      [this, total = synced_request.points.size()](const WaypointTaskGoalHandle::WrappedResult &result) {
         {
           std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
           waypoint_task_goal_handle_.reset();
@@ -1184,13 +1322,126 @@ void rclcomm::ExecuteTaskChain(const TaskExecutionRequest &request) {
         final_status.message = result.result ? result.result->message
                                              : "waypoint task returned no result";
         if (result.result) {
+          if (!result.result->operator_message.empty()) {
+            final_status.message = result.result->operator_message;
+          }
+          if (result.result->final_status.total_waypoints > 0) {
+            final_status.total_waypoints = result.result->final_status.total_waypoints;
+            final_status.current_waypoint = result.result->final_status.current_waypoint;
+          }
           final_status.missed_waypoints.assign(
               result.result->missed_waypoints.begin(),
               result.result->missed_waypoints.end());
         }
         PublishTaskStatus(final_status);
       };
-  waypoint_task_client_->async_send_goal(goal, options);
+    waypoint_task_client_->async_send_goal(goal, options);
+  };
+
+  if (!has_task_identity) {
+    dispatch_goal(request);
+    return;
+  }
+  if (!get_task_group_client_ || !put_task_group_client_ ||
+      !get_task_group_client_->service_is_ready() ||
+      !put_task_group_client_->service_is_ready()) {
+    status.state = "REJECTED";
+    status.message = "任务尚未同步到机器人";
+    status.blocker_code = "TASK_NOT_SYNCED";
+    reject_request(status);
+    return;
+  }
+
+  status.state = "VALIDATING";
+  status.message = "syncing task with robot registry";
+  PublishTaskStatus(status);
+
+  auto get_request = std::make_shared<agt_interfaces::srv::GetTaskGroup::Request>();
+  get_request->map_id = request.map_id;
+  get_request->map_version_id = request.map_version_id;
+  get_request->task_group_id = request.task_group_id;
+  get_request->task_revision = 0U;
+  get_task_group_client_->async_send_request(
+      get_request,
+      [this, request, reject_request, dispatch_goal](
+          rclcpp::Client<agt_interfaces::srv::GetTaskGroup>::SharedFuture future) {
+        const auto get_response = future.get();
+        auto put_or_dispatch = [this, request, reject_request, dispatch_goal](
+                                   std::uint32_t expected_revision) {
+          auto put_request = std::make_shared<agt_interfaces::srv::PutTaskGroup::Request>();
+          put_request->map_id = request.map_id;
+          put_request->map_version_id = request.map_version_id;
+          put_request->task_group_id = request.task_group_id;
+          put_request->expected_revision = expected_revision;
+          put_request->client_request_id = request.client_request_id;
+          put_request->task_json = request.task_json;
+          put_task_group_client_->async_send_request(
+              put_request,
+              [this, request, reject_request, dispatch_goal](
+                  rclcpp::Client<agt_interfaces::srv::PutTaskGroup>::SharedFuture put_future) {
+                const auto put_response = put_future.get();
+                if (!put_response->success) {
+                  TaskExecutionStatus failed;
+                  failed.state = "REJECTED";
+                  failed.total_waypoints = request.points.size();
+                  failed.message = put_response->operator_message.empty()
+                                       ? put_response->technical_message
+                                       : put_response->operator_message;
+                  failed.blocker_code = put_response->blocker_code;
+                  failed.technical_message = put_response->technical_message;
+                  reject_request(failed);
+                  return;
+                }
+                TaskExecutionRequest synced = request;
+                synced.task_revision = put_response->revision;
+                synced.expected_content_sha256 = put_response->content_sha256;
+                dispatch_goal(synced);
+              });
+        };
+
+        if (!get_response->success) {
+          if (get_response->blocker_code == "TASK_NOT_FOUND" ||
+              get_response->error_code ==
+                  agt_interfaces::srv::GetTaskGroup::Response::ERROR_NOT_FOUND) {
+            put_or_dispatch(0U);
+            return;
+          }
+          TaskExecutionStatus failed;
+          failed.state = "REJECTED";
+          failed.total_waypoints = request.points.size();
+          failed.message = get_response->operator_message.empty()
+                               ? get_response->technical_message
+                               : get_response->operator_message;
+          failed.blocker_code = get_response->blocker_code;
+          failed.technical_message = get_response->technical_message;
+          reject_request(failed);
+          return;
+        }
+
+        if (get_response->revision > request.task_revision) {
+          TaskExecutionStatus failed;
+          failed.state = "REJECTED";
+          failed.total_waypoints = request.points.size();
+          failed.message = "任务版本已变化，请刷新任务后再执行。";
+          failed.blocker_code = "TASK_REVISION_CONFLICT";
+          reject_request(failed);
+          return;
+        }
+        if (get_response->revision == request.task_revision) {
+          if (get_response->content_sha256 != request.expected_content_sha256) {
+            TaskExecutionStatus failed;
+            failed.state = "REJECTED";
+            failed.total_waypoints = request.points.size();
+            failed.message = "任务内容校验失败，请重新保存并同步任务。";
+            failed.blocker_code = "TASK_CONTENT_HASH_MISMATCH";
+            reject_request(failed);
+            return;
+          }
+          dispatch_goal(request);
+          return;
+        }
+        put_or_dispatch(get_response->revision);
+      });
 }
 
 void rclcomm::CancelTaskChain() {
@@ -1210,7 +1461,9 @@ bool rclcomm::Stop() {
   {
     std::lock_guard<std::mutex> lock(waypoint_task_mutex_);
     if (task_request_timer_) task_request_timer_->cancel();
+    if (session_request_timer_) session_request_timer_->cancel();
     task_request_timer_.reset();
+    session_request_timer_.reset();
   }
   {
     std::lock_guard<std::mutex> lock(business_request_mutex_);
