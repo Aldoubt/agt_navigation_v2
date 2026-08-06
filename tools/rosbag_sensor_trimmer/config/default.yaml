@@ -1,0 +1,31 @@
+input:
+  uri: /data/original_bag
+
+output:
+  uri: /data/trimmed_bag
+  storage_id: sqlite3
+  overwrite: false
+
+time_range:
+  mode: relative
+  start_sec: 0.0
+  end_sec: 10.0
+
+topics:
+  include: []
+  exclude: []
+
+compression:
+  enabled: false
+  mode: file
+  format: zstd
+
+validation:
+  enabled: true
+  require_lidar_imu_overlap: true
+  maximum_imu_gap_sec: 0.1
+  maximum_lidar_gap_sec: 0.5
+
+preview:
+  fixed_frame: base_link
+  publish_rate_limit_hz: 10.0
