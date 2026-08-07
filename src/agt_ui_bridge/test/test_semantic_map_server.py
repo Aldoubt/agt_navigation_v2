@@ -80,10 +80,14 @@ def _copy_task(tmp_path):
 
 def _waypoint_task(tmp_path):
     semantic_path = _copy_task(tmp_path)
+    coverage = yaml.safe_load(
+        semantic_path.with_name("coverage.yaml").read_text(encoding="utf-8")
+    )
+    map_id = str(coverage["map_id"])
     document = {
         "type": "FeatureCollection",
         "schema_version": "1.1",
-        "map_id": "greenhouse_01",
+        "map_id": map_id,
         "frame_id": "map",
         "features": [
             {
@@ -106,7 +110,7 @@ def _waypoint_task(tmp_path):
         ],
     }
     semantic_path.write_text(json.dumps(document), encoding="utf-8")
-    return semantic_path
+    return semantic_path, map_id
 
 
 def _status(node):
@@ -159,7 +163,7 @@ def test_valid_load_publishes_markers_semantic_mask_and_standard_services():
 
 
 def test_waypoint_mode_accepts_waypoint_only_document_and_does_not_publish_mask(tmp_path):
-    semantic_path = _waypoint_task(tmp_path / "waypoint")
+    semantic_path, expected_map_id = _waypoint_task(tmp_path / "waypoint")
     node = SERVER.SemanticMapServer(
         parameter_overrides=_parameters(semantic_path, semantic_mode="waypoint")
     )
@@ -167,8 +171,8 @@ def test_waypoint_mode_accepts_waypoint_only_document_and_does_not_publish_mask(
     received = []
     try:
         node._base_map_callback(_base_map())
-        success, state, _message = node._load_and_activate(str(semantic_path))
-        assert success
+        success, state, message = node._load_and_activate(str(semantic_path))
+        assert success, f"{state}: {message}"
         assert state == "LOADED"
         assert node.active_candidate.mask is None
         assert node.mask_publisher is None
@@ -190,7 +194,7 @@ def test_waypoint_mode_accepts_waypoint_only_document_and_does_not_publish_mask(
         )
         _spin_until([node, listener], lambda: bool(received))
         assert received
-        assert received[0].map_id == "greenhouse_01"
+        assert received[0].map_id == expected_map_id
         assert received[0].waypoints[0].id == "home"
         assert not node.get_publishers_info_by_topic("/agt/map/keepout_mask")
     finally:
