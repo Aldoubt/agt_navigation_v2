@@ -31,6 +31,17 @@ def test_topic_contract_declares_required_canonical_topics_once():
     assert all(sum(line.startswith("| `" + topic + "` |") for line in table_rows) == 1 for topic in required)
 
 
+def test_semantic_waypoint_topic_is_typed_and_not_an_execution_pose_array():
+    text = CONTRACT.read_text(encoding="utf-8")
+    row = next(
+        line for line in text.splitlines() if line.startswith("| `/agt/map/waypoints` |")
+    )
+    assert "agt_interfaces/msg/SemanticWaypointArray" in row
+    assert "agt_semantic_map_server" in row
+    assert "PoseArray" not in row
+    assert "Semantic Waypoint Library != Waypoint Task" in text
+
+
 def test_historical_registered_point_names_are_not_runtime_interfaces():
     forbidden = ("/agt/mapping/registered_points_lidar", "/agt/mapping/registered_cloud")
     roots = (ROOT / "src", ROOT / "profiles", ROOT / "launch", ROOT / "tests")
