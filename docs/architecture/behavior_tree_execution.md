@@ -34,6 +34,17 @@ guessed to be localization failures. Parent cancellation has bounded goal,
 result, and cancel waits and propagates through `haltTree()` to project Action
 nodes.
 
-Status: `IMPLEMENTED`; unit/contract validated; fake integration pending V25-07;
-vehicle validation pending.
+Status: `SYSTEM-INTEGRATED` for the fake capability full-chain acceptance. The
+`agt_bringup` launch test starts the real `agt_mission_manager` and
+`agt_bt_executor`, loads `v25_06_waypoint_mission.xml`, and fakes only
+`EvaluateTaskReadiness`, `Relocalize`, and `ExecuteWaypointTask`. It covers
+success, readiness/relocalization/waypoint failures, feedback, and parent
+cancellation. Vehicle validation remains pending and is a separate acceptance
+stage.
 The default backend remains `sequential`.
+
+Run the focused test with:
+
+```bash
+colcon test --packages-select agt_bringup --ctest-args -R p0_bt_mission
+```

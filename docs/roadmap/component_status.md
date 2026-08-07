@@ -17,7 +17,7 @@ order and migration evidence are kept under [`docs/archive/`](../archive/).
 | URDF self-filter geometry | P0 | V25-02 code/config/tests implemented on feature branch; raw/profile/URDF bag and vehicle validation remain. |
 | Sensor sync / health | P0 | IMPLEMENTED: stream monitor + system-manager integration; shared diagnostics are cached per stream with freshness expiry. Bag/vehicle threshold tuning remains PENDING. |
 | Semantic waypoint mode | P0 | CORE IMPLEMENTED on V25-04 branch: schema 1.1 validation split, typed waypoint messages/topic and waypoint server mode. Qt authoring + build/runtime verification remain. |
-| BT capability layer / first BT mission | P0 | V25-06 First BT Mission IMPLEMENTED: allowlisted BT backend, project Action composition, structured blockers, safe task identity/hash checks, and bounded cancellation. Unit/contract validated; fake integration pending V25-07; vehicle validation pending. |
+| BT capability layer / first BT mission | P0 | V25-07 SYSTEM-INTEGRATED: real Mission Manager + BT Executor full-chain launch test with capability-only fakes, structured failure/cancel/feedback/audit checks. Vehicle validation pending. |
 | Rolling local map / ground factors | P1 | Robustness and sensor-factor work after the first mission. |
 | GNSS, wheel factor, GTSAM/iSAM2 | P1 | Research-backed localization robustness work. |
 | STD / Scan Context and long-term map | P2 | Long-term agricultural navigation research. |
