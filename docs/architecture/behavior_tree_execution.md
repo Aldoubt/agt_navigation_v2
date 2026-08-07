@@ -34,5 +34,6 @@ guessed to be localization failures. Parent cancellation has bounded goal,
 result, and cancel waits and propagates through `haltTree()` to project Action
 nodes.
 
-Status: `IMPLEMENTED`; fake integration validated; vehicle validation pending.
+Status: `IMPLEMENTED`; unit/contract validated; fake integration pending V25-07;
+vehicle validation pending.
 The default backend remains `sequential`.
