@@ -58,23 +58,28 @@ relative/local target + odometry + local perception + local controller
 
 ## Map products
 
-三个产品必须保持独立：
+三个持久化产品必须保持独立：
 
 | Product | 定义与用途 | 不承担的职责 |
 | --- | --- | --- |
 | Global Navigation Map | 默认是 `2D OccupancyGrid`；表达全局自由/占用几何，供全局规划和 Semantic Map 空间参照 | 实时动态障碍真值、持续 scan-to-map localization 原始数据 |
-| Localization Prior | 与全局导航栅格分离；当前可为 `localization_map.pcd`，优先表达墙、立柱、温室结构、地面、树干和固定设施 | 依赖叶片、软枝、杂草和临时物体作为稳定特征 |
+| Localization Prior | 与全局导航栅格分离；当前可为 `localization_map.pcd`，未来可进一步提取稳定结构层 | 不应把叶片、软枝、杂草和临时物体当作长期稳定约束 |
 | Semantic Map | 持久化领域知识，包含 field boundary、row centerline、access lane、headland、keepout、named waypoint、localization anchor | OccupancyGrid、Runtime Path 或 Mission |
 
 Global Navigation Map 的短期动态障碍不得写回权威地图。Semantic Map 也不等于
 可执行任务。
 
-**Local Environment Map** 是短期在线感知产品，默认推荐 rolling 2D occupancy：
+**Local Environment Map** 是短期在线感知产品，默认推荐 `odom` frame 的 rolling
+2D occupancy。使用 `odom` 作为局部工作坐标系可以让连续局部避障主要依赖稳定的
+`odom -> base_footprint`，而不是在每次稀疏全局校正更新 `map -> odom` 时让整个局部
+障碍表示发生全局跳变。
+
+目标处理链为：
 
 ```text
 registered cloud -> ground/obstacle separation -> raycast
                  -> log-odds -> observation timeout/decay
-                 -> Local Occupancy
+                 -> Local Occupancy (odom, rolling)
                  -> Optional ESDF
 ```
 
@@ -84,13 +89,20 @@ truth。ESDF 是可选派生表达，不是 P1 默认必经地图产品。
 ## State-estimation ownership
 
 - FAST-LIVO2 adapter 是唯一 `odom -> base_footprint` owner。
-- `agt_localization` 是唯一 authoritative `map -> odom` owner。
-- NDT/ICP relocalization、GTSAM/iSAM2、GNSS backend、loop closure 和 place
+- localization subsystem 是唯一 authoritative `map -> odom` authority；任一运行时
+  profile 中必须且只能有一个被选中的 TF publisher。
+- 当前 MAP baseline 中，`agt_localization` package 内的 `agt_relocalization` node 在
+  `publish_tf=true` 时是唯一 `map -> odom` runtime publisher。
+- 如果未来启用连续融合 owner，例如 `agt_localization_fusion`，必须先令基准
+  `agt_relocalization`/`agt_localization` 路径 `publish_tf=false`，再由 fusion owner
+  独占发布；两者不得并行发布同一 TF edge。
+- NDT/ICP registration backend、GTSAM/iSAM2、GNSS backend、loop closure 和 place
   recognition 只能产生 global correction evidence、factor、candidate transform
-  或 pose constraint；它们不得并列发布 authoritative `map -> odom`。
+  或 pose constraint；它们不得作为额外的独立 `map -> odom` publisher。
 
-所有候选修正必须进入唯一 Localization Authority，再由 `agt_localization`
-更新 `map -> odom`。
+因此“Localization Authority”表示 subsystem 级所有权，不等于要求未来所有融合算法
+都塞进当前 relocalization node。无论内部 backend 如何变化，对系统其他模块始终只暴露
+一个 authoritative `map -> odom`。
 
 ## Waypoint, task, route and path
 
@@ -114,7 +126,7 @@ ROUTE 的目标运行链为：
 ```text
 map-frame route -> resolve current segment -> transform to odom
                 -> controller tracks odom-frame Runtime Path
-                -> anchor/confidence event -> sparse relocalization
+                -> anchor/confidence event -> sparse global correction
                 -> authoritative map->odom update -> resolve next segment
 ```
 
@@ -131,7 +143,11 @@ Navigation Capability
 ```
 
 ROUTE backend 可以内部复用 Nav2 Controller Server、`FollowPath`、RPP 或 MPPI，
-但这些不是 Mission/BT 的 public boundary。
+但这些不是 Mission/BT 的 public boundary。正式业务入口继续是 project Action；
+当前 `ExecuteWaypointTask` 的实现使用 Nav2 不意味着该 Action 的长期接口语义等同于 Nav2。
+
+所有会产生运动的 backend 最终都必须进入同一受控速度/安全边界；V25-08 不新增新的
+速度 topic 或第二套 chassis command path。
 
 ## Readiness semantics
 
@@ -148,4 +164,20 @@ LOCAL_READY
 
 `ROUTE_CONTINUE_READY` 不应持续要求 global map matching healthy 或近期刚更新
 `map -> odom`；它必须要求 odometry、local control、安全和所需 local perception
-健康。`GLOBAL_CORRECTION_READY` 单独判断是否具备重定位条件。
+健康。`GLOBAL_CORRECTION_READY` 单独判断是否具备重定位/全局修正条件。
+`LOCAL_READY` 不应要求 Global Navigation Map。
+
+## V25-08 interface freeze
+
+本阶段没有新增或修改 ROS `.msg`、`.srv`、`.action`。以下约束作为后续 V25-09+
+实现的兼容边界：
+
+```text
+Mission/BT -> project Navigation Capability -> internal backend
+Global Navigation Map != Localization Prior != Semantic Map
+SemanticWaypoint != WaypointTask != Route != Runtime Path
+Local Occupancy = odom-frame transient rolling environment product
+ESDF = optional derived local representation
+one authoritative map -> odom publisher at a time
+one odom -> base_footprint publisher
+```
