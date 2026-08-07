@@ -15,7 +15,9 @@ from agt_ui_bridge.semantic_validation import (  # noqa: E402
     FEATURE_GEOMETRY,
     REQUIRED_FEATURE_COUNTS,
     ValidationContext,
+    validate_semantic_document,
     validate_semantic_map,
+    validate_waypoint_map,
 )
 
 
@@ -27,6 +29,34 @@ VALID_MAP = (
 
 def _valid_document():
     return json.loads(VALID_MAP.read_text(encoding="utf-8"))
+
+
+def _waypoint_only_document(schema_version="1.1"):
+    return {
+        "type": "FeatureCollection",
+        "schema_version": schema_version,
+        "map_id": "greenhouse_01",
+        "frame_id": "map",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [2.0, 3.0]},
+                "properties": {
+                    "id": "home",
+                    "feature_type": "waypoint",
+                    "name": "Home",
+                    "enabled": True,
+                    "frame_id": "map",
+                    "yaw": 0.5,
+                    "role": "home",
+                    "position_tolerance": 0.25,
+                    "yaw_tolerance": 0.3,
+                    "preferred_speed": 0.2,
+                    "tags": ["charging", "safe"],
+                },
+            }
+        ],
+    }
 
 
 FOOTPRINT = (
@@ -76,10 +106,46 @@ def test_runtime_validation_matches_the_machine_readable_schema():
         name: contract["geometry"] for name, contract in feature_types.items()
     }
     assert REQUIRED_FEATURE_COUNTS == {
-        name: contract["minimum_count"]
+        name: contract["coverage_minimum_count"]
         for name, contract in feature_types.items()
-        if contract["minimum_count"] > 0
+        if contract.get("coverage_minimum_count", 0) > 0
     }
+    assert schema["load_policy"]["recognized_schema_versions"] == ["1.0", "1.1"]
+    assert schema["validation_profiles"]["waypoint"]["required_feature_types"] == [
+        "waypoint"
+    ]
+
+
+def test_waypoint_only_document_is_not_forced_to_satisfy_coverage_counts():
+    model = SemanticMap.from_geojson(_waypoint_only_document())
+    document_report = validate_semantic_document(model, context=_context())
+    waypoint_report = validate_waypoint_map(model, context=_context())
+    coverage_report = validate_semantic_map(model, context=_context())
+
+    assert document_report.valid
+    assert waypoint_report.valid
+    assert "missing_feature_type" in [issue.code for issue in coverage_report.issues]
+
+
+def test_waypoint_requires_schema_1_1():
+    model = SemanticMap.from_geojson(_waypoint_only_document(schema_version="1.0"))
+    codes = [issue.code for issue in validate_waypoint_map(model).issues]
+    assert "waypoint_requires_schema_1_1" in codes
+
+
+def test_waypoint_properties_are_finite_and_typed():
+    document = _waypoint_only_document()
+    props = document["features"][0]["properties"]
+    props["position_tolerance"] = -0.1
+    props["tags"] = ["safe", 3]
+    props["role"] = ""
+    codes = [
+        issue.code
+        for issue in validate_waypoint_map(SemanticMap.from_geojson(document)).issues
+    ]
+    assert "invalid_waypoint_property" in codes
+    assert "invalid_waypoint_tags" in codes
+    assert "invalid_waypoint_role" in codes
 
 
 def test_duplicate_id_and_wrong_frame_report_stable_object_ids():
