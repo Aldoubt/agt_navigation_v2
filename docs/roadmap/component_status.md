@@ -19,10 +19,12 @@ and `OPTIONAL`; they do not imply vehicle acceptance unless explicitly stated.
 | Sensor sync / health | IMPLEMENTED | Stream monitor + system-manager integration; bag/vehicle threshold tuning remains pending. |
 | Semantic waypoint mode | IMPLEMENTED | Schema 1.1 validation split, typed waypoint messages/topic and waypoint server mode; Qt/runtime verification remains. |
 | BT capability layer / first BT mission | VEHICLE-PENDING | V25-07 full-chain software integration is complete; vehicle validation remains pending. |
+| V25-08 architecture & semantics baseline | IMPLEMENTED | MAP/ROUTE/LOCAL, map products, task/route/path semantics, TF authority and optional-ESDF boundaries are frozen without changing runtime ROS interfaces. |
 | ROUTE navigation core | RESERVED | V25-09 target; no runtime implementation in V25-08. |
-| Sparse correction / anchor recovery | RESERVED | V25-10 target; candidates do not own `map -> odom`. |
-| Rolling local map / ground factors | RESERVED | V25-11 and P1 state-estimation work after the first mission. |
+| Sparse correction / anchor recovery | RESERVED | V25-10 target; correction producers do not own `map -> odom`; one localization TF publisher is selected at runtime. |
+| Local environment mapping | RESERVED | V25-11 target; `/agt/map/local_occupancy` is reserved as an `odom`-frame transient rolling product. |
+| Ground factor | RESERVED | P1 state-estimation constraint; separate from the local occupancy representation. |
 | GNSS, wheel factor, GTSAM/iSAM2 | RESERVED | P1 state-estimation robustness track. |
-| Optional ESDF / advanced local planning | OPTIONAL | V25-12 derived representation; not a default prerequisite. |
+| Optional ESDF / advanced local planning | OPTIONAL | V25-12 derived representation after local occupancy; not a default prerequisite. |
 | STD / Scan Context and long-term map | RESERVED | P2 long-term agricultural navigation research. |
 | Qt/Web operator tooling | OPTIONAL | Clients remain outside business state ownership and motion boundaries. |
