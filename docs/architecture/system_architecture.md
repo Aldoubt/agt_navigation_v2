@@ -10,8 +10,8 @@
 | 蓝色 | P2：长期研究 |
 | 灰色 | OPTIONAL：可选能力 |
 
-topic 的唯一正式名称、类型和 owner 以 [`topic_contract.md`](../interfaces/topic_contract.md)
-为准；图中的接口名称必须与该 contract 一致。
+canonical cross-module topic 的唯一正式名称、类型和 owner 以
+[`topic_contract.md`](../interfaces/topic_contract.md) 为准；package-local/debug topic 由对应模块文档维护。
 
 ## v2.5 新架构总图
 
@@ -33,8 +33,8 @@ LEG5["OPTIONAL 可选"]
 
 LIDAR["MID360<br/>/agt/sensors/lidar/custom<br/>CustomMsg"]
 URDF["robot_description<br/>URDF Collision Geometry"]
-SELF["P0 URDF Self Filter<br/>URDF 自身点云滤除"]
-LFILT["/agt/sensors/lidar/custom_filtered<br/>CustomMsg"]
+SELF["P0 URDF Self Filter<br/>已实现，待 bag / 实车验收"]
+LFILT["/agt/sensors/lidar/custom_filtered<br/>CustomMsg<br/>保留原始 LiDAR frame/逐点字段"]
 IMU["IMU<br/>/agt/sensors/imu/data<br/>sensor_msgs/Imu"]
 CAM["Camera<br/>Image + CameraInfo"]
 GNSS["P1 RTK GNSS<br/>NavSatFix + RTCM/status"]
@@ -186,19 +186,21 @@ NAV --> HEALTH
 CHASSIS --> HEALTH
 
 %% ============================================================
-%% BT MISSION
+%% MISSION / BT
 %% ============================================================
 
-MISSION["P0 agt_mission<br/>BehaviorTree.CPP + Groot2"]
+MISSION["Existing agt_mission_manager<br/>ExecuteMission / Mission State Owner"]
+BT["P0 BT Execution Engine<br/>BehaviorTree.CPP + Groot2"]
 READY["P0 BT Conditions<br/>TaskReady / LocalizationReady<br/>SafetyReady"]
 RELOC_BT["P0 Relocalize BT Action"]
 NAV_BT["P0 ExecuteWaypointTask BT Action"]
 MODE_BT["P0 ChangeSystemMode BT Action"]
+MISSION --> BT
 HEALTH --> READY
-MISSION --> READY
-MISSION --> RELOC_BT
-MISSION --> NAV_BT
-MISSION --> MODE_BT
+BT --> READY
+BT --> RELOC_BT
+BT --> NAV_BT
+BT --> MODE_BT
 RELOC_BT --> RELOC
 NAV_BT --> TASK
 TASK --> NAV
@@ -212,8 +214,8 @@ classDef p0 fill:#ffd8bf,stroke:#d4380d,stroke-width:3px,color:#000
 classDef p1 fill:#fff1b8,stroke:#d4b106,stroke-width:2px,color:#000
 classDef p2 fill:#d6e4ff,stroke:#2f54eb,stroke-width:2px,color:#000
 classDef optional fill:#f0f0f0,stroke:#8c8c8c,stroke-width:1px,color:#000
-class LEG1,FRONT,ODOM,CLOUD,RELOC,STATIC,SEM,KEEP,TASK,NAV,SAFETY,CHASSIS,HEALTH,PRIOR done
-class LEG2,SELF,SYNC,WEDITOR,WDB,MISSION,READY,RELOC_BT,NAV_BT,MODE_BT p0
+class LEG1,FRONT,ODOM,CLOUD,RELOC,STATIC,SEM,KEEP,TASK,NAV,SAFETY,CHASSIS,HEALTH,PRIOR,MISSION done
+class LEG2,SELF,SYNC,WEDITOR,WDB,BT,READY,RELOC_BT,NAV_BT,MODE_BT p0
 class LEG3,GNSS,WHEEL,TERRAIN,GPLANE,GMSG,OBS,LOCALMAP,LOG,OCC,ESDF,KF,LIOF,GF,RTKF,WF,BACKEND,LOCALCOST,DYNAMIC p1
 class LEG4,STD,LOOP,LOOPF,LTM,STRUCT,SEASON,DESCRIPTOR p2
 class LEG5 optional
@@ -223,13 +225,15 @@ class LEG5 optional
 
 ### P0：首个 BT Demo 必须完成
 
-- URDF 自体点云滤除，确保车体几何来自 canonical platform profile。
+- URDF 自体点云滤除：主体几何来自 `robot_description` 的 URDF collision；platform profile 仅保留
+  enable/padding、显式临时 supplemental box 和 `geometry_source:=profile` A/B 回归路径。实现已加入
+  V25-02，完成同 bag `raw/profile/urdf` 与实车误删/漏删验收后才能转 DONE。
 - 时间同步与传感器健康检查，统一检查 timestamp、消息新鲜度和输入质量。
 - Qt5 waypoint edit mode 与命名 Semantic Waypoint Library；不修改基础 PGM。
-- `agt_mission` 基于 BehaviorTree.CPP + Groot2，连接 `TaskReady`、`LocalizationReady`、
-  `SafetyReady` 三类条件。
-- 提供 `Relocalize`、`ExecuteWaypointTask`、`ChangeSystemMode` BT Action，并继续通过
-  现有 project Action、Nav2、`agt_safety` 和底盘 watchdog 执行。
+- 保留现有 `agt_mission_manager` 作为唯一 Mission Action/状态 owner，在其后端增加
+  BehaviorTree.CPP + Groot2 执行引擎，不创建第二个并列 mission manager。
+- BT 层提供 `Relocalize`、`ExecuteWaypointTask`、`ChangeSystemMode` project-Action wrapper，并连接
+  `TaskReady`、`LocalizationReady`、`SafetyReady` 条件；BT 不直接调用 Nav2 native Action，不发布速度或 TF。
 
 ### P1：鲁棒性增强
 
@@ -250,6 +254,7 @@ class LEG5 optional
 
 - MID360 → self-filter → FAST-LIVO2 → `/agt/mapping/registered_points` → NDT/ICP relocalization。
 - 静态 OccupancyGrid、semantic GeoJSON、keepout mask、Nav2、TaskReadiness、安全和 Bunker chassis。
+- `agt_mission_manager` 已提供业务级 Mission 接口/有限状态执行基础；BehaviorTree execution engine 仍属于 P0。
 - 语义地图、coverage planning、动态语义感知和实时 traversability 在 v2.5 中不因架构图出现
   而自动变为执行能力；相关开关继续默认关闭。
 - 不得恢复 `registered_cloud`、`/agt/mapping/registered_points_lidar` 或
@@ -257,10 +262,10 @@ class LEG5 optional
 
 ## Runtime ownership summary
 
-- `agt_localization` uniquely publishes `map → odom`.
+- `agt_localization` uniquely owns authoritative `map → odom` correction.
 - `agt_mapping_fast_livo2_adapter` uniquely publishes `odom → base_footprint`.
-- `robot_state_publisher` uniquely publishes the robot and sensor description
-  chain below `base_footprint`.
+- `robot_state_publisher` uniquely publishes the robot and sensor description chain below `base_footprint`
+  and supplies `robot_description` used by the URDF self-filter.
+- `agt_mission_manager` remains the single project Mission Action/state owner; the future BT engine is an implementation layer behind that boundary.
 - The public registered cloud is `/agt/mapping/registered_points`, a
-  `sensor_msgs/msg/PointCloud2` in `odom`; historical names are archive/legacy
-  references only.
+  `sensor_msgs/msg/PointCloud2` in `odom`; historical names are archive/legacy references only.
