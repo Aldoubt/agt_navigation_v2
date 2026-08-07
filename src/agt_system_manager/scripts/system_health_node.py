@@ -396,7 +396,7 @@ class SystemHealthNode(Node):
             message.components.append(component)
         return message
 
-    def _evaluate(self):
+    def _evaluate(self, gate_profile: int = 0):
         now = time.monotonic()
         with self._stats_lock:
             self._refresh_sensor_health_locked(now)
@@ -460,7 +460,7 @@ class SystemHealthNode(Node):
                 sensor_input_ready=self._sensor_required_ready,
                 health_revision=self._health.revision if self._health else 0,
             )
-        )
+        , gate_profile=gate_profile)
 
     @staticmethod
     def _localization_state(value: int) -> str:
@@ -498,8 +498,8 @@ class SystemHealthNode(Node):
         return response
 
     def _evaluate_readiness(self, request, response):
-        del request
-        response.readiness = self._readiness_message(self._evaluate())
+        response.readiness = self._readiness_message(
+            self._evaluate(gate_profile=int(request.gate_profile)))
         return response
 
 

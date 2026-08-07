@@ -32,6 +32,17 @@ def test_readiness_is_ready_only_when_all_contracts_hold():
     assert result.blocker_codes == []
 
 
+def test_relocalization_profile_does_not_require_tracking_pose_or_localization_tf():
+    inputs = ready_inputs()
+    inputs.localization_state = "LOST"
+    inputs.pose_valid = False
+    inputs.localization_accepted = False
+    inputs.status_stale = True
+    inputs.tf_chain_fresh = False
+    result = evaluate_task_readiness(inputs, gate_profile=1)
+    assert result.ready
+
+
 def test_readiness_reports_independent_blockers():
     inputs = ready_inputs()
     inputs.active_mode = "MAPPING"

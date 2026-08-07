@@ -44,7 +44,7 @@ class ReadinessResult:
     warning_messages: list[str]
 
 
-def evaluate_task_readiness(inputs: ReadinessInputs) -> ReadinessResult:
+def evaluate_task_readiness(inputs: ReadinessInputs, *, gate_profile: int = 0) -> ReadinessResult:
     blockers: list[tuple[str, str]] = []
 
     def require(condition: bool, code: str, message: str) -> None:
@@ -63,15 +63,17 @@ def evaluate_task_readiness(inputs: ReadinessInputs) -> ReadinessResult:
         "LOCALIZATION_MAP_MISMATCH",
         "localization map identity does not match the active map",
     )
-    require(inputs.localization_state == "TRACKING", "LOCALIZATION_NOT_TRACKING", "localization is not TRACKING")
-    require(inputs.pose_valid, "POSE_INVALID", "localization pose_valid is false")
-    require(inputs.localization_accepted, "LOCALIZATION_NOT_ACCEPTED", "localization quality gate is not accepted")
-    require(not inputs.status_stale, "LOCALIZATION_STATUS_STALE", "localization status is stale")
+    if gate_profile == 0:
+        require(inputs.localization_state == "TRACKING", "LOCALIZATION_NOT_TRACKING", "localization is not TRACKING")
+        require(inputs.pose_valid, "POSE_INVALID", "localization pose_valid is false")
+        require(inputs.localization_accepted, "LOCALIZATION_NOT_ACCEPTED", "localization quality gate is not accepted")
+        require(not inputs.status_stale, "LOCALIZATION_STATUS_STALE", "localization status is stale")
     require(not inputs.emergency_stop, "EMERGENCY_STOP", "emergency stop is active")
     require(inputs.chassis_connected, "CHASSIS_DISCONNECTED", "chassis is not connected")
     require(inputs.safety_allows_navigation, "SAFETY_NOT_READY", "agt_safety does not allow navigation input")
     require(inputs.nav2_active, "NAV2_NOT_ACTIVE", "required Nav2 lifecycle nodes are not active")
-    require(inputs.tf_chain_fresh, "TF_NOT_FRESH", "map -> odom -> base_footprint TF is missing or stale")
+    if gate_profile == 0:
+        require(inputs.tf_chain_fresh, "TF_NOT_FRESH", "map -> odom -> base_footprint TF is missing or stale")
     require(inputs.task_valid, "TASK_INVALID", "task has not passed the existing validator")
     require(inputs.sensor_input_ready, "SENSOR_INPUT_UNHEALTHY", "required sensor input health evidence is not ready")
 
