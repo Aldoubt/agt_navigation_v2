@@ -5,6 +5,7 @@ import shutil
 import sys
 import time
 
+from agt_interfaces.msg import SemanticWaypointArray
 from nav_msgs.msg import OccupancyGrid
 from nav2_msgs.srv import LoadMap
 import pytest
@@ -38,10 +39,11 @@ def ros_context():
     rclpy.shutdown()
 
 
-def _parameters(semantic_path=SEMANTIC_PATH, auto_load=False):
+def _parameters(semantic_path=SEMANTIC_PATH, auto_load=False, semantic_mode="coverage"):
     return [
         Parameter("semantic_map", value=str(semantic_path)),
         Parameter("platform_profile", value=str(PROFILE_PATH)),
+        Parameter("semantic_mode", value=semantic_mode),
         Parameter("auto_load", value=auto_load),
     ]
 
@@ -76,6 +78,37 @@ def _copy_task(tmp_path):
     return semantic_dir / "semantic_map.geojson"
 
 
+def _waypoint_task(tmp_path):
+    semantic_path = _copy_task(tmp_path)
+    document = {
+        "type": "FeatureCollection",
+        "schema_version": "1.1",
+        "map_id": "greenhouse_01",
+        "frame_id": "map",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [1.0, 1.0]},
+                "properties": {
+                    "id": "home",
+                    "feature_type": "waypoint",
+                    "name": "Home",
+                    "enabled": True,
+                    "frame_id": "map",
+                    "yaw": 0.0,
+                    "role": "home",
+                    "position_tolerance": 0.25,
+                    "yaw_tolerance": 0.3,
+                    "preferred_speed": 0.2,
+                    "tags": ["safe"],
+                },
+            }
+        ],
+    }
+    semantic_path.write_text(json.dumps(document), encoding="utf-8")
+    return semantic_path
+
+
 def _status(node):
     return node.last_status.status[0]
 
@@ -94,6 +127,8 @@ def test_valid_load_publishes_markers_semantic_mask_and_standard_services():
         assert state == "LOADED"
         assert _status(node).message == "LOADED"
         assert len(node.active_candidate.markers.markers) == 8
+        assert node.active_candidate.waypoints.header.frame_id == "map"
+        assert node.active_candidate.waypoints.waypoints == []
         assert node.active_candidate.mask.info.width == 10
         assert node.active_candidate.mask.info.height == 10
         assert set(node.active_candidate.mask.data) == {0, 100}
@@ -103,6 +138,7 @@ def test_valid_load_publishes_markers_semantic_mask_and_standard_services():
         assert (map_yaml.read_bytes(), map_image.read_bytes()) == original_files
         values = {item.key: item.value for item in _status(node).values}
         assert values["mask_mode"] == "semantic_keepout_task06"
+        assert values["semantic_mode"] == "coverage"
         services = dict(node.get_service_names_and_types())
         assert services["/agt/map/semantic/load"] == ["nav2_msgs/srv/LoadMap"]
         assert services["/agt/map/semantic/reload"] == ["std_srvs/srv/Trigger"]
@@ -111,6 +147,7 @@ def test_valid_load_publishes_markers_semantic_mask_and_standard_services():
         assert SERVER.LATCHED_QOS.depth == 1
         for topic in (
             "/agt/map/semantic_markers",
+            "/agt/map/waypoints",
             "/agt/map/keepout_mask",
             "/agt/map/semantic_status",
         ):
@@ -118,6 +155,46 @@ def test_valid_load_publishes_markers_semantic_mask_and_standard_services():
             assert info.reliability == SERVER.ReliabilityPolicy.RELIABLE
             assert info.durability == SERVER.DurabilityPolicy.TRANSIENT_LOCAL
     finally:
+        node.destroy_node()
+
+
+def test_waypoint_mode_accepts_waypoint_only_document_and_does_not_publish_mask(tmp_path):
+    semantic_path = _waypoint_task(tmp_path / "waypoint")
+    node = SERVER.SemanticMapServer(
+        parameter_overrides=_parameters(semantic_path, semantic_mode="waypoint")
+    )
+    listener = Node("semantic_waypoint_listener")
+    received = []
+    try:
+        node._base_map_callback(_base_map())
+        success, state, _message = node._load_and_activate(str(semantic_path))
+        assert success
+        assert state == "LOADED"
+        assert node.active_candidate.mask is None
+        assert node.mask_publisher is None
+        assert len(node.active_candidate.waypoints.waypoints) == 1
+        waypoint = node.active_candidate.waypoints.waypoints[0]
+        assert waypoint.id == "home"
+        assert waypoint.role == "home"
+        assert waypoint.tags == ["safe"]
+        values = {item.key: item.value for item in _status(node).values}
+        assert values["semantic_mode"] == "waypoint"
+        assert values["mask_mode"] == "not_published"
+        assert values["waypoint_count"] == "1"
+
+        listener.create_subscription(
+            SemanticWaypointArray,
+            "/agt/map/waypoints",
+            received.append,
+            SERVER.LATCHED_QOS,
+        )
+        _spin_until([node, listener], lambda: bool(received))
+        assert received
+        assert received[0].map_id == "greenhouse_01"
+        assert received[0].waypoints[0].id == "home"
+        assert not node.get_publishers_info_by_topic("/agt/map/keepout_mask")
+    finally:
+        listener.destroy_node()
         node.destroy_node()
 
 
@@ -160,7 +237,7 @@ def test_failed_load_keeps_previous_active_products_and_reports_categories(
             lambda *_args: (_ for _ in ()).throw(RuntimeError("mask failure")),
         )
         assert not node._load_and_activate(str(SEMANTIC_PATH))[0]
-        assert _status(node).message == "RASTERIZATION_FAILED"
+        assert _status(node).message == "PRODUCT_BUILD_FAILED"
         assert node.active_candidate is active
     finally:
         node.destroy_node()
