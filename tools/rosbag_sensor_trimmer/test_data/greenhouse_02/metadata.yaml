@@ -1,0 +1,32 @@
+rosbag2_bagfile_information:
+  version: 5
+  storage_identifier: sqlite3
+  duration:
+    nanoseconds: 622994416876
+  starting_time:
+    nanoseconds_since_epoch: 1767659506354222860
+  message_count: 130830
+  topics_with_message_count:
+    - topic_metadata:
+        name: /agt/sensors/imu/data
+        type: sensor_msgs/msg/Imu
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 124600
+    - topic_metadata:
+        name: /agt/sensors/lidar/custom
+        type: livox_ros_driver2/msg/CustomMsg
+        serialization_format: cdr
+        offered_qos_profiles: ""
+      message_count: 6230
+  compression_format: ""
+  compression_mode: ""
+  relative_file_paths:
+    - greenhouse_02_0.db3
+  files:
+    - path: greenhouse_02_0.db3
+      starting_time:
+        nanoseconds_since_epoch: 1767659506354222860
+      duration:
+        nanoseconds: 622994416876
+      message_count: 130830

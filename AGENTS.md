@@ -1,12 +1,15 @@
 # AGENTS.md
 
 ## Scope
-- Current stage: `Bunker Qt5 FAST-LIO Navigation Baseline Integration`.
-- Integrate one Bunker baseline data chain at a time: MID360/FAST-LIVO2 mapping,
-  2D map production, Qt5 operation, map persistence, PCD relocalization, Nav2,
-  safety, and chassis output.
-- Semantic-map, Keepout, Fields2Cover, and coverage-planning code stays present but
-  is not developed or refactored in this stage.
+- Current stage: `AGT Navigation V2.5 Mission Architecture Integration`.
+- Primary target: complete the first production-style BehaviorTree mission by
+  composing existing project Actions and system readiness contracts without
+  bypassing localization, Nav2, safety, TF ownership, or chassis boundaries.
+- The delivery line is V2.5 -> P0 First BT Mission -> P1 Robust Localization /
+  Local Mapping -> P2 Long-term Agricultural Navigation Research.
+- Existing mapping, localization, semantic-map, coverage, Qt5, Web, safety, and
+  chassis capabilities remain in scope as interfaces and runtime foundations;
+  their status is recorded in `docs/roadmap/`.
 
 ## Hard Rules
 - Migrate one module or one data chain at a time.
@@ -36,7 +39,26 @@
   read-model backends needed by Qt/Web clients: `agt_map_manager` for `/agt/maps/active`,
   `agt_system_manager` health/readiness, `agt_robot_state_aggregator`, and `agt_mission_manager`.
   Disabling this group is only for an outer manager profile that already owns those nodes.
-- Every change that affects architecture or interfaces must update `docs/`, this file, and `docs/migration/migration_matrix.md`.
+- Architecture/interface changes must update the authoritative V2.5 documents:
+  `docs/architecture/system_architecture.md`,
+  `docs/interfaces/topic_contract.md`, and `docs/roadmap/v2_5.md`, plus any
+  directly affected package/interface documentation.
+
+## Mission Hard Rules
+- Behavior Tree nodes must not publish chassis or navigation velocity.
+- Behavior Tree nodes must not publish TF.
+- Behavior Tree nodes must not implement localization, mapping, planning, or
+  perception algorithms.
+- Mission logic must call project-owned Actions or Services.
+- Continuously running sensor, localization, perception, mapping, safety, and
+  chassis nodes remain outside the BT.
+- BT Conditions consume structured machine-readable status, preferably
+  `TaskReadiness` or `SystemHealth`, rather than raw sensor streams.
+- Project Actions remain the stable capability boundary between mission logic
+  and algorithm implementations.
+- `docs/interfaces/topic_contract.md` is the only topic source of truth. The canonical registered
+  cloud is `/agt/mapping/registered_points`; `registered_cloud`, `/agt/mapping/registered_points_lidar`,
+  and `/agt/mapping/registered_cloud` are historical names and must not be used by runtime code.
 - The raw MID360 `/agt/sensors/lidar/custom` topic is preserved. In the normal baseline FAST-LIVO2
   consumes only the profile-driven `/agt/sensors/lidar/custom_filtered` output from
   `agt_livox_self_filter`; an explicit A/B baseline may disable the filter and fall back to raw input.
@@ -400,7 +422,7 @@
   one in-memory retained map slot. Backend switching requires all managed
   modules to be stopped.
 - The Web console's mapping state is evidence-based: `MAPPING` requires fresh
-  `/agt/mapping/odometry` and `/agt/mapping/registered_points_lidar`; the
+  `/agt/mapping/odometry` and `/agt/mapping/registered_points`; the
   `/agt/map/mapping_occupancy` snapshot uses matching `RELIABLE +
   TRANSIENT_LOCAL` QoS and is persistent rather than a three-second periodic
   observation. Its occupancy preview is bounded,

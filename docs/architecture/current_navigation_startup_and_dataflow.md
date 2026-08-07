@@ -325,7 +325,7 @@ flowchart LR
     ADAPTER --> ODOM2[/agt/mapping/odometry/]
     ODOM2 --> H
     ADAPTER -. publishes .-> ODOMTF[odom -> base_footprint TF]
-    LIO --> CLOUD[/agt/mapping/registered_points_lidar/]
+    LIO --> CLOUD[/agt/mapping/registered_points/]
     CLOUD --> LOC[agt_relocalization]
     ODOMTF -. TF lookup, not odometry subscription .-> LOC
     LOC --> LS[/agt/localization/status/]
@@ -439,7 +439,7 @@ lifecycle manager；语义和 coverage 在当前默认配置中关闭。
 | 数据方向 | topic | 说明 |
 | --- | --- | --- |
 | 传感器输入 | `/agt/sensors/lidar/custom`、`/agt/sensors/lidar/custom_filtered`、`/agt/sensors/imu/data` | raw MID360、滤波后点云、IMU |
-| 建图/定位 | `/agt/mapping/odometry`、`/agt/mapping/registered_points_lidar` | adapter 输出里程计；backend 注册点云直接供定位使用 |
+| 建图/定位 | `/agt/mapping/odometry`、`/agt/mapping/registered_points` | adapter 输出里程计；backend 注册点云直接供定位使用 |
 | 定位状态 | `/agt/localization/status` | 结构化 `TRACKING/DEGRADED/RECOVERING/LOST`，含 `pose_valid`、`localization_accepted`、错误码和新鲜度 |
 | Nav2 速度 | `/agt/navigation/cmd_vel_raw`、`/agt/navigation/cmd_vel` | controller/behavior 输出，经过 collision monitor 后进入安全层 |
 | Qt 手动速度 | `/agt/cmd_vel_manual` | 安全层输入，手动优先，不能绕过安全层 |

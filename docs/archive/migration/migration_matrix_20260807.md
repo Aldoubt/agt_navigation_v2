@@ -2,6 +2,10 @@
 
 更新时间：2026-07-27。
 
+v2.5 接口收口：新增 `docs/interfaces/topic_contract.md` 作为唯一 topic 真源；注册点云统一
+为 `/agt/mapping/registered_points`，运行代码、配置和测试不再使用历史的
+`registered_cloud`、`/agt/mapping/registered_points_lidar` 或 `/agt/mapping/registered_cloud`。
+
 2026-07-28 统一业务后端增量：定义三层架构、Mission schema、RobotState 读模型及 map/bag
 ROS facade。Qt/Web 正式工作流迁移到同一 manager API，旧项目 Action 在兼容期保留。
 

@@ -99,7 +99,7 @@ ros2 run agt_system_manager mapping_session_workflow.py discard \
 - `/clock`、`/tf`、`/tf_static`
 - `/agt/sensors/lidar/custom`、`/agt/sensors/imu/data`
 - `/agt/mapping/odometry`
-- `/agt/mapping/registered_points`、`/agt/mapping/registered_points_lidar`
+- `/agt/mapping/registered_points`
 - `/agt/mapping/octomap_points`（实际送入全图 OctoMap 的限频点云）
 - `/agt/map/mapping_occupancy`
 - `/agt/chassis/odometry`、`/agt/chassis/status`、`/agt/chassis/connected`

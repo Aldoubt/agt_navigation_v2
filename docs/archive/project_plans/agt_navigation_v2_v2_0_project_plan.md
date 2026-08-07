@@ -241,7 +241,7 @@ flowchart TB
 | 层 | 当前组件 | 输入 | 输出 | 当前状态 |
 | --- | --- | --- | --- | --- |
 | 传感器 | `livox_ros_driver2` + `agt_sensor_adapters` | MID360 点云/IMU | `/agt/sensors/lidar/custom`、`/agt/sensors/imu/data` | 已接入，需继续做网络、QoS、长时间验证 |
-| 建图 | FAST-LIVO2 + `agt_mapping` | CustomMsg、IMU | `/agt/mapping/odometry`、`/agt/mapping/registered_points_lidar` | 纯 LIO baseline 已接入 |
+| 建图 | FAST-LIVO2 + `agt_mapping` | CustomMsg、IMU | `/agt/mapping/odometry`、`/agt/mapping/registered_points` | 纯 LIO baseline 已接入 |
 | 连续 TF | FAST-LIVO2 adapter | LIO odometry、机器人外参 | `odom -> base_footprint` | 已集中适配，需实车外参和 TF 稳定性验证 |
 | 定位 | `agt_localization` NDT/ICP | 全局 PCD、局部注册点云、`/initialpose` | `map -> odom`、定位状态 | 初验通过，批量收敛统计未完成 |
 | 地图 | Nav2 map server | PGM/YAML | `/agt/map/global_occupancy` | 已接入 |
@@ -316,7 +316,7 @@ MID360
   -> /agt/sensors/imu/data           IMU
   -> FAST-LIVO2 pure LIO
   -> /agt/mapping/odometry
-  -> /agt/mapping/registered_points_lidar
+  -> /agt/mapping/registered_points
   -> incremental localization PCD
 ```
 
@@ -1109,7 +1109,7 @@ flowchart LR
 | 传感器 | `/agt/sensors/lidar/custom` | MID360 Livox CustomMsg，供 FAST-LIVO2 使用 |
 | 传感器 | `/agt/sensors/imu/data` | MID360 IMU |
 | 建图 | `/agt/mapping/odometry` | 项目连续里程计 |
-| 建图 | `/agt/mapping/registered_points_lidar` | lidar frame 注册点云 |
+| 建图 | `/agt/mapping/registered_points` | lidar frame 注册点云 |
 | 定位 | `/initialpose` | Qt/RViz 初始位姿输入 |
 | 定位 | `/agt/localization/status` | NDT/ICP 状态和质量 |
 | 地图 | `/agt/map/global_occupancy` | Nav2 基础静态地图 |

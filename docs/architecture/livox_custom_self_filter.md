@@ -11,7 +11,7 @@
   -> agt_livox_self_filter
 /agt/sensors/lidar/custom_filtered (filtered CustomMsg)
   -> FAST-LIVO2
-/agt/mapping/registered_points_lidar
+/agt/mapping/registered_points
   -> agt_perception/local_obstacle_filter
   -> Nav2
 ```

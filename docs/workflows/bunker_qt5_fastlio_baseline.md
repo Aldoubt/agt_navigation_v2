@@ -14,7 +14,7 @@ Nav2、安全层和 Bunker 底盘。语义地图、Keepout 和覆盖规划保留
 
 ```text
 MID360 -> FAST-LIVO2 -> /agt/mapping/odometry
-                    -> /agt/mapping/registered_points_lidar
+                    -> /agt/mapping/registered_points
                     -> OctoMap -> /agt/map/mapping_occupancy -> Qt5 monitor
 mapping bag + online preview
   -> offline ray-traced free/unknown + ground_temporal + footprint sweep

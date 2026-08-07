@@ -117,7 +117,7 @@ def test_local_obstacle_filter_uses_base_frame_and_robot_crop():
     config = yaml.safe_load(
         (ROOT / "src/agt_perception/config/local_obstacle_filter.yaml").read_text()
     )["agt_local_obstacle_filter"]["ros__parameters"]
-    assert config["input_topic"] == "/agt/mapping/registered_points_lidar"
+    assert config["input_topic"] == "/agt/mapping/registered_points"
     assert config["output_topic"] == "/agt/perception/obstacle_cloud"
     assert config["target_frame"] == "base_footprint"
     assert config["robot_min_x"] < 0.0 < config["robot_max_x"]

@@ -1,4 +1,8 @@
-# 核心接口草案
+# 核心接口兼容说明
+
+topic 的唯一正式名称、类型、frame 和 owner 以
+[`topic_contract.md`](topic_contract.md) 为准；本文保留较完整的历史接口说明和扩展 topic，
+不定义新的 canonical 名称。
 
 当前导航启动顺序、Qt5/Nav2/安全数据流以及门禁矩阵见
 [`current_navigation_startup_and_dataflow.md`](../architecture/current_navigation_startup_and_dataflow.md)。
@@ -13,7 +17,6 @@
 - `/agt/sensors/lidar/points`：通用 `sensor_msgs/msg/PointCloud2` 输出，不是当前 MID360 原始驱动输入。
 - `/agt/sensors/imu/data`
 - `/agt/mapping/odometry`
-- `/agt/mapping/registered_cloud`
 - `/agt/mapping/status`
 - `/agt/perception/ground_cloud`
 - `/agt/perception/obstacle_cloud`
@@ -57,7 +60,7 @@ TF used for that attempt is queried at the same stamp.
 - `/agt/teach/route_annotations`: `visualization_msgs/msg/MarkerArray`，由项目后端根据版本化阈值生成的
   方向、转弯、掉头和原地转向标注；Qt 仅显示，不作为验证或执行批准
 
-建图健康证据同时检查 `/agt/mapping/odometry`、`/agt/mapping/registered_points_lidar` 和
+建图健康证据同时检查 `/agt/mapping/odometry`、`/agt/mapping/registered_points` 和
 `/agt/map/mapping_occupancy` 的消息类型和持久快照可用性；该话题不使用三秒新鲜度门限。Web 只读预览会对二维栅格做有界降采样，
 不发布新地图，也不参与建图算法或导航决策。Web 还可以对
 `/agt/mapping/registered_points` 的 `PointCloud2` 做固定体素降采样预览；该缓存不等于持久化

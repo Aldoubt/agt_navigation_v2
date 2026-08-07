@@ -18,7 +18,7 @@
 - adapter 位姿和平移/旋转外参换算测试通过
 - adapter twist 旋转和传感器杠杆臂换算测试通过
 - 注册点云 remap 为 `/agt/mapping/registered_points`
-- 当前帧雷达点云 `/agt/mapping/registered_points_lidar` 使用 `lidar_link`，并能通过动态
+- 注册点云 `/agt/mapping/registered_points` 使用消息声明的 canonical frame，并能通过动态
   `odom -> lidar_link` 生成二维栅格
 - 标准里程计输出为 `/agt/mapping/odometry`，child frame 为 `base_footprint`
 

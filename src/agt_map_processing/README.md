@@ -6,7 +6,7 @@
 
 当前已迁移旧仓库的在线 OctoMap 投影链：
 
-- 输入：`/agt/mapping/registered_points_lidar` (`sensor_msgs/msg/PointCloud2`，`lidar_link` frame)。
+- 输入：`/agt/mapping/registered_points` (`sensor_msgs/msg/PointCloud2`，`lidar_link` frame)。
 - 建图输出：`/agt/map/mapping_occupancy` (`nav_msgs/msg/OccupancyGrid`)。
 - 默认分辨率：`0.05 m`。
 - 默认仅把 `0.10 m <= z <= 1.00 m` 的点作为投影障碍候选。
@@ -69,12 +69,12 @@ ros2 launch agt_map_processing octomap_projection.launch.py use_sim_time:=true
 生成地图后，在仓库根目录执行：
 
 ```bash
-cd /home/yangxuan/agt_navigation_v2
+cd "$AGT_WS"
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-mkdir -p /home/yangxuan/agt_navigation_v2/runtime/maps
+mkdir -p "$AGT_WS/runtime/maps"
 ros2 launch agt_map_processing save_occupancy_map.launch.py \
-  map_prefix:=/home/yangxuan/agt_navigation_v2/runtime/maps/mid360_map
+  map_prefix:="$AGT_WS/runtime/maps/mid360_map"
 ```
 
 会生成 `mid360_map.pgm` 和 `mid360_map.yaml`。保存节点使用 transient-local 订阅，投影节点

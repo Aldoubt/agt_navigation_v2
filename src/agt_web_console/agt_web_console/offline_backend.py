@@ -158,7 +158,7 @@ class OfflineConsoleBackend:
                 self._component("agt_safety", "安全链", False, "离线模式不启动安全链"),
                 self._component("agt_chassis", "底盘", False, "未连接车辆，离线模式不发送底盘命令"),
                 self._component("fast_livo_odometry", "FAST-LIVO2 里程计", mapping_preview, "离线 bag 建图预览输入"),
-                self._component("registered_cloud", "注册点云", mapping_preview, "离线 bag 建图预览输入"),
+                self._component("registered_points", "注册点云", mapping_preview, "离线 bag 建图预览输入"),
                 self._component("mapping_occupancy", "二维建图地图", mapping_preview, "离线 bag 建图预览输入"),
             ],
         }

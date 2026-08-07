@@ -36,7 +36,7 @@ _TOPIC_TYPES = {
     "/agt/sensors/lidar/custom": (CustomMsg, "livox_ros_driver2/msg/CustomMsg"),
     "/agt/sensors/imu/data": (Imu, "sensor_msgs/msg/Imu"),
     "/agt/mapping/odometry": (Odometry, "nav_msgs/msg/Odometry"),
-    "/agt/mapping/registered_points_lidar": (PointCloud2, "sensor_msgs/msg/PointCloud2"),
+    "/agt/mapping/registered_points": (PointCloud2, "sensor_msgs/msg/PointCloud2"),
     "/agt/map/mapping_occupancy": (OccupancyGrid, "nav_msgs/msg/OccupancyGrid"),
     "/agt/chassis/connected": (Bool, "std_msgs/msg/Bool"),
     "/agt/chassis/odometry": (Odometry, "nav_msgs/msg/Odometry"),

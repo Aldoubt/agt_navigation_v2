@@ -18,7 +18,7 @@ def generate_launch_description():
                 default_value=str(package_share / "config" / "octomap_projection.yaml"),
             ),
             DeclareLaunchArgument(
-                "cloud_topic", default_value="/agt/mapping/registered_points_lidar"
+                "cloud_topic", default_value="/agt/mapping/registered_points"
             ),
             DeclareLaunchArgument(
                 "throttled_cloud_topic", default_value="/agt/mapping/octomap_points"

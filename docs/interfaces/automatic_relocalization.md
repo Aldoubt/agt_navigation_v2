@@ -87,5 +87,5 @@ last-pose 的地图绑定。新 processing record 应增加 `pcd_sha256`；如�
 
 接口必须由 `rosidl_generate_interfaces` 生成，安装目录中的 `.msg`/`.action` 文本不是实现。字段
 变化必须同时更新 C++/Python serialization tests、该文档、`docs/interfaces/core_topics.md`、
-`AGENTS.md` 和 `docs/migration/migration_matrix.md`。旧字符串 status topic 继续作为人类调试
+`AGENTS.md` 和 `docs/roadmap/v2_5.md`。旧字符串 status topic 继续作为人类调试
 兼容接口，但系统逻辑不得解析字符串。

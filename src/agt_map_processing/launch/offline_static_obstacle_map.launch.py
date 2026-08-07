@@ -67,7 +67,7 @@ def generate_launch_description():
                 ),
                 launch_arguments={
                     "params_file": str(share / "config" / "octomap_static_baseline.yaml"),
-                    "cloud_topic": "/agt/mapping/registered_points_lidar",
+                    "cloud_topic": "/agt/mapping/registered_points",
                     "map_topic": "/agt/map/octomap_occupancy",
                     "use_sim_time": "true",
                 }.items(),
