@@ -35,6 +35,25 @@ live topics retain their configured freshness limits.
 
 ## Readiness matrix
 
+### V25-08 mode-aware readiness semantics
+
+本阶段不修改 `EvaluateTaskReadiness.srv`。现有 `TASK_EXECUTION` 和
+`RELOCALIZATION` 主要表达当前 MAP navigation baseline；未来 readiness 应按
+导航模式拆分为：
+
+```text
+MAP_START_READY       MAP_CONTINUE_READY
+ROUTE_START_READY     ROUTE_CONTINUE_READY
+GLOBAL_CORRECTION_READY
+LOCAL_READY
+```
+
+`ROUTE_CONTINUE_READY` 的持续门禁应要求 odometry、local control、安全和所需
+local perception 健康，但不应持续要求 global map matching healthy 或近期刚有
+`map -> odom` correction。`GLOBAL_CORRECTION_READY` 单独判断重定位条件，不能
+被 ROUTE continue readiness 隐式替代。`LOCAL_READY` 不应要求 Global Navigation
+Map；具体 srv/message 变更须在后续 versioned interface work 中单独提出。
+
 | Check | Required value | Blocker code |
 | --- | --- | --- |
 | Main mode | `NAVIGATION` | `MODE_NOT_NAVIGATION` |

@@ -27,6 +27,20 @@
 | `/agt/system/health` | `agt_interfaces/msg/SystemHealth` | structured health snapshot | `agt_system_manager` | all clients |
 | `/agt/system/task_readiness` | `agt_interfaces/msg/TaskReadiness` | shared fail-closed task gate | `agt_system_manager` | navigation/safety/clients |
 
+## Map product semantics
+
+`/agt/map/global_occupancy` is the persistent global navigation geometry used by the
+global planner and as the spatial reference for semantic products. It is not the
+dynamic-obstacle truth and does not represent the localization prior.
+
+`/agt/map/local_occupancy` is reserved for a transient rolling local-environment
+representation. It is not versioned global-map truth. An ESDF, when implemented, is
+an optional derived representation of local occupancy rather than a required primary
+map product.
+
+`/agt/map/waypoints` is the persistent SemanticWaypoint anchor library. It is not a
+task, route, or runtime path.
+
 ## Semantic waypoint boundary
 
 `/agt/map/waypoints` 是地图语义产品，不是 Nav2 goal 列表。每个 `SemanticWaypoint` 保留稳定
@@ -37,6 +51,12 @@ schema version 与基础地图 SHA256。
 
 ```text
 Semantic Waypoint Library != Waypoint Task
+```
+
+并且：
+
+```text
+SemanticWaypoint != WaypointTask != Route != Runtime Path
 ```
 
 Waypoint Library 描述“地图上有哪些有名字的锚点”；Waypoint Task/Task Group 描述“本次按什么
