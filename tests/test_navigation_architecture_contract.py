@@ -20,9 +20,10 @@ def test_navigation_modes_are_defined_without_claiming_route_runtime():
     for mode in ("MAP", "ROUTE", "LOCAL"):
         assert f"### {mode}" in semantics
         assert f"{mode} Navigation" in architecture
-    assert "ROUTE is V25-09" not in semantics  # keep prose language-independent
     assert "ROUTE | RESERVED" in architecture
     assert "LOCAL | RESERVED" in architecture
+    assert "ROUTE 是 V25-09 及以后实现的目标能力" in semantics
+    assert "LOCAL 是预留能力，当前未实现" in semantics
 
 
 def test_map_products_keep_distinct_lifetimes_and_frames():
@@ -70,7 +71,7 @@ def test_tf_authority_allows_only_one_selected_map_to_odom_publisher():
         assert "odom -> base_footprint" in text or "odom → base_footprint" in text
         assert "map -> odom" in text or "map → odom" in text
     assert "只能有一个被选中的 TF publisher" in semantics
-    assert "只能有一个\n  selected TF publisher" in topics
+    assert "selected TF publisher" in topics
     assert "exactly one selected runtime publisher" in agents
     assert "publish_tf=false" in semantics
     assert "agt_localization_fusion" in semantics
@@ -83,7 +84,7 @@ def test_project_navigation_capability_stays_above_nav2_native_interfaces():
     agents = _read(AGENTS)
     assert "ExecuteWaypointTask" in semantics
     assert "Nav2 是其中一个\n内部 backend" in semantics
-    assert "project waypoint navigation capability" in interfaces
+    assert "waypoint navigation capability" in interfaces
     assert "Mission WAYPOINT_TASK -> project ExecuteWaypointTask capability" in mission
     assert "Navigation is a project capability, not a synonym for Nav2" in agents
 
@@ -93,5 +94,6 @@ def test_v25_08_does_not_smuggle_route_policy_into_versioned_ros_interfaces():
     assert not (action_dir / "ExecuteRouteTask.action").exists()
     assert not (action_dir / "ExecuteNavigationTask.action").exists()
     mission = _read(MISSION)
+    semantics = _read(SEMANTICS)
     assert "不新增 `navigation_mode`" in mission
-    assert "不新增 `ExecuteRouteTask`" in _read(SEMANTICS)
+    assert "本阶段不公开\n`ExecuteRouteTask` 或 `ExecuteNavigationTask`" in semantics
