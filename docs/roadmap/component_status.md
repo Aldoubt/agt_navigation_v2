@@ -13,12 +13,12 @@ order and migration evidence are kept under [`docs/archive/`](../archive/).
 | Safety and BUNKER chassis | DONE | Watchdog and fail-closed boundaries exist; hardware acceptance remains. |
 | Semantic map and keepout | DONE | Data and offline products exist; execution remains gated. |
 | System health / TaskReadiness | DONE | Structured read models and readiness contracts exist. |
-| URDF self-filter geometry | P0 | Replace profile-only geometry source while preserving the CustomMsg boundary. |
+| `agt_mission_manager` business boundary | DONE | Project ExecuteMission/FSM ownership exists; it remains the single Mission state owner. |
+| URDF self-filter geometry | P0 | V25-02 code/config/tests implemented on feature branch; raw/profile/URDF bag and vehicle validation remain. |
 | Sensor sync / health | P0 | Add bounded synchronization and health evidence. |
 | Semantic waypoint mode | P0 | Add the versioned waypoint extension only after its contract is approved. |
-| `agt_mission` / first BT mission | P0 | Compose project Actions and finite readiness-gated mission steps. |
+| BT execution engine / first BT mission | P0 | Add BehaviorTree.CPP/Groot2 behind `agt_mission_manager`; compose project Actions, do not add a second mission owner. |
 | Rolling local map / ground factors | P1 | Robustness and sensor-factor work after the first mission. |
 | GNSS, wheel factor, GTSAM/iSAM2 | P1 | Research-backed localization robustness work. |
 | STD / Scan Context and long-term map | P2 | Long-term agricultural navigation research. |
 | Qt/Web operator tooling | OPTIONAL | Clients remain outside business state ownership and motion boundaries. |
-
