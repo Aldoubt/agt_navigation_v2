@@ -18,6 +18,7 @@ runtime/evaluation/*.log
 runtime/evaluation/*.asan.*
 runtime/evaluation/*.pids
 runtime/evaluation/*.time
+/myeasylog.log
 
 # Local map-production assets (keep small records, matrices, and READMEs trackable)
 runtime/*.pcd
