@@ -1,6 +1,7 @@
 import math
 
 from builtin_interfaces.msg import Time
+import pytest
 
 from agt_ui_bridge.semantic_model import SemanticFeature, SemanticMap
 from agt_ui_bridge.semantic_waypoints import waypoint_array_message, waypoint_message
