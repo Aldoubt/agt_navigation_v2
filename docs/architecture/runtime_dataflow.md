@@ -6,6 +6,15 @@ Mission 通过 `/agt/missions/execute` 调用项目 waypoint Action；活动地�
 
 本文记录当前 Bunker Qt5/FAST-LIO 导航基线的两种启动方式：命令行直接启动，以及 Web 控制台通过系统管理器启动。文档只描述当前代码已经实现的链路，不把语义地图、覆盖规划和实车运动验收描述成默认已开启能力。
 
+## Current Runtime Baseline / Target Navigation Semantics
+
+当前已经实现并可由本文件后续启动说明验证的是 MAP-oriented Nav2 navigation 和
+P0 BT Mission；BT 运行在唯一 `agt_mission_manager` backend 中，并通过项目
+`ExecuteWaypointTask` capability 执行。V25-08 冻结但尚未实现的目标语义包括
+ROUTE、LOCAL、Local Environment Mapping 和 sparse global correction。它们不是
+当前 launch、readiness 或 runtime 数据流的一部分，详见
+[`navigation_semantics.md`](navigation_semantics.md)。
+
 V25-06 first BT mission uses the following implemented chain behind the same
 public Mission Action; it does not add a second Mission owner:
 

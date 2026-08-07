@@ -36,3 +36,19 @@ steps:
 `WAIT_EVENT` 只接受带非零时间戳、类型匹配、可选 source/correlation ID 匹配且不早于当前
 等待步骤开始时间的 `MissionEvent`。Action cancel 是唯一取消协议；`SetMissionRunState` 仅支持
 PAUSE 和 RESUME。
+
+## Navigation semantics boundary
+
+V25-08 不修改 Mission schema v1。`WAYPOINT_TASK` 描述业务层的有序 waypoint task intent，
+不是 Nav2 goal 列表，也不是 Route 或 controller Runtime Path。必须保持：
+
+```text
+Mission WAYPOINT_TASK -> project ExecuteWaypointTask capability
+WaypointTask != Route != Runtime Path
+```
+
+当前 MAP-oriented backend 可以在 project Action 内部使用 Nav2；Mission YAML 不编码 Nav2
+Action、BT tree ID、planner/controller plugin 或速度 topic。ROUTE/LOCAL 语义在 V25-08 只作为
+未来 navigation backend 目标冻结，本 schema 不新增 `navigation_mode`、`route_file`、
+`planner_id` 等字段。若未来确需把执行策略提升为业务合同，必须以单独的 versioned schema/interface
+变更完成，不能通过未知字段或对 `task_file` 的隐式解释绕过 schema 校验。

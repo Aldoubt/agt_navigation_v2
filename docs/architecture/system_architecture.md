@@ -1,19 +1,18 @@
 # v2.5 系统架构与交付路线
 
-本文保存 v2.5 新架构总图，以及每个能力的交付状态。颜色和优先级含义如下：
+本文是当前架构边界和 V25-08 语义基线。运行时接口的名称、类型、frame 和 owner 以
+[`topic_contract.md`](../interfaces/topic_contract.md) 为准；导航概念与未来模式语义以
+[`navigation_semantics.md`](navigation_semantics.md) 为准。未来能力不因出现在架构图中而成为已实现能力。
 
-| 标识 | 含义 |
-| --- | --- |
-| 绿色 | DONE：已有稳定基础 |
-| 橙色 | P0：当前首个 BT Demo 必须完成 |
-| 黄色 | P1：下一阶段鲁棒性增强 |
-| 蓝色 | P2：长期研究 |
-| 灰色 | OPTIONAL：可选能力 |
+颜色只表达实现/研究状态：
 
-canonical cross-module topic 的唯一正式名称、类型和 owner 以
-[`topic_contract.md`](../interfaces/topic_contract.md) 为准；package-local/debug topic 由对应模块文档维护。
+- 绿色：DONE / 已有稳定基础或软件系统集成完成
+- 橙色：CURRENT / 已实现但仍有专项 bag、UI 或实车验收项
+- 黄色：P1 / 下一阶段鲁棒性增强
+- 蓝色：P2 / 长期研究
+- 灰色：OPTIONAL / 可选派生能力
 
-## v2.5 新架构总图
+## 四层架构总图
 
 ```mermaid
 flowchart TD
@@ -21,258 +20,318 @@ flowchart TD
 %% ============================================================
 %% LEGEND
 %% ============================================================
-LEG1["DONE 已完成 / 已有稳定基础"]
-LEG2["P0 当前首个 BT Demo 必须完成"]
-LEG3["P1 下一阶段鲁棒性增强"]
-LEG4["P2 长期研究"]
-LEG5["OPTIONAL 可选"]
+LEG_DONE["DONE<br/>已有稳定基础 / 软件集成完成"]
+LEG_CUR["CURRENT<br/>已实现，仍有专项验收"]
+LEG_P1["P1<br/>下一阶段鲁棒性增强"]
+LEG_P2["P2<br/>长期研究"]
+LEG_OPT["OPTIONAL<br/>可选能力"]
 
 %% ============================================================
-%% SENSOR
+%% SENSOR / ODOMETRY FRONTEND
 %% ============================================================
-
-LIDAR["MID360<br/>/agt/sensors/lidar/custom<br/>CustomMsg"]
-URDF["robot_description<br/>URDF Collision Geometry"]
-SELF["P0 URDF Self Filter<br/>已实现，待 bag / 实车验收"]
-LFILT["/agt/sensors/lidar/custom_filtered<br/>CustomMsg<br/>保留原始 LiDAR frame/逐点字段"]
-IMU["IMU<br/>/agt/sensors/imu/data<br/>sensor_msgs/Imu"]
-CAM["Camera<br/>Image + CameraInfo"]
-GNSS["P1 RTK GNSS<br/>NavSatFix + RTCM/status"]
-WHEEL["P1 Chassis Wheel Odom<br/>nav_msgs/Odometry"]
-SYNC["P0 Time Sync + Sensor Health<br/>时间同步/传感器健康"]
+subgraph SENSOR["Sensor & Odometry Frontend"]
+LIDAR["MID360<br/>LiDAR"]
+IMU["IMU"]
+CAM["Camera"]
+GNSS["RTK GNSS"]
+WHEEL["Wheel Odometry"]
+SELF["URDF Self Filter"]
+HEALTH_SENSOR["Sensor Sync / Health"]
+FRONT["FAST-LIO2 / FAST-LIVO2<br/>Robust Continuous Odometry"]
+ODOM["Odometry<br/>/agt/mapping/odometry<br/>odom → base_footprint"]
+CLOUD["Registered Cloud<br/>/agt/mapping/registered_points<br/>frame=odom"]
 
 LIDAR --> SELF
-URDF --> SELF
-SELF --> LFILT
-LIDAR -. raw health .-> SYNC
-IMU -. health/timestamp .-> SYNC
-CAM -. health/timestamp .-> SYNC
-GNSS -. quality .-> SYNC
-
-%% ============================================================
-%% FRONTEND
-%% ============================================================
-
-FRONT["FAST-LIO2 / FAST-LIVO2<br/>LIO 连续里程计前端"]
-LFILT --> FRONT
+SELF --> FRONT
 IMU --> FRONT
-CAM -. LIVO mode .-> FRONT
-ODOM["/agt/mapping/odometry<br/>nav_msgs/Odometry<br/>TF odom → base_footprint"]
-CLOUD["/agt/mapping/registered_points<br/>PointCloud2<br/>frame=odom"]
+CAM -. optional LIVO .-> FRONT
+LIDAR -. health .-> HEALTH_SENSOR
+IMU -. health .-> HEALTH_SENSOR
+CAM -. health .-> HEALTH_SENSOR
+GNSS -. quality .-> HEALTH_SENSOR
 FRONT --> ODOM
 FRONT --> CLOUD
+end
 
 %% ============================================================
-%% LOCAL PERCEPTION
+%% PERSISTENT MAP / KNOWLEDGE
 %% ============================================================
+subgraph KNOWLEDGE["Persistent Map & Knowledge"]
+GLOBALMAP["Global Navigation Map<br/>2D OccupancyGrid<br/>长期几何记忆"]
+LOCPRIOR["Localization Prior<br/>localization_map.pcd<br/>当前全局定位先验"]
+SEMMAP["Semantic Map<br/>GeoJSON<br/>长期领域知识"]
+WAYPOINT["Semantic Waypoint Library<br/>Named Anchors"]
+TASK["Waypoint Task / TaskGroup<br/>Ordered Task Intent"]
+ANCHOR["Localization Anchors<br/>Stable Semantic / Geometric Anchors"]
 
-TERRAIN["P1 Terrain Classification<br/>Normal + Height Band<br/>/ Patchwork++"]
-GPLANE["P1 Local Ground Plane<br/>局部地面平面"]
-GMSG["P1 /agt/perception/ground_plane<br/>GroundPlane.msg"]
-OBS["P1 /agt/perception/obstacle_cloud<br/>PointCloud2"]
-LOCALMAP["P1 Rolling Local Map<br/>滚动局部地图"]
-LOG["P1 Raycast + Log-Odds<br/>+ Timeout"]
-OCC["P1 /agt/map/local_occupancy<br/>OccupancyGrid"]
-ESDF["P1 2D ESDF<br/>EnvironmentInterface"]
-
-CLOUD --> TERRAIN
-CLOUD --> GPLANE
-TERRAIN --> OBS
-GPLANE --> GMSG
-OBS --> LOG
-ODOM --> LOCALMAP
-LOCALMAP --> LOG
-LOG --> OCC
-OCC --> ESDF
+SEMMAP --> WAYPOINT
+WAYPOINT --> TASK
+SEMMAP -. future anchor semantics .-> ANCHOR
+end
 
 %% ============================================================
-%% BACKEND
+%% GLOBAL STATE ESTIMATION
 %% ============================================================
+subgraph GLOBALSTATE["Global State Estimation / Localization Authority"]
+RELOC["NDT / ICP<br/>Relocalization"]
+SPARSE["Sparse Global Correction<br/>Anchor Recovery"]
+GTSAM["GTSAM / iSAM2<br/>Global Backend"]
+GNSSF["GNSS Factor"]
+WHEELF["Wheel / Nonholonomic Factor"]
+GROUNDFACTOR["Ground Factor"]
+LOOP["STD / Scan Context<br/>Loop / Place Recognition"]
+AUTH["Localization Authority<br/>localization subsystem<br/>single selected TF publisher"]
+MAPODOM["Authoritative TF<br/>map → odom"]
 
-KF["P1 Keyframe Manager"]
-LIOF["P1 LIO Between Factor"]
-GF["P1 Ground Factor<br/>Z / Roll / Pitch"]
-RTKF["P1 RTK Factor"]
-WF["P1 Wheel / Nonholonomic Factor"]
-STD["P2 STD / Scan Context"]
-LOOP["P2 Loop Candidate<br/>+ GICP Verification"]
-LOOPF["P2 Loop Factor"]
-BACKEND["P1 GTSAM / iSAM2<br/>Global Backend"]
-MAPODOM["TF map → odom"]
-
-ODOM --> KF
-CLOUD --> KF
-KF --> LIOF
-GMSG --> GF
-GNSS --> RTKF
-WHEEL --> WF
-KF --> STD
-STD --> LOOP
-LOOP --> LOOPF
-LIOF --> BACKEND
-GF --> BACKEND
-RTKF --> BACKEND
-WF --> BACKEND
-LOOPF --> BACKEND
-BACKEND --> MAPODOM
-
-%% ============================================================
-%% EXISTING RELOCALIZATION
-%% ============================================================
-
-PRIOR["Global Prior PCD"]
-RELOC["Existing NDT / ICP<br/>Relocalization"]
 CLOUD --> RELOC
-PRIOR --> RELOC
-RELOC --> MAPODOM
+LOCPRIOR --> RELOC
+RELOC --> AUTH
+SPARSE --> AUTH
+GNSS --> GNSSF
+WHEEL --> WHEELF
+GNSSF --> GTSAM
+WHEELF --> GTSAM
+GROUNDFACTOR --> GTSAM
+LOOP --> GTSAM
+GTSAM --> AUTH
+AUTH --> MAPODOM
+end
 
 %% ============================================================
-%% MAP / SEMANTIC
+%% LOCAL PERCEPTION: CURRENT + FUTURE LOCAL MAP PRODUCT
 %% ============================================================
+subgraph LOCALENV["Local Environment Perception"]
+OBSFILTER["Existing Local Obstacle Filter<br/>height / range / robot-body filtering"]
+OBSCLOUD["/agt/perception/obstacle_cloud<br/>PointCloud2<br/>base_footprint"]
+GROUND["Ground / Terrain Separation<br/>future improved classification"]
+ROLLING["Rolling Local Map Window<br/>odom frame"]
+RAYCAST["Raycast + Log-Odds<br/>Observation Timeout / Decay"]
+LOCALOCC["/agt/map/local_occupancy<br/>OccupancyGrid<br/>odom / transient / rolling"]
+ESDF["Optional ESDF"]
 
-STATIC["Global Static Occupancy<br/>静态二维地图"]
-SEM["Existing Semantic GeoJSON<br/>语义地图"]
-KEEP["Existing Keepout Mask"]
-WEDITOR["P0 Waypoint Edit Mode<br/>语义编辑器路点模式"]
-WDB["P0 Semantic Waypoint Library<br/>命名路点库"]
-TASK["Existing Waypoint Task<br/>有序任务序列"]
-
-SEM --> KEEP
-SEM --> WEDITOR
-WEDITOR --> WDB
-WDB --> TASK
-STATIC --> GLOBALCOST["Nav2 Global Costmap"]
-KEEP --> GLOBALCOST
-OCC --> LOCALCOST["Nav2 Local Costmap"]
-
-%% ============================================================
-%% LONG TERM MAP
-%% ============================================================
-
-LTM["P2 Long-term Multi-layer Map<br/>长期多层地图"]
-STRUCT["P2 Stable Structural Layer<br/>长期稳定结构"]
-SEASON["P2 Seasonal / Growth Layer<br/>生长期变化层"]
-DYNAMIC["P1 Short-term Dynamic Layer<br/>短期动态层"]
-DESCRIPTOR["P2 Descriptor / Place DB<br/>地点识别数据库"]
-CLOUD --> LTM
-LTM --> STRUCT
-LTM --> SEASON
-LTM --> DESCRIPTOR
-OCC --> DYNAMIC
-STRUCT -. localization .-> RELOC
-SEASON -. planning / change .-> GLOBALCOST
-DESCRIPTOR -. loop/relocalization .-> STD
+CLOUD --> OBSFILTER
+OBSFILTER --> OBSCLOUD
+CLOUD --> GROUND
+GROUND -. future improved obstacle evidence .-> OBSCLOUD
+ODOM --> ROLLING
+OBSCLOUD --> RAYCAST
+ROLLING --> RAYCAST
+RAYCAST --> LOCALOCC
+LOCALOCC --> ESDF
+end
 
 %% ============================================================
-%% NAVIGATION
+%% MISSION PLANE
 %% ============================================================
-
-NAV["Existing Nav2<br/>Smac2D + MPPI"]
-GLOBALCOST --> NAV
-LOCALCOST --> NAV
-MAPODOM --> NAV
-NAV --> SAFETY["Existing Safety / Collision Monitor"]
-SAFETY --> CHASSIS["Existing Chassis"]
-
-%% ============================================================
-%% SYSTEM MANAGER
-%% ============================================================
-
-HEALTH["Existing agt_system_manager<br/>SystemHealth + TaskReadiness"]
-SYNC --> HEALTH
-ODOM --> HEALTH
-MAPODOM --> HEALTH
-NAV --> HEALTH
-CHASSIS --> HEALTH
-
-%% ============================================================
-%% MISSION / BT
-%% ============================================================
-
-MISSION["Existing agt_mission_manager<br/>ExecuteMission / Mission State Owner"]
-BT["P0 BT Execution Engine<br/>BehaviorTree.CPP + Groot2"]
-READY["P0 BT Conditions<br/>TaskReady / LocalizationReady<br/>SafetyReady"]
-RELOC_BT["P0 Relocalize BT Action"]
-NAV_BT["P0 ExecuteWaypointTask BT Action"]
-MODE_BT["P0 ChangeSystemMode BT Action"]
+subgraph MISSIONPLANE["Mission Plane"]
+MISSION["agt_mission_manager<br/>Mission State Owner"]
+BT["BehaviorTree.CPP<br/>Execution Backend"]
+PROJECTACTION["Project Navigation Capability<br/>ExecuteWaypointTask"]
 MISSION --> BT
-HEALTH --> READY
-BT --> READY
-BT --> RELOC_BT
-BT --> NAV_BT
-BT --> MODE_BT
-RELOC_BT --> RELOC
-NAV_BT --> TASK
-TASK --> NAV
+BT --> PROJECTACTION
+end
 
 %% ============================================================
-%% STYLES - STATUS / PRIORITY ONLY
+%% NAVIGATION CAPABILITY PLANE
 %% ============================================================
+subgraph NAVCAP["Navigation Capability Plane"]
+MODE["Navigation Mode Policy"]
+MAPNAV["MAP Navigation"]
+ROUTENAV["ROUTE Navigation"]
+LOCALNAV["LOCAL Navigation"]
+PROJECTACTION --> MODE
+MODE --> MAPNAV
+MODE --> ROUTENAV
+MODE --> LOCALNAV
+end
 
+%% ============================================================
+%% MAP MODE
+%% ============================================================
+subgraph MAPMODE["MAP Mode — current baseline"]
+GLOBALPLANNER["Global Planner<br/>Nav2 / Smac / A*"]
+GLOBALPATH["Global Runtime Path<br/>map frame"]
+GLOBALMAP --> GLOBALPLANNER
+MAPODOM --> GLOBALPLANNER
+GLOBALPLANNER --> GLOBALPATH
+end
+MAPNAV --> GLOBALPLANNER
+
+%% ============================================================
+%% ROUTE MODE
+%% ============================================================
+subgraph ROUTEMODE["ROUTE Mode — V25-09+"]
+ROUTERESOLVER["Route Resolver"]
+ROUTE["Prior Route<br/>map frame"]
+SEGMENT["Active Route Segment"]
+ODOMPATH["Runtime Path<br/>odom frame"]
+ROUTECONF["Odometry / Route Confidence"]
+
+TASK --> ROUTERESOLVER
+SEMMAP --> ROUTERESOLVER
+ROUTERESOLVER --> ROUTE
+ROUTE --> SEGMENT
+MAPODOM --> SEGMENT
+SEGMENT --> ODOMPATH
+ODOM --> ROUTECONF
+ROUTECONF -. degraded .-> SPARSE
+ANCHOR -. anchor event .-> SPARSE
+end
+ROUTENAV --> ROUTERESOLVER
+
+%% ============================================================
+%% LOCAL MODE
+%% ============================================================
+subgraph LOCALMODE["LOCAL Mode — reserved"]
+LOCALGOAL["Relative / Local Goal"]
+LOCALPATH["Local Runtime Path<br/>odom/local frame"]
+LOCALGOAL --> LOCALPATH
+end
+LOCALNAV --> LOCALGOAL
+
+%% ============================================================
+%% CONTROL / SAFETY
+%% ============================================================
+subgraph CONTROL["Local Planning / Control / Safety"]
+PATHMUX["Runtime Path / Backend Policy"]
+NAV2LOCAL["Existing Nav2 Local Costmap<br/>odom rolling<br/>Voxel + Inflation"]
+CONTROLLER["Local Controller<br/>current: Nav2 MPPI<br/>future backend may vary"]
+SAFETY["Collision Monitor + agt_safety"]
+CHASSIS["BUNKER Chassis"]
+
+OBSCLOUD --> NAV2LOCAL
+LOCALOCC -. future canonical local-map source .-> NAV2LOCAL
+ESDF -. optional advanced cost .-> PATHMUX
+GLOBALPATH --> CONTROLLER
+ODOMPATH --> PATHMUX
+LOCALPATH --> PATHMUX
+PATHMUX --> CONTROLLER
+NAV2LOCAL --> CONTROLLER
+CONTROLLER --> SAFETY
+SAFETY --> CHASSIS
+end
+
+%% ============================================================
+%% HEALTH / READINESS
+%% ============================================================
+SYSTEMHEALTH["agt_system_manager<br/>SystemHealth / TaskReadiness"]
+HEALTH_SENSOR --> SYSTEMHEALTH
+ODOM --> SYSTEMHEALTH
+MAPODOM --> SYSTEMHEALTH
+CHASSIS --> SYSTEMHEALTH
+LOCALOCC -. future mode-aware readiness .-> SYSTEMHEALTH
+SYSTEMHEALTH --> BT
+
+%% ============================================================
+%% LONG-TERM AGRICULTURAL RESEARCH
+%% ============================================================
+subgraph LONGTERM["Long-term Agricultural Map"]
+STRUCT["Stable Structural Layer"]
+SEASON["Seasonal / Growth Layer"]
+DYNAMIC["Dynamic Change Layer"]
+PLACEDB["Descriptor / Place DB"]
+STRUCT --> LOCPRIOR
+PLACEDB --> LOOP
+end
+
+%% ============================================================
+%% STYLES
+%% ============================================================
 classDef done fill:#d9f7be,stroke:#389e0d,stroke-width:2px,color:#000
-classDef p0 fill:#ffd8bf,stroke:#d4380d,stroke-width:3px,color:#000
+classDef current fill:#ffd8bf,stroke:#d4380d,stroke-width:3px,color:#000
 classDef p1 fill:#fff1b8,stroke:#d4b106,stroke-width:2px,color:#000
 classDef p2 fill:#d6e4ff,stroke:#2f54eb,stroke-width:2px,color:#000
 classDef optional fill:#f0f0f0,stroke:#8c8c8c,stroke-width:1px,color:#000
-class LEG1,FRONT,ODOM,CLOUD,RELOC,STATIC,SEM,KEEP,TASK,NAV,SAFETY,CHASSIS,HEALTH,PRIOR,MISSION done
-class LEG2,SELF,SYNC,WEDITOR,WDB,BT,READY,RELOC_BT,NAV_BT,MODE_BT p0
-class LEG3,GNSS,WHEEL,TERRAIN,GPLANE,GMSG,OBS,LOCALMAP,LOG,OCC,ESDF,KF,LIOF,GF,RTKF,WF,BACKEND,LOCALCOST,DYNAMIC p1
-class LEG4,STD,LOOP,LOOPF,LTM,STRUCT,SEASON,DESCRIPTOR p2
-class LEG5 optional
+
+%% DONE
+class LEG_DONE,LIDAR,IMU,FRONT,ODOM,CLOUD,GLOBALMAP,LOCPRIOR,SEMMAP,TASK,RELOC,AUTH,MAPODOM,OBSFILTER,OBSCLOUD,MISSION,BT,PROJECTACTION,MAPNAV,GLOBALPLANNER,GLOBALPATH,NAV2LOCAL,CONTROLLER,SAFETY,CHASSIS,SYSTEMHEALTH done
+
+%% CURRENT / acceptance pending
+class LEG_CUR,SELF,HEALTH_SENSOR,WAYPOINT current
+
+%% P1
+class LEG_P1,GNSS,WHEEL,SPARSE,GTSAM,GNSSF,WHEELF,GROUNDFACTOR,GROUND,ROLLING,RAYCAST,LOCALOCC,MODE,ROUTENAV,LOCALNAV,ROUTERESOLVER,ROUTE,SEGMENT,ODOMPATH,ROUTECONF,ANCHOR,LOCALGOAL,LOCALPATH,PATHMUX p1
+
+%% P2
+class LEG_P2,LOOP,STRUCT,SEASON,DYNAMIC,PLACEDB p2
+
+%% OPTIONAL
+class LEG_OPT,CAM,ESDF optional
 ```
 
-## v2.5 待完成内容
+## 关键边界
 
-### P0：首个 BT Demo 必须完成
+### 1. Continuous odometry 与 global localization 分离
 
-V25-05 的 `agt_bt_executor` 已实现 BehaviorTree.CPP capability layer：它由
-`agt_mission_manager` 的受控 backend 使用，集中注册项目 Action/Condition
-节点，并通过项目 Action 边界访问定位与航点能力。该包不进入默认 bringup，
-不发布速度或 TF，也不创建第二个 Mission owner。V25-06 第一条 BT Mission
-已完成 unit/contract validation；fake integration pending V25-07，车辆验证仍待
-完成；默认 backend 仍为 `sequential`。
+`agt_mapping_fast_livo2_adapter` 是唯一 `odom -> base_footprint` publisher。authoritative
+`map -> odom` 属于 localization subsystem，任一 runtime profile 只能选择一个 TF publisher。
+当前 baseline 是 `agt_localization` package 内的 `agt_relocalization` node；未来若启用 fusion
+owner，必须先关闭当前 publisher。NDT/ICP、GTSAM、GNSS、loop/place-recognition 都只能提供
+correction evidence/factor/candidate，不得并列竞争 TF。
 
-- URDF 自体点云滤除：主体几何来自 `robot_description` 的 URDF collision；platform profile 仅保留
-  enable/padding、显式临时 supplemental box 和 `geometry_source:=profile` A/B 回归路径。实现已加入
-  V25-02，完成同 bag `raw/profile/urdf` 与实车误删/漏删验收后才能转 DONE。
-- 时间同步与传感器健康检查，统一检查 timestamp、消息新鲜度和输入质量。
-- Qt5 waypoint edit mode 与命名 Semantic Waypoint Library；不修改基础 PGM。
-- 保留现有 `agt_mission_manager` 作为唯一 Mission Action/状态 owner，在其后端增加
-  BehaviorTree.CPP + Groot2 执行引擎，不创建第二个并列 mission manager。
-- BT 层提供 `Relocalize`、`ExecuteWaypointTask`、`ChangeSystemMode` project-Action wrapper，并连接
-  `TaskReady`、`LocalizationReady`、`SafetyReady` 条件；BT 不直接调用 Nav2 native Action，不发布速度或 TF。
+### 2. 四类地图/知识产品不是同一个“地图”
 
-### P1：鲁棒性增强
+- Global Navigation Map：`map` frame 的持久二维导航几何
+- Localization Prior：当前 `localization_map.pcd` 等全局定位先验；P2 才研究稳定结构层
+- Semantic Map：持久领域知识与命名锚点
+- Local Environment Map：未来 `odom` frame 的短期 rolling occupancy；不是 READY map version
 
-- Patchwork++ terrain classification、local ground plane、障碍点云和滚动局部地图。
-- Raycast + log-odds + timeout 的 `/agt/map/local_occupancy` 与 2D ESDF。
-- Keyframe Manager、LIO/ground/RTK/wheel factors，以及 GTSAM/iSAM2 global backend。
-- RTK GNSS、轮速/非完整约束和短期动态层。
-- 以上能力须先完成离线 bag 回归、资源限制、stale-data 清理和安全 fail-closed 验证，
-  才能接入导航运行链。
+Local Occupancy 到 ESDF 是可选派生关系，ESDF 不是 P1 默认主链。
 
-### P2：长期研究
+### 3. 当前 local costmap 与未来 local occupancy 不能混为一谈
 
-- STD/Scan Context、回环候选与 GICP verification。
-- 长期多层地图：稳定结构层、生长/季节层和地点描述数据库。
-- 多层地图与 localization、planning/change detection 的受控集成。
+当前 MAP baseline 已经存在 Nav2 `odom` rolling local costmap，并通过 VoxelLayer/InflationLayer
+消费 `/agt/perception/obstacle_cloud`。V25-11 的目标不是重新发明这个已有 costmap，而是提供一个
+项目级、可审计、可衰减的 `/agt/map/local_occupancy` 产品：ground/terrain separation + raycast +
+log-odds + timeout/decay。它未来可以成为 Nav2/local controller 的一个输入，也可以供其他 backend
+或 UI/audit 使用。
 
-### 已有稳定基础与边界
+### 4. Task、Route、Path 保持分层
 
-- MID360 → self-filter → FAST-LIVO2 → `/agt/mapping/registered_points` → NDT/ICP relocalization。
-- 静态 OccupancyGrid、semantic GeoJSON、keepout mask、Nav2、TaskReadiness、安全和 Bunker chassis。
-- `agt_mission_manager` 已提供业务级 Mission 接口/有限状态执行基础；BehaviorTree execution engine 仍属于 P0。
-- 语义地图、coverage planning、动态语义感知和实时 traversability 在 v2.5 中不因架构图出现
-  而自动变为执行能力；相关开关继续默认关闭。
-- 不得恢复 `registered_cloud`、`/agt/mapping/registered_points_lidar` 或
-  `/agt/mapping/registered_cloud` 作为运行时接口。详见 topic contract。
+```text
+SemanticWaypoint != WaypointTask != Route != Runtime Path
+```
+
+WaypointTask/TaskGroup 是有序任务意图；Route 是 Navigation Policy 解析后的内部导航意图；Runtime
+Path 才是 controller 消费的几何轨迹。V25-08 不新增 Route Action 或 Mission `navigation_mode` 字段。
+
+## 当前与目标状态
+
+| Capability / product | Status | 说明 |
+| --- | --- | --- |
+| MAP-oriented Nav2 navigation | SYSTEM-INTEGRATED | 当前稳定导航基线，通过 `ExecuteWaypointTask` 使用 |
+| P0 BT Mission | SYSTEM-INTEGRATED | BT 是 Mission Manager backend，不是第二个 Mission owner |
+| Existing obstacle cloud + Nav2 local costmap | SYSTEM-INTEGRATED | 当前 MAP baseline 已使用 `base_footprint` obstacle cloud 与 `odom` rolling costmap |
+| V25-08 architecture semantics | IMPLEMENTED | 只冻结合同/语义，不增加 runtime ROS interface |
+| ROUTE | RESERVED | V25-09 目标；当前没有 route runtime |
+| LOCAL | RESERVED | 当前没有 local-target runtime |
+| Sparse Global Correction | RESERVED | V25-10 目标；correction producer 不拥有 TF |
+| Local Environment Mapping | RESERVED | V25-11 目标；canonical `/agt/map/local_occupancy` 当前无 publisher |
+| ESDF | OPTIONAL | 仅在 Local Occupancy 之后按需派生 |
+
+## 交付路线
+
+```text
+P0     First BT Mission                         PASS software integration; vehicle validation separate
+V25-08 Architecture & Semantics Baseline       IMPLEMENTED
+V25-09 Robust Route Navigation Core
+V25-10 Sparse Global Correction / Anchor Recovery
+V25-11 Local Environment Mapping
+V25-12 Optional ESDF / Advanced Local Planning
+```
+
+GNSS、Wheel、Ground Factor、GTSAM 保持 P1 state-estimation track；STD、Scan Context 和
+seasonal maps 保持 P2 research track。
 
 ## Runtime ownership summary
 
-- `agt_localization` uniquely owns authoritative `map → odom` correction.
-- `agt_mapping_fast_livo2_adapter` uniquely publishes `odom → base_footprint`.
-- `robot_state_publisher` uniquely publishes the robot and sensor description chain below `base_footprint`
-  and supplies `robot_description` used by the URDF self-filter.
-- `agt_mission_manager` remains the single project Mission Action/state owner; the future BT engine is an implementation layer behind that boundary.
-- The public registered cloud is `/agt/mapping/registered_points`, a
-  `sensor_msgs/msg/PointCloud2` in `odom`; historical names are archive/legacy references only.
+- `agt_mapping_fast_livo2_adapter` uniquely publishes `odom -> base_footprint`.
+- localization subsystem uniquely owns authoritative `map -> odom`; current selected publisher is
+  `agt_relocalization` with `publish_tf=true`.
+- `robot_state_publisher` owns the robot/sensor description chain below `base_footprint`.
+- `agt_mission_manager` remains the single project Mission Action/state owner.
+- BT nodes do not publish velocity or TF and do not call Nav2 native Actions directly.
+- Current MAP motion is `Nav2 controller -> project collision/safety chain -> agt_safety -> agt_chassis`;
+  future ROUTE/LOCAL backends must enter the same safety/chassis ownership boundary.
+- `/agt/mapping/registered_points` is the sole canonical registered-cloud topic; historical names remain
+  forbidden in runtime configuration.

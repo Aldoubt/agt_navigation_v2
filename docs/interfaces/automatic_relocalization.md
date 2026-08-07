@@ -19,7 +19,7 @@ supervisor 已实现。低频 TRACKING 验证不改写 `map -> odom`，并使用
 | 接口 | 类型 | 方向 | 语义 |
 | --- | --- | --- | --- |
 | `/agt/localization/status` | `agt_interfaces/msg/LocalizationStatus` | localization -> consumers | 机器可解析状态。`pose_valid` 只有在质量门禁通过后为 true；`has_converged` 不等于可信定位。`status_stale` 由消费者按时间策略判断，定位节点在正常发布时为 false。QoS 初版为普通可靠 topic，后续 gate 以 header stamp 和 timeout 判定新鲜度。 |
-| `/agt/localization/global_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | localization -> fusion | 通过质量验证的 `map` frame 全局位姿测量。基准模式可选发布；未来融合模式必须设置 `publish_tf=false`。 |
+| `/agt/localization/global_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | localization -> fusion | 通过质量验证的 `map` frame 全局位姿测量。基准模式可选发布；未来融合模式必须关闭基准节点 TF 输出，再由唯一 fusion owner 消费该测量并维护 authoritative `map -> odom`。 |
 | `/agt/localization/coarse_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | external provider -> localization | 外部粗位姿输入。只用于 frame、时间和协方差校验及候选搜索范围，不直接写 TF。 |
 | `/agt/localization/candidate_pose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | localization -> RViz/debug | 当前正在测试的候选位姿。只用于可视化，不是外部输入，不直接写 TF。 |
 | `/initialpose` | `geometry_msgs/msg/PoseWithCovarianceStamped` | RViz/Qt -> localization | 兼容入口，必须转换到同一内部重定位请求，不维护第二套配准逻辑。 |
@@ -76,12 +76,19 @@ last-pose 的地图绑定。新 processing record 应增加 `pcd_sha256`；如�
 
 ## TF ownership
 
-基准模式只有 `agt_localization` 发布 `map -> odom`；FAST-LIVO2 adapter 只发布
+localization subsystem 是 authoritative `map -> odom` 的唯一 authority，但“authority”与
+“具体 node 名”需要区分：任一运行时 profile 中只能有一个 selected TF publisher。
+
+当前基准模式中，`agt_localization` package 内的 `agt_relocalization` node 使用
+`publish_tf=true`，因此它是唯一 `map -> odom` runtime publisher；FAST-LIVO2 adapter 只发布
 `odom -> base_footprint`；`agt_description`/robot_state_publisher 负责机器人描述和传感器静态
 关系。RViz、Action 客户端和 debug publisher 不发布 TF。
 
-未来融合模式将 `agt_localization.publish_tf=false`，由 `agt_localization_fusion` 成为唯一
-连续状态/TF owner。本阶段不同时启动两种 owner。
+未来融合模式如果由 `agt_localization_fusion` 维护连续全局状态，则必须令基准
+`agt_relocalization` 路径 `publish_tf=false`，再由 fusion node 成为唯一 selected TF publisher。
+NDT/ICP backend、GTSAM/iSAM2、GNSS factor、loop/place-recognition 等只能向该 localization
+subsystem 提供测量、factor、candidate transform 或 correction evidence，不能再增加第二个
+`map -> odom` publisher。本阶段绝不同时启动两个 owner。
 
 ## Generation and compatibility
 
