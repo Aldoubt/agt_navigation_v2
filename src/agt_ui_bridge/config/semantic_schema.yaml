@@ -1,4 +1,4 @@
-schema_version: "1.0"
+schema_version: "1.1"
 coordinate_contract:
   frame_id: map
   units: meters
@@ -25,22 +25,36 @@ semantic_map:
   feature_types:
     field_boundary:
       geometry: Polygon
-      minimum_count: 1
+      minimum_count: 0
+      coverage_minimum_count: 1
       minimum_unique_vertices: 3
       ring_must_be_closed: true
     exclusion_zone:
       geometry: Polygon
-      minimum_count: 1
+      minimum_count: 0
+      coverage_minimum_count: 1
       minimum_unique_vertices: 3
       ring_must_be_closed: true
     entry_pose:
       geometry: Point
-      minimum_count: 1
+      minimum_count: 0
+      coverage_minimum_count: 1
       required_properties: [yaw]
     work_direction:
       geometry: LineString
-      minimum_count: 1
+      minimum_count: 0
+      coverage_minimum_count: 1
       minimum_points: 2
+    waypoint:
+      geometry: Point
+      minimum_count: 0
+      required_properties: [yaw]
+      optional_properties:
+        role: {default: navigation}
+        position_tolerance: {default: 0.30, minimum: 0.0}
+        yaw_tolerance: {default: 0.35, minimum: 0.0}
+        preferred_speed: {default: 0.0, minimum: 0.0}
+        tags: {default: []}
     row_centerline:
       geometry: LineString
       minimum_count: 0
@@ -61,6 +75,9 @@ semantic_map:
       ring_must_be_closed: true
 
 coverage:
+  # coverage.yaml remains schema 1.0 in V25-04. Semantic-map schema 1.1 is
+  # independently versioned so existing coverage tasks do not require migration.
+  schema_version: "1.0"
   required_members:
     - schema_version
     - map_id
@@ -84,8 +101,17 @@ coverage:
     min_turning_radius: {minimum: 0.0, source: platform_profile}
     headland_width: {minimum: 0.0}
 
+validation_profiles:
+  document:
+    description: Validate document identity, feature syntax/geometry and map bounds only.
+  coverage:
+    required_feature_types: [field_boundary, exclusion_zone, entry_pose, work_direction]
+  waypoint:
+    required_feature_types: [waypoint]
+
 load_policy:
-  recognized_schema_versions: ["1.0"]
+  recognized_schema_versions: ["1.0", "1.1"]
+  waypoint_feature_minimum_schema: "1.1"
   hash_mismatch_mode: read_only
   planning_allowed_on_hash_mismatch: false
   planning_allowed_on_validation_error: false
@@ -111,6 +137,9 @@ ros_server_contract:
     semantic_markers:
       name: /agt/map/semantic_markers
       type: visualization_msgs/msg/MarkerArray
+    waypoints:
+      name: /agt/map/waypoints
+      type: agt_interfaces/msg/SemanticWaypointArray
     keepout_mask:
       name: /agt/map/keepout_mask
       type: nav_msgs/msg/OccupancyGrid
