@@ -25,6 +25,7 @@ class ReadinessInputs:
     nav2_active: bool = False
     tf_chain_fresh: bool = False
     task_valid: bool = False
+    sensor_input_ready: bool = True
     health_revision: int = 0
     warnings: list[tuple[str, str]] = field(default_factory=list)
 
@@ -72,6 +73,7 @@ def evaluate_task_readiness(inputs: ReadinessInputs) -> ReadinessResult:
     require(inputs.nav2_active, "NAV2_NOT_ACTIVE", "required Nav2 lifecycle nodes are not active")
     require(inputs.tf_chain_fresh, "TF_NOT_FRESH", "map -> odom -> base_footprint TF is missing or stale")
     require(inputs.task_valid, "TASK_INVALID", "task has not passed the existing validator")
+    require(inputs.sensor_input_ready, "SENSOR_INPUT_UNHEALTHY", "required sensor input health evidence is not ready")
 
     return ReadinessResult(
         ready=not blockers,

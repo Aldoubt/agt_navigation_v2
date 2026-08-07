@@ -1,14 +1,16 @@
 # v2.5 Topic Contract
 
-本文是仓库内 ROS topic 的唯一真源。代码、launch、bag profile、健康检查、Qt/Web 展示和
-其他文档引用 topic 时必须使用下表的正式名称；topic 名称不是可随意替换的显示标签。
+本文是仓库内 **canonical cross-module ROS topic** 的唯一真源。代码、launch、bag profile、
+健康检查、Qt/Web 展示和其他文档引用跨模块正式 topic 时必须使用下表名称；topic 名称不是可随意
+替换的显示标签。单个 package 的内部、debug、可视化 topic 可以由对应 package/architecture 文档
+定义，但不得冒充第二套跨模块 canonical interface。
 
 ## 正式 topic
 
 | Topic | 类型 | frame / 语义 | owner | 主要消费者 |
 | --- | --- | --- | --- | --- |
 | `/agt/sensors/lidar/custom` | `livox_ros_driver2/msg/CustomMsg` | MID360 原始输入 | Livox driver | self-filter、bag |
-| `/agt/sensors/lidar/custom_filtered` | `livox_ros_driver2/msg/CustomMsg` | 过滤后的 MID360 输入 | `agt_livox_self_filter` | FAST-LIVO2 |
+| `/agt/sensors/lidar/custom_filtered` | `livox_ros_driver2/msg/CustomMsg` | 过滤后的 MID360 输入；仍保持原始 LiDAR message frame 与逐点字段 | `agt_livox_self_filter` | FAST-LIVO2 |
 | `/agt/sensors/imu/data` | `sensor_msgs/msg/Imu` | IMU 数据 | sensor adapter/driver | FAST-LIVO2 |
 | `/agt/sensors/camera/image` | `sensor_msgs/msg/Image` | 相机图像 | camera adapter | mapping/perception（可选） |
 | `/agt/sensors/camera/camera_info` | `sensor_msgs/msg/CameraInfo` | 相机标定 | camera adapter | mapping/perception（可选） |
@@ -25,6 +27,13 @@
 | `/agt/system/health` | `agt_interfaces/msg/SystemHealth` | structured health snapshot | `agt_system_manager` | all clients |
 | `/agt/system/task_readiness` | `agt_interfaces/msg/TaskReadiness` | shared fail-closed task gate | `agt_system_manager` | navigation/safety/clients |
 
+## Package-local / debug topic boundary
+
+例如 self-filter 的 `/agt/sensors/lidar/self_filter/geometry`、removed-points 可视化和
+`/diagnostics` 属于 package-local/debug evidence，不是 FAST-LIVO2 或导航模块之间的新正式数据
+接口。其类型、QoS 与启停规则由
+[`livox_custom_self_filter.md`](../architecture/livox_custom_self_filter.md) 定义。
+
 ## 命名收口
 
 `/agt/mapping/registered_points` 是唯一正式注册点云 topic。以下名称均为禁止新增、禁止
@@ -40,9 +49,10 @@
 
 ## 规则
 
-- 一个 topic 只能有明确的 runtime owner；兼容 remap 不能制造第二个正式名称。
+- 一个 canonical topic 只能有明确的 runtime owner；兼容 remap 不能制造第二个正式名称。
 - 表中标为 reserved/not implemented 的 topic 是 v2.5 预留名称，不得被伪造为已发布能力；实现时仍须遵守本文 owner/type/frame 约束。
-- 需要新增或修改 topic 时，必须同时更新本文、相关接口文档、`AGENTS.md` 与
+- package-local/debug topic 不得成为跨模块控制、定位或安全状态的隐式依赖；需要升级为正式接口时必须先进入本合同。
+- 需要新增或修改 canonical topic 时，必须同时更新本文、相关接口文档、`AGENTS.md` 与
   `docs/roadmap/v2_5.md`，并增加 contract test。
 - `/agt/map/global_occupancy` 是导航地图；不得把 semantic keepout 或临时障碍写回基础地图。
 - topic liveness 不等于 readiness；运动前必须满足结构化 health、TaskReadiness、定位和安全门禁。

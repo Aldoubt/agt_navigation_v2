@@ -59,6 +59,13 @@ only consumes fresh `/agt/chassis/connected` for its chassis condition; odometry
 and status failures can therefore make `SystemHealth` unhealthy without adding a
 dedicated TaskReadiness blocker.
 
+V2.5 sensor-input evidence is published by `agt_sensor_monitor` as individual
+diagnostics `agt_sensor_monitor/lidar`, `agt_sensor_monitor/filtered_lidar`, and
+`agt_sensor_monitor/imu` on `/diagnostics`. `agt_system_manager` consumes their
+structured `healthy` values as the required `sensor_input` component; it does
+not independently calculate sensor rates or timestamp monotonicity. Camera,
+CameraInfo, and GNSS monitor streams are disabled and optional by default.
+
 `agt_safety` is the owner of the emergency-stop latch. The health node consumes
 `emergency_stop`/`estop_latched` and `navigation_ready` from its diagnostic status;
 the optional `/agt/safety/emergency_stop` input is not a required health topic.

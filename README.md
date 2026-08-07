@@ -5,8 +5,8 @@
 AGT Navigation V2.5 is a modular ROS 2 navigation platform for agricultural
 robots. Its current production-style target is one finite BehaviorTree mission
 that composes existing project Actions and readiness contracts. The execution
-boundary remains `Nav2 -> agt_safety -> chassis`; Qt, Web, and future mission
-clients do not publish velocity or TF.
+boundary remains `Nav2 -> agt_safety -> chassis`; Qt, Web, and mission clients
+do not publish velocity or TF.
 
 The development line is:
 
@@ -43,13 +43,18 @@ acceptance. Each capability must distinguish `implemented`, `validated offline`,
   coverage output remains execution-gated.
 - System health, TaskReadiness, map/experiment manager foundations, and the
   existing Livox self-filter baseline.
+- `agt_mission_manager` project Mission Action/FSM boundary; it remains the
+  single project Mission state owner.
 
 ### P0
 
-- URDF self-filter geometry upgrade while preserving the current CustomMsg
-  boundary.
+- URDF self-filter geometry upgrade is implemented on the V25-02 feature branch
+  while preserving the current CustomMsg boundary; same-bag raw/profile/URDF and
+  vehicle false-removal/missed-removal validation remain before DONE.
 - Sensor synchronization and health monitoring.
-- Semantic waypoint mode, `agt_mission`, and the first finite BT mission.
+- Semantic waypoint mode.
+- BehaviorTree.CPP + Groot2 execution engine behind the existing
+  `agt_mission_manager`, followed by the first finite waypoint BT mission.
 
 ### P1
 
@@ -69,23 +74,26 @@ acceptance. Each capability must distinguish `implemented`, `validated offline`,
 
 ## Core Data Flow
 
-`MID360 -> profile self-filter -> FAST-LIVO2 -> odometry/registered_points ->
+`MID360 -> self-filter -> FAST-LIVO2 -> odometry/registered_points ->
 localization -> Nav2 -> agt_safety -> chassis`.
 
 The raw input is `/agt/sensors/lidar/custom`; the normal baseline consumes
-`/agt/sensors/lidar/custom_filtered`. The public registered cloud is
+`/agt/sensors/lidar/custom_filtered`. The V2.5 self-filter default uses URDF
+collision geometry only for temporary self-return tests; kept `CustomPoint`s
+remain in the original LiDAR message frame. The public registered cloud is
 `/agt/mapping/registered_points` (`sensor_msgs/msg/PointCloud2`, frame `odom`).
 The complete runtime sequence is [`docs/architecture/runtime_dataflow.md`](docs/architecture/runtime_dataflow.md).
 
 ## Core TF Contract
 
-- `agt_localization` is the only owner of `map -> odom`.
+- `agt_localization` is the only owner of authoritative `map -> odom` correction.
 - `agt_mapping_fast_livo2_adapter` is the only owner of `odom -> base_footprint`.
-- `robot_state_publisher` owns the robot and sensor description chain.
+- `robot_state_publisher` owns the robot and sensor description chain and
+  supplies `robot_description` to the URDF self-filter.
 
 ## Core Capability Interfaces
 
-- Topic source of truth: [`docs/interfaces/topic_contract.md`](docs/interfaces/topic_contract.md)
+- Canonical cross-module topic source of truth: [`docs/interfaces/topic_contract.md`](docs/interfaces/topic_contract.md)
 - Health and readiness: [`docs/interfaces/system_health.md`](docs/interfaces/system_health.md)
 - Waypoint Action: [`docs/interfaces/waypoint_task_action.md`](docs/interfaces/waypoint_task_action.md)
 - Semantic map contract: [`docs/interfaces/semantic_map_schema.md`](docs/interfaces/semantic_map_schema.md)
@@ -98,7 +106,7 @@ docs/architecture/   current system and runtime design
 docs/interfaces/     current ROS and data contracts
 docs/roadmap/        V2.5 priorities and component status
 docs/archive/        historical migration, experiments, and plans
-profiles/            canonical platform geometry and limits
+profiles/            canonical platform geometry, limits, and policy snapshots
 src/                 ROS 2 packages
 tests/               package and contract tests
 ```
@@ -124,6 +132,7 @@ chassis gates. Semantic and coverage launch switches remain disabled by default.
 
 - Architecture: [`docs/architecture/system_architecture.md`](docs/architecture/system_architecture.md)
 - Runtime flow: [`docs/architecture/runtime_dataflow.md`](docs/architecture/runtime_dataflow.md)
+- URDF self-filter: [`docs/architecture/livox_custom_self_filter.md`](docs/architecture/livox_custom_self_filter.md)
 - Interfaces: [`docs/interfaces/topic_contract.md`](docs/interfaces/topic_contract.md)
 - System health: [`docs/interfaces/system_health.md`](docs/interfaces/system_health.md)
 - Semantic schema: [`docs/interfaces/semantic_map_schema.md`](docs/interfaces/semantic_map_schema.md)

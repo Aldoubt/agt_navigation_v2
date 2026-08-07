@@ -6,6 +6,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE_PATH = ROOT / "profiles/platforms/bunker.yaml"
+BUNKER_DESCRIPTION_CONFIG_PATH = (
+    ROOT / "src/agt_description/config/bunker_mid360.yaml"
+)
 NAV2_CONFIG_PATH = ROOT / "src/agt_navigation/config/nav2_bunker.yaml"
 OBSTACLE_CONFIG_PATH = (
     ROOT / "src/agt_perception/config/local_obstacle_filter.yaml"
@@ -49,6 +52,15 @@ def test_bunker_profile_is_the_canonical_navigation_geometry():
     assert navigation["max_y"] == pytest.approx(physical["max_y"] + 0.08)
 
 
+def test_bunker_description_dimensions_match_verified_platform_body():
+    geometry = _load_yaml(PROFILE_PATH)["platform"]["geometry"]
+    description = _load_yaml(BUNKER_DESCRIPTION_CONFIG_PATH)["/**"]["ros__parameters"]
+
+    assert description["base_length"] == pytest.approx(geometry["length"])
+    assert description["base_width"] == pytest.approx(geometry["width"])
+    assert description["base_height"] == pytest.approx(geometry["height"])
+
+
 def test_nav2_costmaps_match_the_platform_navigation_footprint():
     _, expected = _canonical_footprint()
     nav2 = _load_yaml(NAV2_CONFIG_PATH)
@@ -73,29 +85,39 @@ def test_obstacle_filter_crop_matches_the_platform_navigation_footprint():
     assert parameters["robot_max_y"] == pytest.approx(expected["max_y"])
 
 
-def test_self_filter_geometry_uses_physical_dimensions_and_explicit_boxes():
-    profile = _load_yaml(PROFILE_PATH)["platform"]
-    geometry = profile["geometry"]
+def test_self_filter_policy_uses_urdf_body_and_explicit_profile_supplements():
+    platform = _load_yaml(PROFILE_PATH)["platform"]
+    geometry = platform["geometry"]
     self_filter = geometry["self_filter"]
+    parameters = _load_yaml(SELF_FILTER_CONFIG_PATH)[
+        "agt_livox_self_filter"
+    ]["ros__parameters"]
 
     assert self_filter["enabled"] is True
-    assert self_filter["frame"] == profile["footprint_frame"]
-    assert self_filter["include_chassis_body"] is True
+    assert self_filter["frame"] == platform["footprint_frame"]
     assert self_filter["padding"] >= 0.0
     assert self_filter["boxes"][0]["verified"] is False
     assert self_filter["boxes"][0]["min"][2] < self_filter["boxes"][0]["max"][2]
-    assert SELF_FILTER_CONFIG_PATH.exists()
+
+    # In the V2.5 default path the chassis body comes from robot_description;
+    # profile boxes remain only as explicit supplemental geometry and as the
+    # complete legacy/profile A/B source.
+    assert parameters["geometry_source"] == "urdf"
+    assert parameters["urdf_reference_frame"] == platform["base_frame"]
+    assert parameters["robot_description_topic"] == "/robot_description"
+    assert parameters["filter_geometry_topic"] == "/agt/sensors/lidar/self_filter/geometry"
 
 
-def test_self_filter_does_not_reuse_navigation_footprint_as_box_source():
-    profile = _load_yaml(PROFILE_PATH)["platform"]["geometry"]
-    self_filter = profile["self_filter"]
+def test_profile_self_filter_fallback_does_not_reuse_navigation_footprint():
+    geometry = _load_yaml(PROFILE_PATH)["platform"]["geometry"]
+    self_filter = geometry["self_filter"]
     body = {
-        "min_x": -profile["length"] / 2.0,
-        "max_x": profile["length"] / 2.0,
-        "min_y": -profile["width"] / 2.0,
-        "max_y": profile["width"] / 2.0,
+        "min_x": -geometry["length"] / 2.0,
+        "max_x": geometry["length"] / 2.0,
+        "min_y": -geometry["width"] / 2.0,
+        "max_y": geometry["width"] / 2.0,
     }
-    navigation = _bounds(profile["navigation_footprint"])
+    navigation = _bounds(geometry["navigation_footprint"])
+    assert self_filter["include_chassis_body"] is True
     assert body["max_x"] < navigation["max_x"]
     assert self_filter["padding"] != pytest.approx(0.08)

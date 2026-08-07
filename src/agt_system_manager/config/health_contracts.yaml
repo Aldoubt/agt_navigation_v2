@@ -2,31 +2,17 @@ schema_version: 1
 health:
   period_sec: 1.0
   components:
-    - component_id: mid360_pointcloud
-      display_name: MID360 point cloud
+    - component_id: sensor_input
+      display_name: Sensor input health evidence
       required_in_modes: [SENSOR_ONLY, MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
       required_topics:
-        - name: /agt/sensors/lidar/custom
-          expected_message_type: livox_ros_driver2/msg/CustomMsg
-          min_rate_hz: 5.0
-          max_age_sec: 1.0
-    - component_id: livox_self_filter
-      display_name: Livox CustomMsg self filter
-      required_in_modes: [MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
-      required_topics:
-        - name: /agt/sensors/lidar/custom_filtered
-          expected_message_type: livox_ros_driver2/msg/CustomMsg
-          min_rate_hz: 5.0
-          max_age_sec: 1.0
-      required_nodes: [agt_livox_self_filter]
-    - component_id: imu
-      display_name: MID360 IMU
-      required_in_modes: [SENSOR_ONLY, MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
-      required_topics:
-        - name: /agt/sensors/imu/data
-          expected_message_type: sensor_msgs/msg/Imu
-          min_rate_hz: 50.0
-          max_age_sec: 0.5
+        - name: /diagnostics
+          expected_message_type: diagnostic_msgs/msg/DiagnosticArray
+          max_age_sec: 2.0
+      conditions:
+        - {name: sensor_input.lidar_healthy, expected: true, severity: ERROR}
+        - {name: sensor_input.filtered_lidar_healthy, expected: true, severity: ERROR}
+        - {name: sensor_input.imu_healthy, expected: true, severity: ERROR}
     - component_id: fast_livo_odometry
       display_name: FAST-LIVO2 odometry
       required_in_modes: [MAPPING, LOCALIZATION_DEBUG, NAVIGATION]

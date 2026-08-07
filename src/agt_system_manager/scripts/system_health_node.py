@@ -42,6 +42,7 @@ _TOPIC_TYPES = {
     "/agt/chassis/odometry": (Odometry, "nav_msgs/msg/Odometry"),
     "/agt/chassis/status": (DiagnosticArray, "diagnostic_msgs/msg/DiagnosticArray"),
     "/agt/safety/status": (DiagnosticArray, "diagnostic_msgs/msg/DiagnosticArray"),
+    "/diagnostics": (DiagnosticArray, "diagnostic_msgs/msg/DiagnosticArray"),
     "/agt/safety/emergency_stop": (Bool, "std_msgs/msg/Bool"),
     "/agt/localization/status": (LocalizationStatus, "agt_interfaces/msg/LocalizationStatus"),
     "/agt/maps/active": (MapVersionSummary, "agt_interfaces/msg/MapVersionSummary"),
@@ -169,7 +170,11 @@ class SystemHealthNode(Node):
             "web.process_alive": False,
             "frontend.process_alive": False,
             "rosbag.process_alive": False,
+            "sensor_input.lidar_healthy": False,
+            "sensor_input.filtered_lidar_healthy": False,
+            "sensor_input.imu_healthy": False,
         }
+        self._sensor_required_ready = False
         self._frames: set[str] = set()
         self._nodes: set[str] = set()
         self._lifecycle_states: dict[str, str] = {}
@@ -236,6 +241,19 @@ class SystemHealthNode(Node):
                 )
                 self._conditions["safety.navigation_ready"] = (
                     self._safety_status_seen and self._safety_allows_navigation
+                )
+            elif topic == "/diagnostics":
+                values_by_name = {
+                    status.name: {item.key: item.value.strip().lower() for item in status.values}
+                    for status in message.status
+                }
+                for stream in ("lidar", "filtered_lidar", "imu"):
+                    self._conditions[f"sensor_input.{stream}_healthy"] = (
+                        values_by_name.get(f"agt_sensor_monitor/{stream}", {}).get("healthy") == "true"
+                    )
+                self._sensor_required_ready = all(
+                    self._conditions[f"sensor_input.{stream}_healthy"]
+                    for stream in ("lidar", "filtered_lidar", "imu")
                 )
 
     def _refresh_graph(self) -> None:
@@ -392,6 +410,7 @@ class SystemHealthNode(Node):
                 ),
                 tf_chain_fresh={"map->odom", "odom->base_footprint", "base_link->lidar_link"}.issubset(self._frames),
                 task_valid=self._task_valid,
+                sensor_input_ready=self._sensor_required_ready,
                 health_revision=self._health.revision if self._health else 0,
             )
         )
