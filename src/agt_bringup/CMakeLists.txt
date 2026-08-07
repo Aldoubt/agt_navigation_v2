@@ -27,6 +27,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_teach_mapping_rescan test/test_teach_mapping_rescan.py
   )
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/test_p0_bt_mission_integration.py TIMEOUT 180
+    ENV ROS_LOG_DIR=/tmp)
 endif()
 
 ament_package()

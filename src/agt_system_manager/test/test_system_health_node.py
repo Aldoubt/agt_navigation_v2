@@ -1,8 +1,18 @@
 import importlib.util
 from pathlib import Path
+import time
 
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
-from agt_interfaces.msg import MapVersionSummary
+from agt_interfaces.msg import LocalizationStatus, MapVersionSummary
+from agt_interfaces.srv import EvaluateTaskReadiness
+from geometry_msgs.msg import TransformStamped
+from lifecycle_msgs.srv import GetState
+import rclpy
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.node import Node
+from rclpy.parameter import Parameter
+from std_msgs.msg import Bool
+from tf2_ros import StaticTransformBroadcaster
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "system_health_node.py"
@@ -88,3 +98,136 @@ def test_active_map_gate_uses_typed_manager_context_only():
     )
     message.active = False
     assert HEALTH._active_map_gate(message) == ("", "", "", False, False, False)
+
+
+class _ReadinessInputs(Node):
+    """ROS-only prerequisites for exercising the real SystemHealthNode gate."""
+
+    _LIFECYCLE_NODES = (
+        "map_server", "planner_server", "smoother_server", "controller_server",
+        "behavior_server", "bt_navigator", "waypoint_follower", "collision_monitor",
+    )
+
+    def __init__(self):
+        super().__init__("startup_ordering_readiness_inputs")
+        self._localization_publisher = self.create_publisher(
+            LocalizationStatus, "/agt/localization/status", 10
+        )
+        self._localization_enabled = False
+        self._map_publisher = self.create_publisher(MapVersionSummary, "/agt/maps/active", 10)
+        self._chassis_publisher = self.create_publisher(Bool, "/agt/chassis/connected", 10)
+        self._safety_publisher = self.create_publisher(DiagnosticArray, "/agt/safety/status", 10)
+        self._diagnostics_publisher = self.create_publisher(DiagnosticArray, "/diagnostics", 10)
+        self._tf = StaticTransformBroadcaster(self)
+        for name in self._LIFECYCLE_NODES:
+            self.create_service(GetState, f"/{name}/get_state", self._active_state)
+        self.create_timer(0.05, self._publish_prerequisites)
+        self._publish_static_tf()
+
+    @staticmethod
+    def _active_state(_request, response):
+        response.current_state.id = 3
+        response.current_state.label = "active"
+        return response
+
+    def enable_valid_localization(self):
+        self._localization_enabled = True
+
+    def _publish_static_tf(self):
+        transforms = []
+        for parent, child in (
+            ("map", "odom"), ("odom", "base_footprint"), ("base_link", "lidar_link")
+        ):
+            transform = TransformStamped()
+            transform.header.frame_id = parent
+            transform.child_frame_id = child
+            transform.transform.rotation.w = 1.0
+            transforms.append(transform)
+        self._tf.sendTransform(transforms)
+
+    def _publish_prerequisites(self):
+        active_map = MapVersionSummary()
+        active_map.active = True
+        active_map.valid = True
+        active_map.state = MapVersionSummary.STATE_READY
+        active_map.map_id = "startup_map"
+        active_map.map_version_id = "v1"
+        active_map.map_hash = "sha256:" + "b" * 64
+        active_map.navigation_yaml = "managed/navigation.yaml"
+        active_map.localization_pcd = "managed/map.pcd"
+        active_map.processing_record = "managed/map.processing.yaml"
+        self._map_publisher.publish(active_map)
+
+        connected = Bool()
+        connected.data = True
+        self._chassis_publisher.publish(connected)
+
+        safety = DiagnosticArray()
+        safety.status = [_status(
+            {
+                "motion_enabled": "true",
+                "estop_latched": "false",
+                "emergency_stop": "false",
+                "navigation_ready": "true",
+            }
+        ).status[0]]
+        self._safety_publisher.publish(safety)
+
+        diagnostics = DiagnosticArray()
+        diagnostics.status = [
+            _status({"healthy": "true"}, name=f"agt_sensor_monitor/{stream}").status[0]
+            for stream in ("lidar", "filtered_lidar", "imu")
+        ]
+        self._diagnostics_publisher.publish(diagnostics)
+
+        if self._localization_enabled:
+            localization = LocalizationStatus()
+            localization.state = LocalizationStatus.STATE_TRACKING
+            localization.pose_valid = True
+            localization.localization_accepted = True
+            localization.status_stale = False
+            localization.map_id = "startup_map"
+            localization.map_hash = "sha256:" + "b" * 64
+            self._localization_publisher.publish(localization)
+
+
+def _spin_until(executor, future, timeout=8.0):
+    deadline = time.monotonic() + timeout
+    while not future.done() and time.monotonic() < deadline:
+        executor.spin_once(timeout_sec=0.05)
+    assert future.done(), "bounded startup-ordering ROS future timed out"
+    return future.result()
+
+
+def test_system_health_startup_ordering_recovers_relocalization_readiness():
+    rclpy.init()
+    inputs = _ReadinessInputs()
+    health = HEALTH.SystemHealthNode()
+    health.set_parameters([Parameter("active_mode", Parameter.Type.STRING, "NAVIGATION")])
+    executor = MultiThreadedExecutor(num_threads=4)
+    executor.add_node(inputs)
+    executor.add_node(health)
+    client = health.create_client(EvaluateTaskReadiness, "/agt/system/evaluate_task_readiness")
+    try:
+        assert client.wait_for_service(timeout_sec=5.0)
+        request = EvaluateTaskReadiness.Request()
+        request.gate_profile = EvaluateTaskReadiness.Request.PROFILE_RELOCALIZATION
+        first = _spin_until(executor, client.call_async(request))
+        assert not first.readiness.ready
+        assert "LOCALIZATION_MAP_MISMATCH" in first.readiness.blocker_codes
+
+        inputs.enable_valid_localization()
+        deadline = time.monotonic() + 8.0
+        recovered = None
+        while time.monotonic() < deadline:
+            recovered = _spin_until(executor, client.call_async(request))
+            if recovered.readiness.ready:
+                break
+        assert recovered is not None and recovered.readiness.ready
+        assert recovered.readiness.map_id == "startup_map"
+        assert recovered.readiness.map_version_id == "v1"
+    finally:
+        executor.shutdown()
+        health.destroy_node()
+        inputs.destroy_node()
+        rclpy.shutdown()

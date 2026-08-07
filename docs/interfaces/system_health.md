@@ -52,6 +52,14 @@ validator protects against malformed or out-of-map waypoints. The health node's
 `task_valid` default means no task-specific request is currently pending; it is
 not permission to skip Action validation.
 
+At startup, an absent `/agt/localization/status` is fail-closed: the
+relocalization readiness profile remains blocked because localization map
+identity and freshness are not yet evidenced. Once a fresh
+`LocalizationStatus` carries a `map_id` and `map_hash` matching the READY
+active-map identity, the same `/agt/system/evaluate_task_readiness` service
+can recover to ready for `PROFILE_RELOCALIZATION`. This ordering is exercised
+against the real `SystemHealthNode` in its ROS test.
+
 `SystemHealth` and `TaskReadiness` are not identical outputs. The health contract
 checks all three chassis evidence topics (`/agt/chassis/connected`,
 `/agt/chassis/odometry`, `/agt/chassis/status`). The current readiness evaluator

@@ -14,6 +14,7 @@ runtime/cache/
 runtime/gui/
 runtime/teach_mapping/
 runtime/teach_repeat/
+runtime/evaluation/
 runtime/evaluation/*.log
 runtime/evaluation/*.asan.*
 runtime/evaluation/*.pids
