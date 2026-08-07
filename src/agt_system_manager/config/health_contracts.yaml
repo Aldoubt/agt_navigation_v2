@@ -36,11 +36,11 @@ health:
           min_rate_hz: 5.0
           max_age_sec: 1.0
       required_frames: [odom->base_footprint]
-    - component_id: registered_cloud
+    - component_id: registered_points
       display_name: Registered point cloud
       required_in_modes: [MAPPING, LOCALIZATION_DEBUG, NAVIGATION]
       required_topics:
-        - name: /agt/mapping/registered_points_lidar
+        - name: /agt/mapping/registered_points
           expected_message_type: sensor_msgs/msg/PointCloud2
           min_rate_hz: 1.0
           max_age_sec: 2.0

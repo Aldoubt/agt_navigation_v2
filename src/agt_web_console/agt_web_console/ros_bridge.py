@@ -1,16 +1,38 @@
 """ROS interface adapter used by the Web console runtime."""
 
-import math
 import json
+import math
 from pathlib import Path
 import threading
 import time
 from typing import Any, Mapping
 
-from agt_interfaces.action import ChangeSystemMode, ManageMappingSession, Relocalize
-from agt_interfaces.msg import LocalizationStatus, SystemHealth, TaskReadiness
+from agt_interfaces.action import (
+    ChangeSystemMode,
+    ExecuteMission,
+    ManageMappingSession,
+    Relocalize,
+)
+from agt_interfaces.msg import (
+    BagSessionSummary,
+    ExperimentSummary,
+    LocalizationStatus,
+    MapVersionSummary,
+    MissionStatus,
+    RobotState,
+    SystemHealth,
+    TaskReadiness,
+)
 from diagnostic_msgs.msg import DiagnosticArray
-from agt_interfaces.srv import SetLocalizationMode
+from agt_interfaces.srv import (
+    ListBagSessions,
+    ListExperiments,
+    ListMapVersions,
+    ManageBagSession,
+    ManageMapVersion,
+    SetLocalizationMode,
+    SetMissionRunState,
+)
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.action import ActionClient
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -44,6 +66,12 @@ class RosConsoleBridge(Node):
         self._health = {"overall_state": "UNKNOWN", "components": []}
         self._readiness = {"ready": False, "blocker_codes": ["HEALTH_UNAVAILABLE"]}
         self._localization = LocalizationStatus()
+        self._robot_state = {
+            "revision": 0,
+            "system_mode": "UNKNOWN",
+            "message": "尚未收到统一机器人状态",
+        }
+        self._mission_status = self._mission_summary(MissionStatus())
         self._mapping_map: dict[str, Any] = {"available": False, "message": "尚未收到二维建图地图"}
         self._mapping_pointcloud: dict[str, Any] = {
             "available": False,
@@ -71,10 +99,10 @@ class RosConsoleBridge(Node):
         }
         self._chassis_last_status = None
         self._runtime_dir = Path(runtime_dir).expanduser().resolve()
-        self._status_path = self._runtime_dir / "logs" / "system_manager" / "process_status.json"
         self._managed_processes: list[dict[str, Any]] = []
         self._active_mode = "IDLE"
         self._status_listeners: list[Any] = []
+        self._mission_goal_handle = None
         self._mode_action = ActionClient(self, ChangeSystemMode, "/agt/system/change_mode", callback_group=group)
         self._mapping_session_action = ActionClient(
             self,
@@ -83,7 +111,42 @@ class RosConsoleBridge(Node):
             callback_group=group,
         )
         self._relocalize_action = ActionClient(self, Relocalize, "/agt/localization/relocalize", callback_group=group)
+        self._mission_action = ActionClient(
+            self, ExecuteMission, "/agt/missions/execute", callback_group=group
+        )
         self._localization_mode = self.create_client(SetLocalizationMode, "/agt/localization/set_mode", callback_group=group)
+        self._map_list = self.create_client(
+            ListMapVersions, "/agt/maps/list", callback_group=group
+        )
+        self._map_manage = self.create_client(
+            ManageMapVersion, "/agt/maps/manage", callback_group=group
+        )
+        self._bag_list = self.create_client(
+            ListBagSessions, "/agt/data/bags/list", callback_group=group
+        )
+        self._bag_manage = self.create_client(
+            ManageBagSession, "/agt/data/bags/manage", callback_group=group
+        )
+        self._experiment_list = self.create_client(
+            ListExperiments, "/agt/data/experiments/list", callback_group=group
+        )
+        self._mission_run_state = self.create_client(
+            SetMissionRunState, "/agt/missions/set_run_state", callback_group=group
+        )
+        self.create_subscription(
+            RobotState,
+            "/agt/system/robot_state",
+            self._robot_state_callback,
+            _LATCHED_MAP_QOS,
+            callback_group=group,
+        )
+        self.create_subscription(
+            MissionStatus,
+            "/agt/missions/status",
+            self._mission_callback,
+            _LATCHED_MAP_QOS,
+            callback_group=group,
+        )
         self.create_subscription(SystemHealth, "/agt/system/health", self._health_callback, 10, callback_group=group)
         self.create_subscription(TaskReadiness, "/agt/system/task_readiness", self._readiness_callback, 10, callback_group=group)
         self.create_subscription(LocalizationStatus, "/agt/localization/status", self._localization_callback, 10, callback_group=group)
@@ -97,6 +160,20 @@ class RosConsoleBridge(Node):
         self._executor.add_node(self)
         self._thread = threading.Thread(target=self._executor.spin, daemon=True)
         self._thread.start()
+
+    def _robot_state_callback(self, message: RobotState) -> None:
+        summary = self._robot_state_summary(message)
+        with self._lock:
+            self._robot_state = summary
+            self._active_mode = str(summary["system_mode"])
+            if self._active_mode != "MAPPING":
+                self._clear_mapping_previews_locked()
+        self._notify_status()
+
+    def _mission_callback(self, message: MissionStatus) -> None:
+        with self._lock:
+            self._mission_status = self._mission_summary(message)
+        self._notify_status()
 
     def _health_callback(self, message: SystemHealth) -> None:
         with self._lock:
@@ -286,6 +363,8 @@ class RosConsoleBridge(Node):
             listeners = list(self._status_listeners)
         event = {
             "type": "status",
+            "robot_state": self.robot_state(),
+            "mission": self.mission_status(),
             "health": self.health(),
             "task_readiness": self.readiness(),
             "localization": self.localization(),
@@ -303,6 +382,230 @@ class RosConsoleBridge(Node):
         if isinstance(value, float) and not math.isfinite(value):
             return None
         return value
+
+    @staticmethod
+    def _map_summary(message: MapVersionSummary) -> dict[str, Any]:
+        states = {
+            MapVersionSummary.STATE_UNKNOWN: "UNKNOWN",
+            MapVersionSummary.STATE_DRAFT: "DRAFT",
+            MapVersionSummary.STATE_PROCESSING: "PROCESSING",
+            MapVersionSummary.STATE_READY: "READY",
+            MapVersionSummary.STATE_INVALID: "INVALID",
+            MapVersionSummary.STATE_ARCHIVED: "ARCHIVED",
+            MapVersionSummary.STATE_DELETED: "DELETED",
+        }
+        assets = {
+            "map": message.navigation_yaml,
+            "global_map_pcd": message.localization_pcd,
+            "global_map_processing_record": message.processing_record,
+            "tasks_directory": message.tasks_directory,
+        }
+        return {
+            "map_id": message.map_id,
+            "version_id": message.map_version_id,
+            "map_version_id": message.map_version_id,
+            "parent_version_id": message.parent_map_version_id,
+            "state": states.get(int(message.state), "UNKNOWN"),
+            "active": int(message.active),
+            "pinned": int(message.pinned),
+            "deleted": int(message.deleted),
+            "valid": bool(message.valid),
+            "map_hash": message.map_hash,
+            "manifest_sha256": message.manifest_sha256,
+            "assets": assets,
+            "storage_bytes": int(message.storage_bytes),
+            "created_at": message.created_at,
+            "errors": list(message.validation_errors),
+            "warnings": list(message.validation_warnings),
+        }
+
+    @staticmethod
+    def _bag_summary(message: BagSessionSummary) -> dict[str, Any]:
+        states = {
+            BagSessionSummary.STATE_UNKNOWN: "UNKNOWN",
+            BagSessionSummary.STATE_IDLE: "IDLE",
+            BagSessionSummary.STATE_RECORDING: "RECORDING",
+            BagSessionSummary.STATE_PLAYING: "PLAYING",
+            BagSessionSummary.STATE_COMPLETED: "COMPLETED",
+            BagSessionSummary.STATE_INTERRUPTED: "INTERRUPTED",
+            BagSessionSummary.STATE_ERROR: "ERROR",
+        }
+        state = states.get(int(message.state), "UNKNOWN")
+        return {
+            "state": state,
+            "bag_id": message.bag_id,
+            "experiment_id": message.experiment_id,
+            "profile_id": message.profile_id,
+            "playback_profile": message.profile_id,
+            "relative_uri": message.relative_uri,
+            "complete": bool(message.complete),
+            "simulation": bool(message.simulation),
+            "playback_rate": float(message.playback_rate),
+            "rate": float(message.playback_rate),
+            "storage_bytes": int(message.storage_bytes),
+            "started_at": message.started_at,
+            "updated_at": message.updated_at,
+            "message": message.message,
+            "process_id": int(message.process_id),
+            "pid": int(message.process_id),
+            "message_count": int(message.message_count),
+            "storage_identifier": message.storage_identifier,
+            "mapping_input_ready": bool(message.mapping_input_ready),
+            "contains_mapping_outputs": bool(message.contains_mapping_outputs),
+            "contains_navigation_outputs": bool(message.contains_navigation_outputs),
+            "playing": state == "PLAYING",
+            "recording": state == "RECORDING",
+        }
+
+    @staticmethod
+    def _experiment_summary(message: ExperimentSummary) -> dict[str, Any]:
+        states = {
+            ExperimentSummary.STATE_UNKNOWN: "UNKNOWN",
+            ExperimentSummary.STATE_CREATED: "CREATED",
+            ExperimentSummary.STATE_RUNNING: "RUNNING",
+            ExperimentSummary.STATE_COMPLETED: "COMPLETED",
+            ExperimentSummary.STATE_INTERRUPTED: "INTERRUPTED",
+            ExperimentSummary.STATE_INVALID: "INVALID",
+        }
+        return {
+            "experiment_id": message.experiment_id,
+            "title": message.title,
+            "state": states.get(int(message.state), "UNKNOWN"),
+            "created_at": message.created_at,
+            "start_time": message.start_time,
+            "end_time": message.end_time,
+            "platform_profile": message.platform_profile,
+            "active_map": {
+                "map_id": message.map_id,
+                "map_version_id": message.map_version_id,
+                "manifest_sha256": message.map_hash,
+            },
+            "launch_profile": message.launch_profile,
+            "launch_arguments": {
+                "mission_id": message.mission_id,
+                "mission_version": message.mission_version,
+                "mission_sha256": message.mission_sha256,
+            },
+            "result_status": message.result_status,
+            "config_snapshot_count": int(message.config_snapshot_count),
+            "message": message.message,
+        }
+
+    @staticmethod
+    def _mission_summary(message: MissionStatus) -> dict[str, Any]:
+        states = {
+            MissionStatus.STATE_IDLE: "IDLE",
+            MissionStatus.STATE_VALIDATING: "VALIDATING",
+            MissionStatus.STATE_RUNNING: "RUNNING",
+            MissionStatus.STATE_WAITING_DURATION: "WAITING_DURATION",
+            MissionStatus.STATE_WAITING_EVENT: "WAITING_EVENT",
+            MissionStatus.STATE_PAUSING: "PAUSING",
+            MissionStatus.STATE_PAUSED: "PAUSED",
+            MissionStatus.STATE_RESUMING: "RESUMING",
+            MissionStatus.STATE_CANCELING: "CANCELING",
+            MissionStatus.STATE_SUCCEEDED: "SUCCEEDED",
+            MissionStatus.STATE_FAILED: "FAILED",
+            MissionStatus.STATE_CANCELED: "CANCELED",
+            MissionStatus.STATE_INTERRUPTED: "INTERRUPTED",
+        }
+        step_types = {
+            MissionStatus.STEP_UNKNOWN: "UNKNOWN",
+            MissionStatus.STEP_WAYPOINT_TASK: "WAYPOINT_TASK",
+            MissionStatus.STEP_WAIT_DURATION: "WAIT_DURATION",
+            MissionStatus.STEP_WAIT_EVENT: "WAIT_EVENT",
+        }
+        return {
+            "state": states.get(int(message.state), "IDLE"),
+            "mission_id": message.mission_id,
+            "mission_version": message.mission_version,
+            "content_sha256": message.content_sha256,
+            "map_id": message.map_id,
+            "map_version_id": message.map_version_id,
+            "map_manifest_sha256": message.map_manifest_sha256,
+            "current_step_index": int(message.current_step_index),
+            "total_steps": int(message.total_steps),
+            "current_step_id": message.current_step_id,
+            "current_step_type": step_types.get(int(message.current_step_type), "UNKNOWN"),
+            "current_waypoint": int(message.current_waypoint),
+            "total_waypoints": int(message.total_waypoints),
+            "step_elapsed_s": float(message.step_elapsed_s),
+            "step_remaining_s": float(message.step_remaining_s),
+            "error_code": int(message.error_code),
+            "blocker_codes": list(message.blocker_codes),
+            "blocker_messages": list(message.blocker_messages),
+            "message": message.message,
+        }
+
+    def _robot_state_summary(self, message: RobotState) -> dict[str, Any]:
+        modes = {
+            RobotState.MODE_UNKNOWN: "UNKNOWN",
+            RobotState.MODE_IDLE: "IDLE",
+            RobotState.MODE_SENSOR_ONLY: "SENSOR_ONLY",
+            RobotState.MODE_MAPPING: "MAPPING",
+            RobotState.MODE_LOCALIZATION_DEBUG: "LOCALIZATION_DEBUG",
+            RobotState.MODE_NAVIGATION: "NAVIGATION",
+            RobotState.MODE_ERROR: "ERROR",
+        }
+        nav2_states = {
+            RobotState.NAV2_UNKNOWN: "UNKNOWN",
+            RobotState.NAV2_INACTIVE: "INACTIVE",
+            RobotState.NAV2_ACTIVE: "ACTIVE",
+            RobotState.NAV2_ERROR: "ERROR",
+        }
+        return {
+            "revision": int(message.revision),
+            "system_mode": modes.get(int(message.system_mode), "UNKNOWN"),
+            "active_profile": message.active_profile,
+            "managed_process_count": int(message.managed_process_count),
+            "running_process_count": int(message.running_process_count),
+            "system_health_known": bool(message.system_health_known),
+            "system_health_freshness_s": self._json_number(message.system_health_freshness_s),
+            "task_readiness_known": bool(message.task_readiness_known),
+            "task_readiness_freshness_s": self._json_number(message.task_readiness_freshness_s),
+            "active_map_known": bool(message.active_map_known),
+            "active_map_freshness_s": self._json_number(message.active_map_freshness_s),
+            "active_map": self._map_summary(message.active_map),
+            "localization_status_known": bool(message.localization_status_known),
+            "localization_freshness_s": self._json_number(message.localization_freshness_s),
+            "mission_status_known": bool(message.mission_status_known),
+            "mission_freshness_s": self._json_number(message.mission_freshness_s),
+            "mission": self._mission_summary(message.mission),
+            "nav2_state": nav2_states.get(int(message.nav2_state), "UNKNOWN"),
+            "nav2_freshness_s": self._json_number(message.nav2_freshness_s),
+            "safety_status_known": bool(message.safety_status_known),
+            "safety_motion_enabled": bool(message.safety_motion_enabled),
+            "emergency_stop": bool(message.emergency_stop),
+            "estop_latched": bool(message.estop_latched),
+            "navigation_ready": bool(message.navigation_ready),
+            "safety_freshness_s": self._json_number(message.safety_freshness_s),
+            "chassis_status_known": bool(message.chassis_status_known),
+            "chassis_connected": bool(message.chassis_connected),
+            "chassis_control_mode": int(message.chassis_control_mode),
+            "chassis_status_freshness_s": self._json_number(message.chassis_status_freshness_s),
+            "chassis_odometry_freshness_s": self._json_number(message.chassis_odometry_freshness_s),
+            "bag_status_known": bool(message.bag_status_known),
+            "bag_freshness_s": self._json_number(message.bag_freshness_s),
+            "bag_session": self._bag_summary(message.bag_session),
+            "error_code": int(message.error_code),
+            "blocker_codes": list(message.blocker_codes),
+            "blocker_messages": list(message.blocker_messages),
+            "message": message.message,
+        }
+
+    def robot_state(self) -> dict[str, Any]:
+        with self._lock:
+            result = dict(self._robot_state)
+            if "active_map" in result:
+                result["active_map"] = dict(result["active_map"])
+            if "mission" in result:
+                result["mission"] = dict(result["mission"])
+            if "bag_session" in result:
+                result["bag_session"] = dict(result["bag_session"])
+            return result
+
+    def mission_status(self) -> dict[str, Any]:
+        with self._lock:
+            return dict(self._mission_status)
 
     def health(self) -> dict[str, Any]:
         with self._lock:
@@ -352,6 +655,11 @@ class RosConsoleBridge(Node):
         if not event.wait(timeout):
             raise RuntimeError("ROS operation timed out")
         return result[0].result()
+
+    def _call_service(self, client, request, name: str, timeout: float = 10.0):
+        if not client.wait_for_service(timeout_sec=min(timeout, 2.0)):
+            raise RuntimeError(f"{name} service is unavailable")
+        return self._wait(client.call_async(request), timeout=timeout)
 
     def start(self, profile: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if profile not in self._PROFILE_MODES:
@@ -410,16 +718,25 @@ class RosConsoleBridge(Node):
 
     def status(self) -> dict[str, Any]:
         with self._lock:
-            active_mode = self._readiness.get("active_mode") or self._active_mode or "UNKNOWN"
+            robot_state = dict(self._robot_state)
+            active_mode = (
+                robot_state.get("system_mode")
+                or self._readiness.get("active_mode")
+                or self._active_mode
+                or "UNKNOWN"
+            )
             processes = list(self._managed_processes)
-        try:
-            with open(self._status_path, "r", encoding="utf-8") as stream:
-                manager_status = json.load(stream)
-            if isinstance(manager_status, list):
-                processes = manager_status
-        except (OSError, TypeError, ValueError, json.JSONDecodeError):
-            pass
-        return {"active_mode": active_mode, "processes": processes}
+        return {
+            "active_mode": active_mode,
+            "active_profile": str(robot_state.get("active_profile", "")),
+            "managed_process_count": int(
+                robot_state.get("managed_process_count", len(processes))
+            ),
+            "running_process_count": int(
+                robot_state.get("running_process_count", len(processes))
+            ),
+            "processes": processes,
+        }
 
     def set_mode(self, mode: str) -> dict[str, Any]:
         if not self._localization_mode.wait_for_service(timeout_sec=2.0):
@@ -489,6 +806,365 @@ class RosConsoleBridge(Node):
             },
         }
 
+    def maps(self, *, map_id: str = "", state: str = "") -> list[dict[str, Any]]:
+        state_values = {
+            "": MapVersionSummary.STATE_UNKNOWN,
+            "UNKNOWN": MapVersionSummary.STATE_UNKNOWN,
+            "DRAFT": MapVersionSummary.STATE_DRAFT,
+            "PROCESSING": MapVersionSummary.STATE_PROCESSING,
+            "READY": MapVersionSummary.STATE_READY,
+            "INVALID": MapVersionSummary.STATE_INVALID,
+            "ARCHIVED": MapVersionSummary.STATE_ARCHIVED,
+            "DELETED": MapVersionSummary.STATE_DELETED,
+        }
+        state_name = str(state or "").upper()
+        if state_name not in state_values:
+            raise ValueError(f"unsupported map state: {state}")
+        request = ListMapVersions.Request()
+        request.map_id = str(map_id or "")
+        request.state = state_values[state_name]
+        request.include_deleted = state_name == "DELETED"
+        response = self._call_service(self._map_list, request, "map list")
+        if not response.success:
+            raise RuntimeError(response.message)
+        return [self._map_summary(item) for item in response.versions]
+
+    def _manage_map(
+        self,
+        operation: int,
+        version_id: str = "",
+        *,
+        confirm_destructive: bool = False,
+        values: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        request = ManageMapVersion.Request()
+        request.operation = int(operation)
+        request.map_version_id = str(version_id)
+        request.confirm_destructive = bool(confirm_destructive)
+        supplied = dict(values or {})
+        request.map_id = str(supplied.get("map_id", ""))
+        request.candidate_map_yaml = str(
+            supplied.get("map_yaml", supplied.get("candidate_map_yaml", ""))
+        )
+        request.localization_pcd = str(
+            supplied.get("pcd", supplied.get("localization_pcd", ""))
+        )
+        request.processing_record = str(supplied.get("processing_record", ""))
+        request.platform_profile = str(supplied.get("platform_profile", ""))
+        request.parent_map_version_id = str(
+            supplied.get("parent_map_version_id", "")
+        )
+        response = self._call_service(self._map_manage, request, "map manage")
+        if not response.success:
+            raise RuntimeError(response.message)
+        return self._map_summary(response.version)
+
+    def validate_map(self, version_id: str) -> dict[str, Any]:
+        result = self._manage_map(ManageMapVersion.Request.OP_VALIDATE, version_id)
+        return {
+            "valid": result["valid"],
+            "map_id": result["map_id"],
+            "map_version_id": result["version_id"],
+            "errors": result["errors"],
+            "warnings": result["warnings"],
+            "map_hash": result["map_hash"],
+            "manifest_sha256": result["manifest_sha256"],
+            "assets": result["assets"],
+        }
+
+    def activate_map(self, version_id: str) -> dict[str, Any]:
+        result = self._manage_map(ManageMapVersion.Request.OP_ACTIVATE, version_id)
+        return {**result, "activated": bool(result["active"])}
+
+    def map_action(self, version_id: str, action: str) -> dict[str, Any]:
+        operations = {
+            "pin": ManageMapVersion.Request.OP_PIN,
+            "unpin": ManageMapVersion.Request.OP_UNPIN,
+            "archive": ManageMapVersion.Request.OP_ARCHIVE,
+            "delete": ManageMapVersion.Request.OP_SOFT_DELETE,
+            "purge": ManageMapVersion.Request.OP_PURGE,
+        }
+        if action not in operations:
+            raise ValueError(f"unsupported map action: {action}")
+        result = self._manage_map(
+            operations[action],
+            version_id,
+            confirm_destructive=action in {"delete", "purge"},
+        )
+        return {**result, "action": action}
+
+    def import_map(self, values: Mapping[str, Any]) -> dict[str, Any]:
+        allowed = {
+            "map_id",
+            "map_yaml",
+            "pcd",
+            "processing_record",
+            "platform_profile",
+            "parent_map_version_id",
+        }
+        unknown = set(values) - allowed
+        required = {"map_id", "map_yaml", "pcd", "processing_record"}
+        if unknown or not required.issubset(values):
+            raise ValueError(
+                "map import requires map_id, map_yaml, pcd and processing_record; "
+                f"unknown={sorted(unknown)}"
+            )
+        result = self._manage_map(
+            ManageMapVersion.Request.OP_IMPORT_CANDIDATE, values=values
+        )
+        return {
+            "valid": result["valid"],
+            "map_id": result["map_id"],
+            "map_version_id": result["version_id"],
+            "errors": result["errors"],
+            "warnings": result["warnings"],
+        }
+
+    def experiments(self, *, state: str = "") -> list[dict[str, Any]]:
+        state_values = {
+            "": ExperimentSummary.STATE_UNKNOWN,
+            "UNKNOWN": ExperimentSummary.STATE_UNKNOWN,
+            "CREATED": ExperimentSummary.STATE_CREATED,
+            "RUNNING": ExperimentSummary.STATE_RUNNING,
+            "COMPLETED": ExperimentSummary.STATE_COMPLETED,
+            "INTERRUPTED": ExperimentSummary.STATE_INTERRUPTED,
+            "INVALID": ExperimentSummary.STATE_INVALID,
+        }
+        state_name = str(state or "").upper()
+        if state_name not in state_values:
+            raise ValueError(f"unsupported experiment state: {state}")
+        request = ListExperiments.Request()
+        request.state = state_values[state_name]
+        response = self._call_service(
+            self._experiment_list, request, "experiment list"
+        )
+        if not response.success:
+            raise RuntimeError(response.message)
+        return [self._experiment_summary(item) for item in response.experiments]
+
+    def _manage_bag(
+        self, operation: int, values: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
+        supplied = dict(values or {})
+        request = ManageBagSession.Request()
+        request.operation = int(operation)
+        request.bag_id = str(supplied.get("bag_id", ""))
+        request.experiment_id = str(supplied.get("experiment_id", ""))
+        request.experiment_title = str(
+            supplied.get("title", supplied.get("experiment_title", ""))
+        )
+        request.objective = str(supplied.get("objective", ""))
+        request.hypothesis = str(supplied.get("hypothesis", ""))
+        request.tags_json = json.dumps(
+            supplied.get("tags", []), ensure_ascii=False, allow_nan=False
+        )
+        request.operator_note = str(supplied.get("operator_note", ""))
+        request.profile_id = str(
+            supplied.get("profile_id", supplied.get("profile", ""))
+        )
+        request.playback_rate = float(
+            supplied.get("playback_rate", supplied.get("rate", 1.0)) or 1.0
+        )
+        active_map = supplied.get("active_map", {})
+        if not isinstance(active_map, Mapping):
+            raise ValueError("active_map must be an object")
+        request.map_id = str(supplied.get("map_id", active_map.get("map_id", "")))
+        request.map_version_id = str(
+            supplied.get("map_version_id", active_map.get("map_version_id", ""))
+        )
+        request.map_sha256 = str(
+            supplied.get(
+                "map_sha256",
+                active_map.get("manifest_sha256", active_map.get("map_hash", "")),
+            )
+        )
+        launch_arguments = supplied.get("launch_arguments", {})
+        if not isinstance(launch_arguments, Mapping):
+            raise ValueError("launch_arguments must be an object")
+        request.mission_id = str(
+            supplied.get("mission_id", launch_arguments.get("mission_id", ""))
+        )
+        request.mission_version = str(
+            supplied.get("mission_version", launch_arguments.get("mission_version", ""))
+        )
+        request.mission_sha256 = str(
+            supplied.get("mission_sha256", launch_arguments.get("mission_sha256", ""))
+        )
+        request.platform_profile = str(supplied.get("platform_profile", ""))
+        request.calibration_profile = str(
+            supplied.get(
+                "calibration_profile", launch_arguments.get("calibration_profile", "")
+            )
+        )
+        request.nav2_profile = str(supplied.get("nav2_profile", ""))
+        request.launch_profile = str(supplied.get("launch_profile", ""))
+        request.start_experiment = bool(supplied.get("start_experiment", False))
+        request.event_type = str(supplied.get("event_type", ""))
+        request.metadata_json = str(supplied.get("metadata_json", ""))
+        request.result_status = str(supplied.get("result_status", ""))
+        request.reason = str(supplied.get("reason", ""))
+        response = self._call_service(self._bag_manage, request, "bag manage")
+        if not response.success:
+            raise RuntimeError(response.message)
+        return self._bag_summary(response.session)
+
+    def bags(self) -> dict[str, Any]:
+        request = ListBagSessions.Request()
+        response = self._call_service(self._bag_list, request, "bag list")
+        if not response.success:
+            raise RuntimeError(response.message)
+        sessions = [self._bag_summary(item) for item in response.sessions]
+        current = self._manage_bag(ManageBagSession.Request.OP_STATUS)
+        return {
+            "bags": [item for item in sessions if item["complete"]],
+            "playback": current
+            if current["state"] in {"PLAYING", "ERROR"}
+            else {"playing": False, "state": current["state"]},
+            "recording": current
+            if current["state"] == "RECORDING"
+            else {"recording": False, "state": current["state"]},
+        }
+
+    def bag_action(
+        self, action: str, values: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
+        if action == "play":
+            return self._manage_bag(
+                ManageBagSession.Request.OP_START_PLAYBACK, values
+            )
+        if action == "stop":
+            return self._manage_bag(ManageBagSession.Request.OP_STOP_PLAYBACK, values)
+        raise ValueError(f"unsupported bag action: {action}")
+
+    def create_experiment(self, values: Mapping[str, Any]) -> dict[str, Any]:
+        result = self._manage_bag(
+            ManageBagSession.Request.OP_CREATE_EXPERIMENT,
+            {**dict(values), "start_experiment": False},
+        )
+        return {
+            "experiment_id": result["experiment_id"],
+            "state": "CREATED",
+            "message": result["message"],
+        }
+
+    def experiment_action(
+        self,
+        experiment_id: str,
+        action: str,
+        values: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        operations = {
+            "start": ManageBagSession.Request.OP_START_EXPERIMENT,
+            "event": ManageBagSession.Request.OP_ADD_EXPERIMENT_EVENT,
+            "finalize": ManageBagSession.Request.OP_COMPLETE_EXPERIMENT,
+            "invalid": ManageBagSession.Request.OP_MARK_EXPERIMENT_INVALID,
+            "start_bag": ManageBagSession.Request.OP_START_RECORDING,
+            "stop_bag": ManageBagSession.Request.OP_STOP_RECORDING,
+        }
+        if action not in operations:
+            raise ValueError(f"unsupported experiment action: {action}")
+        supplied = {**dict(values or {}), "experiment_id": experiment_id}
+        if action == "event":
+            supplied["event_type"] = str(supplied.pop("type", "operator_event"))
+            supplied["metadata_json"] = json.dumps(
+                supplied.pop("data", {}), ensure_ascii=False, allow_nan=False
+            )
+        result = self._manage_bag(operations[action], supplied)
+        states = {
+            "start": "RUNNING",
+            "event": "RUNNING",
+            "finalize": str(supplied.get("result_status", "COMPLETED")),
+            "invalid": "INVALID",
+            "start_bag": "RECORDING",
+            "stop_bag": "RUNNING",
+        }
+        return {**result, "experiment_id": experiment_id, "state": states[action]}
+
+    def execute_mission(self, values: Mapping[str, Any]) -> dict[str, Any]:
+        allowed = {"mission_id", "mission_version", "expected_content_sha256"}
+        unknown = set(values) - allowed
+        if unknown:
+            raise ValueError(f"unsupported mission fields: {sorted(unknown)}")
+        mission_id = str(values.get("mission_id", "")).strip()
+        mission_version = str(values.get("mission_version", "")).strip()
+        if not mission_id or not mission_version:
+            raise ValueError("mission_id and mission_version are required")
+        if not self._mission_action.wait_for_server(timeout_sec=2.0):
+            raise RuntimeError("mission Action is unavailable")
+        goal = ExecuteMission.Goal()
+        goal.mission_id = mission_id
+        goal.mission_version = mission_version
+        goal.expected_content_sha256 = str(
+            values.get("expected_content_sha256", "")
+        )
+
+        def feedback_callback(feedback) -> None:
+            self._mission_callback(feedback.feedback.status)
+
+        handle = self._wait(
+            self._mission_action.send_goal_async(goal, feedback_callback=feedback_callback),
+            timeout=5.0,
+        )
+        if not handle.accepted:
+            raise RuntimeError("mission Action rejected the request")
+        with self._lock:
+            self._mission_goal_handle = handle
+        handle.get_result_async().add_done_callback(self._mission_result_callback)
+        return {
+            "accepted": True,
+            "mission_id": mission_id,
+            "mission_version": mission_version,
+        }
+
+    def _mission_result_callback(self, future) -> None:
+        try:
+            wrapped = future.result()
+            result = wrapped.result
+            summary = self._mission_summary(result.final_status)
+            summary.update(
+                {
+                    "success": bool(result.success),
+                    "audit_log_uri": result.audit_log_uri,
+                    "message": result.message,
+                }
+            )
+            with self._lock:
+                self._mission_status = summary
+                self._mission_goal_handle = None
+        except Exception as exc:
+            self.get_logger().error(f"mission result failed: {exc}")
+            with self._lock:
+                self._mission_goal_handle = None
+        self._notify_status()
+
+    def set_mission_run_state(self, mission_id: str, command: str) -> dict[str, Any]:
+        commands = {
+            "pause": SetMissionRunState.Request.COMMAND_PAUSE,
+            "resume": SetMissionRunState.Request.COMMAND_RESUME,
+        }
+        if command not in commands:
+            raise ValueError(f"unsupported mission run-state command: {command}")
+        request = SetMissionRunState.Request()
+        request.command = commands[command]
+        request.mission_id = str(mission_id)
+        response = self._call_service(
+            self._mission_run_state, request, "mission run-state"
+        )
+        if not response.success:
+            raise RuntimeError(response.message)
+        return self._mission_summary(response.status)
+
+    def cancel_mission(self, mission_id: str) -> dict[str, Any]:
+        with self._lock:
+            handle = self._mission_goal_handle
+            active_id = str(self._mission_status.get("mission_id", ""))
+        if handle is None or (mission_id and active_id and mission_id != active_id):
+            raise RuntimeError("no matching active mission")
+        response = self._wait(handle.cancel_goal_async(), timeout=5.0)
+        if not response.goals_canceling:
+            raise RuntimeError("mission cancellation was not accepted")
+        return {"accepted": True, "mission_id": active_id, "state": "CANCELING"}
+
     def close(self) -> None:
         self._executor.shutdown()
         self._thread.join(timeout=2.0)
@@ -556,8 +1232,8 @@ class RosConsoleBridge(Node):
             "bag_directory": result.bag_directory,
             "registered_map_yaml": result.registered_map_yaml,
             "tasks_directory": result.tasks_directory,
-            "pgm_ready": bool(result.candidate_map_yaml and Path(result.candidate_map_yaml).is_file()),
-            "pcd_ready": bool(result.processing_record and Path(result.processing_record).is_file()),
+            "pgm_ready": bool(result.candidate_map_yaml),
+            "pcd_ready": bool(result.processing_record),
             "message": result.message,
         }
         if result.session_file:

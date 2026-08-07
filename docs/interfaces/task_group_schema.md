@@ -16,10 +16,13 @@ runtime/maps/<map_id>/versions/<map_version_id>/tasks/
   <task_group_id>.json.bak.1
 ```
 
-The task file stores paths relative to the map version where possible. A Qt
-frontend may resolve the file to an absolute path only when sending the Action.
-The repository writes a flushed temporary file, fsyncs it, and atomically
-renames it. Existing files are retained as numbered backups.
+Task JSON is the content authority. `task_index.json` is a rebuildable index.
+The robot-side Task Registry resolves every path from `map_id`,
+`map_version_id`, and `task_group_id`; clients are not allowed to submit arbitrary
+file paths for formal execution. The repository writes a flushed temporary file,
+fsyncs it, and atomically renames it. Existing files are retained as numbered
+backups, and archive moves remove active task files without mutating READY
+PGM/YAML/PCD assets.
 
 ## Contract
 
@@ -48,9 +51,12 @@ canonical footprint check.
 
 At runtime a schema-v1 task additionally requires independently observed active
 map ID/version, YAML/image hashes, and the localization PCD hash. The server
-does not fill missing active identity from the task document. Legacy points
-JSON has no binding and retains the compatibility boundary documented for the
-Action.
+does not fill missing active identity from the task document. Formal execution
+loads by task identity and verifies `revision` plus `content_sha256`; stale
+revision, missing task JSON, missing content hash, or mismatched content hash is
+terminal and does not start Nav2. Legacy points JSON has no binding and remains
+available only through the deprecated same-machine `task_file` compatibility
+boundary documented for the Action.
 
 ## Example
 
@@ -83,6 +89,8 @@ Action.
 }
 ```
 
-Legacy Qt JSON containing `points[].theta` remains accepted by the Action
-server. Importing it into the task library generates stable IDs, requires an
+Legacy Qt JSON containing `points[].theta` remains importable by the Task Library.
+Direct Action execution of that file requires `allow_legacy_local_task_file:=true`
+and a path below the configured `runtime/maps` root; Qt/Web navigation profiles do
+not use it. Importing it into the task library generates stable IDs, requires an
 explicit current map binding, and never overwrites the source file.

@@ -184,6 +184,14 @@ def prepare_runtime_config(
         defaults["TaskLibraryEnabled"] = task_library_enabled
     profile_owned_keys = {
         "EnableTaskExecution",
+        "EnableLegacyWaypointExecution",
+        "EnableMissionExecution",
+        "EnableSystemModeControl",
+        "EnableDebugGoalPose",
+        "EnableMappingSessionControl",
+        "EnableRelocalization",
+        "EnableMapManager",
+        "EnableBagManager",
         "EnableCostmapDisplay",
         "EnableOfflinePlanningPreview",
         "EnableManualControl",
@@ -192,6 +200,13 @@ def prepare_runtime_config(
         "EnableMapOpen",
         "EnableLegacyTopologyTasks",
         "TaskLibraryEnabled",
+        "ShowOverviewPage",
+        "ShowPlatformPage",
+        "ShowMappingPage",
+        "ShowTeachTuningPage",
+        "ShowNavigationMissionPage",
+        "ShowMapTaskPage",
+        "ShowDiagnosticsPage",
     }
     for key, value in defaults.items():
         if key in profile_owned_keys:

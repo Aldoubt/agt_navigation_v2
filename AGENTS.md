@@ -1,12 +1,15 @@
 # AGENTS.md
 
 ## Scope
-- Current stage: `Bunker Qt5 FAST-LIO Navigation Baseline Integration`.
-- Integrate one Bunker baseline data chain at a time: MID360/FAST-LIVO2 mapping,
-  2D map production, Qt5 operation, map persistence, PCD relocalization, Nav2,
-  safety, and chassis output.
-- Semantic-map, Keepout, Fields2Cover, and coverage-planning code stays present but
-  is not developed or refactored in this stage.
+- Current stage: `AGT Navigation V2.5 Mission Architecture Integration`.
+- Primary target: complete the first production-style BehaviorTree mission by
+  composing existing project Actions and system readiness contracts without
+  bypassing localization, Nav2, safety, TF ownership, or chassis boundaries.
+- The delivery line is V2.5 -> P0 First BT Mission -> P1 Robust Localization /
+  Local Mapping -> P2 Long-term Agricultural Navigation Research.
+- Existing mapping, localization, semantic-map, coverage, Qt5, Web, safety, and
+  chassis capabilities remain in scope as interfaces and runtime foundations;
+  their status is recorded in `docs/roadmap/`.
 
 ## Hard Rules
 - Migrate one module or one data chain at a time.
@@ -20,7 +23,42 @@
   Bunker driver.
 - Semantic-map and coverage-planning launch arguments must default to `false`.
 - Do not modify validated parameters or datasets from the legacy repository without explicit approval.
-- Every change that affects architecture or interfaces must update `docs/`, this file, and `docs/migration/migration_matrix.md`.
+- ROS 2 managers are the only real business backend. Qt5 and Web are clients and must not own
+  system mode, mission, active-map, experiment, bag-process, safety, or chassis state.
+- `agt_map_manager` is the only runtime owner of `MapRegistry` mutations and active-map
+  publication. Managed mapping imports, activates, and cleans failed versions through
+  `/agt/maps/manage`; consumers must use the returned asset paths instead of reconstructing them.
+- `agt_experiment_manager` is the only runtime owner of rosbag record/playback processes.
+  Managed mapping creates an experiment and starts the explicit `mapping` profile through
+  `/agt/data/bags/manage`; the legacy launch recorder remains compatibility-only.
+- `agt_mission_manager` may sequence only project Actions and finite waits. It must not call Nav2
+  native Actions, start launch files, publish velocity/TF, or infer completion from distance or time.
+- `/agt/system/robot_state` is a read model, not a new business owner. Unknown or stale evidence
+  remains UNKNOWN, and active map identity comes only from `agt_map_manager`.
+- Direct `agt_bringup/system.launch.py` mapping/navigation starts must include the shared business
+  read-model backends needed by Qt/Web clients: `agt_map_manager` for `/agt/maps/active`,
+  `agt_system_manager` health/readiness, `agt_robot_state_aggregator`, and `agt_mission_manager`.
+  Disabling this group is only for an outer manager profile that already owns those nodes.
+- Architecture/interface changes must update the authoritative V2.5 documents:
+  `docs/architecture/system_architecture.md`,
+  `docs/interfaces/topic_contract.md`, and `docs/roadmap/v2_5.md`, plus any
+  directly affected package/interface documentation.
+
+## Mission Hard Rules
+- Behavior Tree nodes must not publish chassis or navigation velocity.
+- Behavior Tree nodes must not publish TF.
+- Behavior Tree nodes must not implement localization, mapping, planning, or
+  perception algorithms.
+- Mission logic must call project-owned Actions or Services.
+- Continuously running sensor, localization, perception, mapping, safety, and
+  chassis nodes remain outside the BT.
+- BT Conditions consume structured machine-readable status, preferably
+  `TaskReadiness` or `SystemHealth`, rather than raw sensor streams.
+- Project Actions remain the stable capability boundary between mission logic
+  and algorithm implementations.
+- `docs/interfaces/topic_contract.md` is the only topic source of truth. The canonical registered
+  cloud is `/agt/mapping/registered_points`; `registered_cloud`, `/agt/mapping/registered_points_lidar`,
+  and `/agt/mapping/registered_cloud` are historical names and must not be used by runtime code.
 - The raw MID360 `/agt/sensors/lidar/custom` topic is preserved. In the normal baseline FAST-LIVO2
   consumes only the profile-driven `/agt/sensors/lidar/custom_filtered` output from
   `agt_livox_self_filter`; an explicit A/B baseline may disable the filter and fall back to raw input.
@@ -136,6 +174,15 @@
 - The maintained Qt fork is a frontend only. Its native Start/Stop controls must call the project Action and display Action feedback/result; pose-distance polling is forbidden as an execution-success test.
 - Qt-compatible task JSON is operator input only. Portable frontends may submit `map`-frame PoseStamped arrays instead. Project-owned execution must validate finite coordinates, point count, repeated append patterns, and every waypoint against the currently published OccupancyGrid before sending motion goals.
 - `/agt/navigation/execute_waypoint_task` is the project-owned `ExecuteWaypointTask` action. It may dispatch only Nav2 `FollowWaypoints`; it must not publish velocity or enable `agt_safety`.
+- Formal waypoint execution uses robot-side task identity, not frontend file paths:
+  clients submit `map_id`, `map_version_id`, `task_group_id`, `task_revision`,
+  `expected_content_sha256`, finite `loop_count`, and `client_request_id`.
+  `agt_navigation` Task Registry resolves `runtime/maps/<map_id>/versions/<map_version_id>/tasks/`
+  and verifies revision/content hash before Nav2 dispatch.
+- `/agt/navigation/session_status` and `/agt/navigation/session/get` are the robot-side
+  waypoint execution session authority. Qt/Web disconnects must not cancel a running task;
+  reconnecting clients recover current point, total points, missed waypoints, and terminal blocker from the session.
+- Deprecated `task_file` execution is same-machine CLI/debug only, disabled by default, and when enabled must stay below the configured `runtime/maps` root.
 - A task succeeds only when the Nav2 child Action succeeds with no missed waypoints. Rejection, abort, missed waypoints, stale safety state, map mismatch, cancellation, and unexpected exceptions are terminal failures.
 - Looping must be explicit and finite. Zero-count or unbounded loops are forbidden.
 - Parent cancellation and loss of recent `agt_safety` motion readiness must cancel the active Nav2 child before the project task finishes.
@@ -174,6 +221,11 @@
   segment and a terminal success/failure on its advisory status topic; every
   ComputePathToPose segment has a positive finite timeout and failure clears
   `/plan`.
+- Offline multi-segment preview must start each later ComputePathToPose request
+  from the previous segment's actual returned endpoint. A planner tolerance may
+  adjust an intermediate task point; restarting from the original point may
+  create a disconnected preview or a false lethal-start failure. This continuity
+  rule must not mutate saved task points or convert preview into execution approval.
 - Consecutive waypoint poses are ordered Nav2 goals, not a required straight-line
   path. Save-time validation checks each enabled endpoint against the base raster
   but must not reject a task because the visual chord crosses occupied or unknown
@@ -322,6 +374,10 @@
 - Web control may call only generated project ROS interfaces and configured
   map/experiment services. It must never accept or execute arbitrary shell,
   publish final `/cmd_vel`, publish TF, or bypass `agt_safety`.
+- The real Web backend is only an HTTP/WebSocket adapter over `RosConsoleBridge`.
+  It must not instantiate `MapRegistry` or `ExperimentManager`, inspect manager
+  manifests/process snapshots, or own Mission, map, experiment, or Bag state.
+  RobotState and MissionStatus are its primary live WebSocket read models.
 - `ChangeSystemMode` profiles are argv allowlists. Profile arguments are
   validated against declared keys; browser input is never a command string.
   Managed processes use their own process group and only processes created by
@@ -332,6 +388,15 @@
 - `TaskReadiness` is the shared fail-closed gate. Waypoint and future task
   servers must check it at goal acceptance and again during execution; a GUI
   button is never an authorization boundary.
+- `agt_mission_manager` sequences only finite `WAYPOINT_TASK`, `WAIT_DURATION`,
+  and `WAIT_EVENT` steps. It calls only the project waypoint Action, never Nav2
+  native Actions, launch files, TF, safety enablement, or velocity topics. Parent
+  pause/cancel waits for child cancel confirmation; resume revalidates active-map,
+  localization, and TaskReadiness evidence.
+- `/agt/system/robot_state` is a freshness-aware read model for clients, not a
+  business owner. Active-map identity comes only from `/agt/maps/active`; missing
+  or stale lifecycle, safety, chassis, localization, readiness, and mission
+  evidence remains UNKNOWN or blocked.
 - Runtime map versions are immutable bundles under
   `runtime/maps/<map_id>/versions/<map_version_id>/`. `manifest.yaml` is the
   portable source of truth; SQLite is rebuildable index data. Activation
@@ -357,7 +422,7 @@
   one in-memory retained map slot. Backend switching requires all managed
   modules to be stopped.
 - The Web console's mapping state is evidence-based: `MAPPING` requires fresh
-  `/agt/mapping/odometry` and `/agt/mapping/registered_points_lidar`; the
+  `/agt/mapping/odometry` and `/agt/mapping/registered_points`; the
   `/agt/map/mapping_occupancy` snapshot uses matching `RELIABLE +
   TRANSIENT_LOCAL` QoS and is persistent rather than a three-second periodic
   observation. Its occupancy preview is bounded,
@@ -400,7 +465,8 @@
   the session plus any failed version to recoverable trash. Offline
   retain/delete remains simulation-only and writes no real assets.
 - Web navigation startup requires an active `READY` map version and derives
-  `map`, localization PCD, and processing-record arguments from its manifest.
+  `map`, localization PCD, and processing-record arguments from the map manager
+  response.
   Browser-supplied asset paths must match the selected version or the service
   rejects the request.
 - `agt_chassis` currently exposes the `bunker_can` backend. `operation_mode:=monitor`

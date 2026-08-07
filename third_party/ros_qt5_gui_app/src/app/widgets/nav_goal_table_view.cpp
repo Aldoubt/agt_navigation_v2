@@ -262,6 +262,7 @@ void NavGoalTableView::StopTaskChain() {
 
 void NavGoalTableView::UpdateTaskExecutionStatus(
     const TaskExecutionStatus &status) {
+  if (status.state == "IDLE") return;
   const int current = static_cast<int>(status.current_waypoint);
   for (int row = 0; row < table_model_->rowCount(); ++row) {
     auto *label = qobject_cast<QLabel *>(indexWidget(model()->index(row, 1)));

@@ -207,7 +207,7 @@ ros2 service call /agt/safety/set_motion_enabled \
 
 ```bash
 ros2 topic hz /agt/mapping/odometry
-ros2 topic hz /agt/mapping/registered_points_lidar
+ros2 topic hz /agt/mapping/registered_points
 ros2 run tf2_ros tf2_echo odom base_footprint
 ```
 

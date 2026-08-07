@@ -1,0 +1,15 @@
+{
+  "id": "agt-dark",
+  "name": "AGT Dark",
+  "tokens": {
+    "background": "#171a1f",
+    "surface": "#23272f",
+    "text": "#f2f4f7",
+    "mutedText": "#98a2b3",
+    "border": "#475467",
+    "accent": "#4db3d3",
+    "success": "#58c48d",
+    "warning": "#f5bf4f",
+    "danger": "#f97066"
+  }
+}

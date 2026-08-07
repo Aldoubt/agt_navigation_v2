@@ -8,7 +8,9 @@
 #include <QTemporaryDir>
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <string>
 
 #include "map/occupancy_map.h"
 
@@ -184,6 +186,31 @@ TEST(TaskEditorState, SubmissionIsFailClosed) {
       task_group::BindingState::GeometryMismatch));
   EXPECT_EQ(task_group::bindingStateText(task_group::BindingState::ContentChanged),
             "CONTENT_CHANGED");
+}
+
+TEST(TaskExecutionRequest, CarriesRegistryIdentityNotLocalPath) {
+  auto value = task();
+  value.revision = 3;
+  value.content_sha256 = value.canonicalHash();
+
+  TaskExecutionRequest request;
+  request.map_id = value.map_binding.map_id.toStdString();
+  request.map_version_id = value.map_binding.map_version_id.toStdString();
+  request.task_group_id = value.task_group_id.toStdString();
+  request.task_revision = static_cast<std::uint32_t>(value.revision);
+  request.expected_content_sha256 = value.content_sha256.toStdString();
+  request.client_request_id = "11111111-1111-4111-8111-111111111111";
+  request.task_json = QJsonDocument(value.toJson())
+                          .toJson(QJsonDocument::Compact)
+                          .toStdString();
+
+  EXPECT_EQ(request.map_id, "site");
+  EXPECT_EQ(request.map_version_id, "map_v1");
+  EXPECT_EQ(request.task_group_id, "inspection_v01");
+  EXPECT_EQ(request.task_revision, static_cast<std::uint32_t>(3));
+  EXPECT_FALSE(request.expected_content_sha256.empty());
+  EXPECT_NE(request.task_json.find("\"task_group_id\""), std::string::npos);
+  EXPECT_EQ(request.task_json.find("/tmp/"), std::string::npos);
 }
 
 TEST(TaskValidator, ChecksWaypointCellsWithoutTreatingChordsAsRoutes) {

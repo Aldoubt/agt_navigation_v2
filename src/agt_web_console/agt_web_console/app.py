@@ -162,6 +162,27 @@ def create_app(service: WebConsoleService):
         except (ValueError, RuntimeError) as error:
             raise HTTPException(status_code=400, detail=str(error)) from error
 
+    @app.get("/api/v1/missions/status")
+    def mission_status(x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        return service.mission_status()
+
+    @app.post("/api/v1/missions/execute")
+    def execute_mission(body: dict[str, Any], x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        try:
+            return service.execute_mission(body)
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
+    @app.post("/api/v1/missions/{mission_id}/{action}")
+    def mission_action(mission_id: str, action: str, x_agt_token: str | None = Header(default=None)):
+        authorize(x_agt_token)
+        try:
+            return service.mission_action(mission_id, action)
+        except (ValueError, RuntimeError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
+
     @app.post("/api/v1/localization/mode")
     def localization_mode(body: dict[str, Any], x_agt_token: str | None = Header(default=None)):
         authorize(x_agt_token)

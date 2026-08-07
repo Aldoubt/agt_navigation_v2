@@ -37,7 +37,7 @@ class AutomaticRelocalization(Node):
             self.declare_parameter("server_wait_timeout_s", 15.0).value
         )
         self._cloud_topic = self.declare_parameter(
-            "cloud_topic", "/agt/mapping/registered_points_lidar"
+            "cloud_topic", "/agt/mapping/registered_points"
         ).value
         self._action_timeout_s = float(
             self.declare_parameter("action_timeout_s", 30.0).value

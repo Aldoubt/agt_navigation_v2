@@ -12,6 +12,7 @@ install(PROGRAMS
   scripts/mapping_session_manager.py
   scripts/mapping_session_workflow.py
   scripts/relocalization_mode_controller.py
+  scripts/robot_state_aggregator.py
   scripts/health_smoke.py
   scripts/teach_mapping_workflow.py
   DESTINATION lib/${PROJECT_NAME}
@@ -30,6 +31,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_localization_mode test/test_localization_mode.py)
   ament_add_pytest_test(test_teach_mapping test/test_teach_mapping.py)
   ament_add_pytest_test(test_mapping_session test/test_mapping_session.py)
+  ament_add_pytest_test(test_robot_state test/test_robot_state.py)
 endif()
 
 ament_package()

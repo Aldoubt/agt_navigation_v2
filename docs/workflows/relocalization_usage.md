@@ -124,7 +124,7 @@ ros2 bag play runtime/rosbag/Benchmark-BAG-260725 --clock
 ## 自动重定位
 
 自动模式是一个启动后只发送一次的、有候选上限和超时的 `Relocalize` Action 请求。客户端会
-先等待首帧 `/agt/mapping/registered_points_lidar` 和 Action Server，满足后才发送请求。它按
+先等待首帧 `/agt/mapping/registered_points` 和 Action Server，满足后才发送请求。它按
 顺序使用以下可选来源：
 
 - 带当前 `map_id`/`map_hash` 的 `last_valid_pose.yaml`；
@@ -235,7 +235,7 @@ supervisor、TF 和 Nav2/safety gate。自动模式也不会把“Action Server 
 ```bash
 ros2 topic echo /agt/localization/status --once
 ros2 topic echo /agt/localization/status_text --once
-ros2 topic info /agt/mapping/registered_points_lidar -v
+ros2 topic info /agt/mapping/registered_points -v
 ros2 run tf2_ros tf2_echo odom base_footprint
 ros2 service call /agt/safety/set_motion_enabled std_srvs/srv/SetBool '{data: false}'
 ```

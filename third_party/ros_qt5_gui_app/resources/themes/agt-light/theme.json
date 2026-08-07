@@ -1,0 +1,15 @@
+{
+  "id": "agt-light",
+  "name": "AGT Light",
+  "tokens": {
+    "background": "#f2f4f7",
+    "surface": "#ffffff",
+    "text": "#20242a",
+    "mutedText": "#667085",
+    "border": "#d0d5dd",
+    "accent": "#176b87",
+    "success": "#287a4b",
+    "warning": "#9a6700",
+    "danger": "#b42318"
+  }
+}

@@ -8,8 +8,6 @@ import re
 import threading
 from typing import Any, Callable, Mapping
 
-import yaml
-
 
 @dataclass(frozen=True)
 class WebConsoleConfig:
@@ -45,9 +43,9 @@ class WebConsoleService:
         chassis_provider: Callable[[], Mapping[str, Any]] | None = None,
         mapping_session_controller: Any = None,
         mode_controller: Any = None,
-        map_registry: Any = None,
-        experiment_manager: Any = None,
-        bag_profiles: Mapping[str, Any] | None = None,
+        business_controller: Any = None,
+        robot_state_provider: Callable[[], Mapping[str, Any]] | None = None,
+        mission_provider: Callable[[], Mapping[str, Any]] | None = None,
         localization_controller: Any = None,
         backends: Mapping[str, Mapping[str, Any]] | None = None,
     ) -> None:
@@ -62,9 +60,9 @@ class WebConsoleService:
         self.chassis_provider = chassis_provider or (lambda: {})
         self.mapping_session_controller = mapping_session_controller
         self.mode_controller = mode_controller
-        self.map_registry = map_registry
-        self.experiment_manager = experiment_manager
-        self.bag_profiles = dict(bag_profiles or {})
+        self.business_controller = business_controller
+        self.robot_state_provider = robot_state_provider or (lambda: {})
+        self.mission_provider = mission_provider or (lambda: {"state": "IDLE"})
         self.localization_controller = localization_controller
         self._backend_options = {"ros": {
             "health_provider": default_health_provider,
@@ -74,6 +72,9 @@ class WebConsoleService:
             "chassis_provider": self.chassis_provider,
             "mapping_session_controller": mapping_session_controller,
             "mode_controller": mode_controller,
+            "business_controller": business_controller,
+            "robot_state_provider": self.robot_state_provider,
+            "mission_provider": self.mission_provider,
             "localization_controller": localization_controller,
         }}
         for backend_name, backend in (backends or {}).items():
@@ -116,6 +117,8 @@ class WebConsoleService:
             "health": dict(self.health_provider()),
             "task_readiness": dict(self.readiness_provider()),
             "localization": self.localization_controller.localization() if self.localization_controller and hasattr(self.localization_controller, "localization") else {},
+            "robot_state": dict(self.robot_state_provider()),
+            "mission": dict(self.mission_provider()),
             "maps": self.maps(),
             "experiments": self.experiments(),
             "mode": self.mode_status(),
@@ -142,6 +145,9 @@ class WebConsoleService:
         self.chassis_provider = option.get("chassis_provider", self.chassis_provider)
         self.mapping_session_controller = option.get("mapping_session_controller")
         self.mode_controller = option.get("mode_controller")
+        self.business_controller = option.get("business_controller")
+        self.robot_state_provider = option.get("robot_state_provider", lambda: {})
+        self.mission_provider = option.get("mission_provider", lambda: {"state": "IDLE"})
         self.localization_controller = option.get("localization_controller")
 
     def publish_backend(self, backend: str, event: Mapping[str, Any]) -> None:
@@ -158,7 +164,11 @@ class WebConsoleService:
             if backend == self._backend_mode:
                 return self.runtime_status()
             current_status = self.mode_status()
-            if current_status.get("processes") or self._playback_status().get("playing"):
+            if (
+                str(current_status.get("active_mode", "IDLE")).upper() != "IDLE"
+                or current_status.get("processes")
+                or self._playback_status().get("playing")
+            ):
                 raise RuntimeError("请先停止当前后端管理的模块和 bag 回放，再切换运行后端")
             self._backend_mode = backend
             self._apply_backend(backend)
@@ -185,16 +195,13 @@ class WebConsoleService:
     def _playback_status(self) -> dict[str, Any]:
         if self._backend_mode == "offline" and self.mode_controller is not None and hasattr(self.mode_controller, "playback_status"):
             return dict(self.mode_controller.playback_status())
-        if self.experiment_manager is not None and hasattr(self.experiment_manager, "playback_status"):
-            return dict(self.experiment_manager.playback_status())
+        if self.business_controller is not None and hasattr(self.business_controller, "bags"):
+            return dict(self.business_controller.bags().get("playback", {}))
         return {"playing": False}
 
     @staticmethod
     def _valid_map_name(map_name: str) -> bool:
         return bool(re.fullmatch(r"[A-Za-z0-9_-]+", map_name))
-
-    def _mapping_session_root(self) -> Path:
-        return Path(self.config.runtime_dir).expanduser().resolve() / "mapping_sessions"
 
     def _discover_mapping_session(self, backend: str | None = None) -> dict[str, Any] | None:
         expected_offline = backend == "offline" if backend is not None else None
@@ -202,21 +209,6 @@ class WebConsoleService:
             expected_offline is None or bool(self._mapping_session.get("offline", False)) == expected_offline
         ):
             return self._mapping_session
-        root = self._mapping_session_root()
-        candidates = sorted(root.glob("*/**/session.yaml"), key=lambda path: path.stat().st_mtime, reverse=True)
-        for path in candidates:
-            try:
-                with open(path, "r", encoding="utf-8") as stream:
-                    session = yaml.safe_load(stream) or {}
-                if not isinstance(session, dict) or not session.get("map_name"):
-                    continue
-                if expected_offline is not None and bool(session.get("offline", False)) != expected_offline:
-                    continue
-                session["session_file"] = str(path)
-                self._mapping_session = session
-                return session
-            except (OSError, TypeError, yaml.YAMLError):
-                continue
         return None
 
     def mapping_session_status(self) -> dict[str, Any]:
@@ -303,39 +295,27 @@ class WebConsoleService:
         return response
 
     def _validate_navigation_selection(self, arguments: Mapping[str, Any]) -> None:
-        if self.map_registry is None:
-            raise RuntimeError("地图版本管理器不可用")
         version_id = str(arguments.get("map_version_id", "")).strip()
         if not version_id:
             raise ValueError("启动导航前必须选择一个地图版本")
-        row = self.map_registry._row(version_id)
+        row = next(
+            (item for item in self.maps() if item.get("version_id") == version_id),
+            None,
+        )
+        if row is None:
+            raise ValueError("选择的地图版本不存在")
         if int(row.get("deleted", 0)) or str(row.get("state", "")).upper() != "READY":
             raise ValueError("选择的地图版本不是 READY 状态")
         if not int(row.get("active", 0)):
             raise ValueError("请先在地图版本管理中激活选择的地图版本")
-        details = self._map_asset_paths(row)
+        details = row.get("assets", {})
+        if not isinstance(details, Mapping):
+            raise ValueError("地图管理器未返回版本资产")
         for key in ("map", "global_map_pcd", "global_map_processing_record"):
-            if str(arguments.get(key, "")).strip() != details[key]:
+            if not details.get(key) or str(arguments.get(key, "")).strip() != str(
+                details.get(key, "")
+            ):
                 raise ValueError("导航参数与所选地图版本资产不一致")
-
-    def _map_asset_paths(self, row: Mapping[str, Any]) -> dict[str, str]:
-        manifest_path = Path(str(row["manifest_path"])).resolve()
-        with open(manifest_path, "r", encoding="utf-8") as stream:
-            manifest = yaml.safe_load(stream) or {}
-        assets = manifest.get("assets", {})
-        root = manifest_path.parent
-        result = {}
-        for asset_id, output_key in (("navigation_yaml", "map"), ("localization_pcd", "global_map_pcd"), ("processing_record", "global_map_processing_record")):
-            raw = assets.get(asset_id, {})
-            path = (root / str(raw.get("path", ""))).resolve()
-            try:
-                path.relative_to(root)
-            except ValueError as error:
-                raise ValueError("地图资产路径越出版本目录") from error
-            if not path.is_file():
-                raise ValueError(f"地图资产不存在: {asset_id}")
-            result[output_key] = str(path)
-        return result
 
     def set_mode(self, profile: str, arguments: Mapping[str, Any] | None = None) -> dict[str, Any]:
         if not isinstance(profile, str) or not profile or any(char in profile for char in "\x00\r\n"):
@@ -428,84 +408,61 @@ class WebConsoleService:
         return response
 
     def maps(self, **filters: Any) -> list[dict[str, Any]]:
-        if self.map_registry is None:
+        if self._backend_mode == "offline":
             return []
-        result = []
-        for row in self.map_registry.list_versions(**filters):
-            item = dict(row)
-            try:
-                item["assets"] = self._map_asset_paths(row)
-            except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError):
-                item["assets"] = {}
-            result.append(item)
-        return result
+        if self.business_controller is None:
+            raise RuntimeError("business ROS bridge is unavailable")
+        return [dict(item) for item in self.business_controller.maps(**filters)]
 
     def validate_map(self, version_id: str) -> dict[str, Any]:
-        if self.map_registry is None:
-            raise RuntimeError("map registry is unavailable")
-        row = self.map_registry._row(version_id)
-        result = self.map_registry.validate_manifest(row["manifest_path"])
-        return {"valid": result.valid, "map_id": result.map_id, "map_version_id": result.map_version_id, "errors": list(result.errors), "warnings": list(result.warnings), "asset_hashes": dict(result.asset_hashes), "map_hash": result.map_hash}
+        if self._backend_mode == "offline" or self.business_controller is None:
+            raise RuntimeError("离线模式不能校验真实地图版本")
+        return dict(self.business_controller.validate_map(version_id))
 
     def activate_map(self, version_id: str) -> dict[str, Any]:
-        if self.map_registry is None:
-            raise RuntimeError("map registry is unavailable")
-        result = self.map_registry.activate(version_id)
-        response = self.validate_map(version_id)
-        response["activated"] = result.valid
+        if self._backend_mode == "offline" or self.business_controller is None:
+            raise RuntimeError("离线模式不能激活真实地图版本")
+        response = dict(self.business_controller.activate_map(version_id))
         self._audit("map_activate", {"version_id": version_id, "result": response})
         return response
 
     def map_action(self, version_id: str, action: str) -> dict[str, Any]:
-        if self.map_registry is None:
-            raise RuntimeError("map registry is unavailable")
-        if action == "pin":
-            self.map_registry.set_pinned(version_id, True)
-        elif action == "unpin":
-            self.map_registry.set_pinned(version_id, False)
-        elif action == "archive":
-            self.map_registry.archive(version_id)
-        elif action == "delete":
-            response = {"deleted_path": str(self.map_registry.soft_delete(version_id))}
-            self._audit("map_delete", {"version_id": version_id, "result": response})
-            return response
-        elif action == "purge":
-            self.map_registry.purge(version_id)
-        else:
-            raise ValueError(f"unsupported map action: {action}")
-        response = {"version_id": version_id, "action": action}
+        if self._backend_mode == "offline" or self.business_controller is None:
+            raise RuntimeError("离线模式不能修改真实地图版本")
+        response = dict(self.business_controller.map_action(version_id, action))
         self._audit(f"map_{action}", response)
         return response
 
     def import_map(self, values: Mapping[str, Any]) -> dict[str, Any]:
-        if self.map_registry is None:
-            raise RuntimeError("map registry is unavailable")
-        allowed = {"map_id", "map_yaml", "pcd", "processing_record", "platform_profile"}
-        unknown = set(values) - allowed
-        required = {"map_id", "map_yaml", "pcd", "processing_record"}
-        if unknown or not required.issubset(values):
-            raise ValueError(f"map import requires map_id, map_yaml, pcd and processing_record; unknown={sorted(unknown)}")
-        result = self.map_registry.import_legacy(**dict(values))
-        response = {"valid": result.valid, "map_id": result.map_id, "map_version_id": result.map_version_id, "errors": list(result.errors), "warnings": list(result.warnings)}
+        if self._backend_mode == "offline" or self.business_controller is None:
+            raise RuntimeError("离线模式不能导入真实地图版本")
+        response = dict(self.business_controller.import_map(values))
         self._audit("map_import", response)
         return response
 
     def experiments(self, **filters: Any) -> list[dict[str, Any]]:
-        if self.experiment_manager is None:
+        if self._backend_mode == "offline":
             return []
-        return [dict(item) for item in self.experiment_manager.list(**filters)]
+        if self.business_controller is None:
+            raise RuntimeError("business ROS bridge is unavailable")
+        return [
+            dict(item) for item in self.business_controller.experiments(**filters)
+        ]
 
     def bags(self) -> dict[str, Any]:
-        if self.experiment_manager is None or not hasattr(self.experiment_manager, "list_bags"):
-            return {"bags": [], "playback": {"playing": False}}
-        return {
-            "bags": [dict(item) for item in self.experiment_manager.list_bags()],
-            "playback": self._playback_status(),
-        }
+        if self._backend_mode == "offline":
+            bags = (
+                self.mode_controller.list_bags()
+                if self.mode_controller is not None
+                and hasattr(self.mode_controller, "list_bags")
+                else []
+            )
+            return {"bags": bags, "playback": self._playback_status()}
+        if self.business_controller is None:
+            raise RuntimeError("business ROS bridge is unavailable")
+        return dict(self.business_controller.bags())
 
     def bag_action(self, action: str, values: Mapping[str, Any] | None = None) -> dict[str, Any]:
-        if self.experiment_manager is None:
-            raise RuntimeError("experiment manager is unavailable")
         values = dict(values or {})
         if self._backend_mode == "offline":
             if self.mode_controller is None or not hasattr(self.mode_controller, "start_playback"):
@@ -519,9 +476,9 @@ class WebConsoleService:
             response = dict(result)
             self._audit(f"offline_bag_{action}", {"request": values, "result": response})
             return response
+        if self.business_controller is None:
+            raise RuntimeError("business ROS bridge is unavailable")
         if action == "play":
-            if not hasattr(self.experiment_manager, "start_playback"):
-                raise RuntimeError("bag playback is unavailable")
             active_mode = str(self.mode_status().get("active_mode", "IDLE")).upper()
             requested_profile = str(values.get("playback_profile", "")).strip()
             if active_mode == "MAPPING":
@@ -536,15 +493,11 @@ class WebConsoleService:
                 raise RuntimeError("导航模式运行期间禁止回放 bag，避免覆盖导航、TF 或定位输出")
             else:
                 playback_profile = requested_profile or "all"
-            result = self.experiment_manager.start_playback(
-                str(values.get("bag_id", "")),
-                rate=values.get("rate", 1.0),
-                playback_profile=playback_profile,
-            )
+            values["playback_profile"] = playback_profile
+            values["profile_id"] = playback_profile
+            result = self.business_controller.bag_action("play", values)
         elif action == "stop":
-            if hasattr(self.experiment_manager, "stop_playback"):
-                self.experiment_manager.stop_playback()
-            result = {"state": "STOPPED"}
+            result = self.business_controller.bag_action("stop", values)
         else:
             raise ValueError("unsupported bag action")
         response = dict(result)
@@ -552,47 +505,49 @@ class WebConsoleService:
         return response
 
     def create_experiment(self, values: Mapping[str, Any]) -> dict[str, Any]:
-        if self.experiment_manager is None:
-            raise RuntimeError("experiment manager is unavailable")
+        if self._backend_mode == "offline" or self.business_controller is None:
+            raise RuntimeError("离线模式不能创建真实实验记录")
         allowed = {"title", "objective", "hypothesis", "tags", "operator_note", "platform_profile", "active_map", "launch_profile", "launch_arguments"}
         unknown = set(values) - allowed
         if unknown:
             raise ValueError(f"unknown experiment fields: {sorted(unknown)}")
-        experiment_id = self.experiment_manager.create(**dict(values))
-        response = {"experiment_id": experiment_id, "state": "CREATED"}
+        response = dict(self.business_controller.create_experiment(values))
         self._audit("experiment_create", response)
         return response
 
     def experiment_action(self, experiment_id: str, action: str, values: Mapping[str, Any] | None = None) -> dict[str, Any]:
-        if self.experiment_manager is None:
-            raise RuntimeError("experiment manager is unavailable")
-        if self._backend_mode == "offline" and action in {"start_bag", "stop_bag"}:
-            raise RuntimeError("离线测试模式不启动或停止 rosbag；请切换到 ROS 2 后端")
-        values = dict(values or {})
-        if action == "start":
-            result = self.experiment_manager.start(experiment_id, values.get("health"))
-        elif action == "event":
-            self.experiment_manager.add_event(experiment_id, str(values.get("type", "operator_event")), values.get("data", {}))
-            result = {"state": "RUNNING"}
-        elif action == "finalize":
-            result = self.experiment_manager.finalize(experiment_id, values.get("health"), str(values.get("result_status", "COMPLETED")))
-        elif action == "invalid":
-            self.experiment_manager.mark_invalid(experiment_id, str(values.get("reason", "operator marked invalid")))
-            result = {"state": "INVALID"}
-        elif action == "start_bag":
-            profile_id = str(values.get("profile", "minimal"))
-            profile = self.bag_profiles.get(profile_id)
-            if not isinstance(profile, Mapping):
-                raise ValueError(f"unknown bag profile: {profile_id}")
-            bag_path = self.experiment_manager.start_bag(experiment_id, profile_id, profile)
-            result = {"state": "RECORDING", "profile": profile_id, "path": str(bag_path)}
-        elif action == "stop_bag":
-            self.experiment_manager.stop_bag(experiment_id)
-            result = {"state": "RUNNING", "bag": self.experiment_manager.bag_status() if hasattr(self.experiment_manager, "bag_status") else {}}
-        else:
-            raise ValueError(f"unsupported experiment action: {action}")
-        response = dict(result if isinstance(result, Mapping) else {"result": result})
+        if self._backend_mode == "offline" or self.business_controller is None:
+            raise RuntimeError("离线模式不能修改真实实验或启动 rosbag")
+        response = dict(
+            self.business_controller.experiment_action(
+                experiment_id, action, dict(values or {})
+            )
+        )
         self._audit(f"experiment_{action}", {"experiment_id": experiment_id, "result": response})
+        return response
+
+    def mission_status(self) -> dict[str, Any]:
+        return dict(self.mission_provider())
+
+    def execute_mission(self, values: Mapping[str, Any]) -> dict[str, Any]:
+        if self._backend_mode == "offline" or self.business_controller is None:
+            raise RuntimeError("离线模式禁止任务执行")
+        response = dict(self.business_controller.execute_mission(values))
+        self._audit("mission_execute", response)
+        return response
+
+    def mission_action(self, mission_id: str, action: str) -> dict[str, Any]:
+        if self._backend_mode == "offline" or self.business_controller is None:
+            raise RuntimeError("离线模式禁止任务控制")
+        if action == "cancel":
+            response = dict(self.business_controller.cancel_mission(mission_id))
+        elif action in {"pause", "resume"}:
+            response = dict(
+                self.business_controller.set_mission_run_state(mission_id, action)
+            )
+        else:
+            raise ValueError(f"unsupported mission action: {action}")
+        self._audit(f"mission_{action}", response)
         return response
 
     def localization_mode(self, mode: str) -> dict[str, Any]:

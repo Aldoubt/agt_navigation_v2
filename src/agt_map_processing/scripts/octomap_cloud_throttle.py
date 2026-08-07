@@ -83,7 +83,7 @@ class ProjectionGate:
 class OctomapCloudThrottle(Node):
     def __init__(self) -> None:
         super().__init__("agt_map_processing_octomap_cloud_throttle")
-        input_topic = str(self.declare_parameter("input_topic", "/agt/mapping/registered_points_lidar").value)
+        input_topic = str(self.declare_parameter("input_topic", "/agt/mapping/registered_points").value)
         output_topic = str(self.declare_parameter("output_topic", "/agt/mapping/octomap_points").value)
         projected_map_input_topic = str(
             self.declare_parameter(

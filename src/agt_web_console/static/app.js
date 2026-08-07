@@ -105,14 +105,14 @@ function mappingComponent(health, id) {
 function mappingStatus(health, mode) {
   if (mode !== "MAPPING") return { state: "IDLE", label: "未启动", message: "当前没有运行建图链。" };
   const odometry = mappingComponent(health, "fast_livo_odometry");
-  const cloud = mappingComponent(health, "registered_cloud");
+  const cloud = mappingComponent(health, "registered_points");
   const occupancy = mappingComponent(health, "mapping_occupancy");
   if ([odometry, cloud, occupancy].some((item) => item.state === "ERROR")) {
     const failed = [odometry, cloud, occupancy].find((item) => item.state === "ERROR");
     return { state: "ERROR", label: "建图链异常", message: `${failed.display_name || "建图组件"}：${failed.detail || "健康检查失败"}` };
   }
   if (odometry.state !== "OK") return { state: "WAITING", label: "等待里程计", message: "FAST-LIVO2 还没有发布有效的 /agt/mapping/odometry。" };
-  if (cloud.state !== "OK") return { state: "WAITING", label: "等待注册点云", message: "FAST-LIVO2 里程计已到达，正在等待 /agt/mapping/registered_points_lidar。" };
+  if (cloud.state !== "OK") return { state: "WAITING", label: "等待注册点云", message: "FAST-LIVO2 里程计已到达，正在等待 /agt/mapping/registered_points。" };
   if (occupancy.state !== "OK") return { state: "WAITING", label: "等待二维地图", message: "点云链已到达，正在等待 /agt/map/mapping_occupancy。" };
   return { state: "MAPPING", label: "建图中", message: "FAST-LIVO2、注册点云和二维栅格地图均在持续更新。" };
 }
@@ -127,7 +127,7 @@ function renderMappingObservability() {
   document.querySelector("#mapping-status-message").textContent = status.message;
   const values = [
     ["FAST-LIVO2 里程计", mappingComponent(health, "fast_livo_odometry")],
-    ["注册点云", mappingComponent(health, "registered_cloud")],
+    ["注册点云", mappingComponent(health, "registered_points")],
     ["二维栅格地图", mappingComponent(health, "mapping_occupancy")],
   ];
   document.querySelector("#mapping-metrics").innerHTML = values.map(([label, item]) => {
@@ -415,13 +415,8 @@ function renderChassis() {
     `ip -details link show ${interfaceName}`,
     "# sudo apt-get install -y can-utils",
     "",
-    "# 终端 2：普通用户启动只读 BUNKER 状态桥接",
-    "source /opt/ros/humble/setup.bash",
-    "export AGT_WS=/absolute/path/to/agt_navigation_v2",
-    'source "$AGT_WS/install/setup.bash"',
-    `ros2 launch agt_chassis bunker.launch.py can_interface:=${interfaceName} operation_mode:=monitor start_safety:=false command_topic:=/agt/chassis/monitor_cmd_vel`,
-    "",
-    `# 可选终端 3：只读观察 CAN 帧\ncandump ${interfaceName}`,
+    "# 只读观察 CAN 帧；底盘状态桥接必须由 ROS 2 系统管理器的白名单 profile 启动",
+    `candump ${interfaceName}`,
   ].join("\n");
   const commandElement = document.querySelector("#chassis-admin-command");
   if (commandElement) commandElement.textContent = command;

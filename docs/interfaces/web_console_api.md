@@ -8,7 +8,7 @@ No endpoint accepts a shell command.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/api/v1/overview` | health, readiness, mode, active maps, experiments, localization |
+| GET | `/api/v1/overview` | RobotState、MissionStatus、health、readiness、mode、maps、experiments、localization |
 | GET | `/api/v1/health` | current `SystemHealth` projection |
 | GET | `/api/v1/task-readiness` | current shared gate |
 | GET | `/api/v1/system/status` | managed process/mode projection |
@@ -28,12 +28,15 @@ No endpoint accepts a shell command.
 | POST | `/api/v1/experiments/{id}/{start,event,start_bag,stop_bag,finalize,invalid}` | controlled session and explicit bag-profile transitions |
 | GET | `/api/v1/bags` | list complete configured rosbag bundles and playback state |
 | POST | `/api/v1/bags/{play,stop}` | simulate selected-bag state in offline mode or start/stop real `ros2 bag play --clock` in ROS mode |
+| GET | `/api/v1/missions/status` | current manager-owned MissionStatus projection |
+| POST | `/api/v1/missions/execute` | send one versioned `ExecuteMission` project Action goal |
+| POST | `/api/v1/missions/{id}/{pause,resume,cancel}` | call run-state service or ROS Action cancel |
 | POST | `/api/v1/localization/mode` | call `SetLocalizationMode` |
 | POST | `/api/v1/localization/relocalize` | send one bounded structured `Relocalize` Action goal |
 | GET | `/api/v1/runtime` | current `ros` or `offline` backend |
 | POST | `/api/v1/runtime/backend` | switch backend after managed modules are stopped |
 | GET | `/api/v1/logs?component=...` | list manager-owned log files only |
-| WebSocket | `/ws` | initial overview plus live structured health/readiness/localization, audit, and mode events |
+| WebSocket | `/ws` | initial overview plus RobotState/MissionStatus-primary live status and audit events |
 
 The static page defaults to `zh-CN` and provides a Chinese operations dashboard
 with an ordered startup workflow, separate sensor/mapping/navigation controls,
@@ -48,7 +51,13 @@ the offline ray-traced + `ground_temporal` map, and yields `CANDIDATE_READY` onl
 after its production report passes. A retryable offline-build failure must not be
 presented as an editable candidate. `commit` separately validates the possibly edited
 candidate and creates an immutable version. Navigation accepts only an active
-READY version and derives its three navigation asset paths from that version's manifest.
+READY version and uses the three navigation asset paths returned by `agt_map_manager`.
+
+The real backend does not instantiate map or experiment storage classes. Every map,
+experiment, Bag, mode, mapping-session, localization, and Mission REST operation delegates
+through `RosConsoleBridge` to a generated ROS topic/service/action. The bridge does not read
+manager manifests or process snapshots. Existing REST paths remain compatibility adapters;
+they are not a second business API owner.
 
 The configured `offline` backend is a deterministic Web-only simulator. It may
 simulate profile state, one bounded relocalization result, and the playback state

@@ -1,0 +1,4 @@
+interface:
+  display_name: "AGT Qt5 UI Modernization"
+  short_description: "Modernize the AGT Qt5 robot console safely"
+  default_prompt: "Use $qt5-app-ui-modernization to modernize the AGT Qt5 frontend while preserving its ROS 2, capability, safety, and fork-sync contracts."

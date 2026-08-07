@@ -37,7 +37,7 @@
 先把 CloudCompare 栅格封装成运行时地图包：
 
 ```bash
-cd ~/agt_navigation_v2
+cd "$AGT_WS"
 
 python3 tools/map_tools/create_cloudcompare_runtime_map.py \
   --source-image runtime/maps/archive/from_cloudcompare_20260716/greenhouse_obstacle_height.png \

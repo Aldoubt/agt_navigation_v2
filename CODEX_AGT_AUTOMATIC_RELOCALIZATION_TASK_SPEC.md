@@ -31,7 +31,7 @@
 `agt_localization` 目前由 ROS 2 C++ 节点 `relocalization_node` 编排：
 
 - 启动时加载 `global_map_pcd`，调用现有 `relocalization_core::Relocalizer`；core 提供 ICP/NDT、体素预处理、CropBox、fitness 阈值和 NDT-OMP。
-- 订阅 `/agt/mapping/registered_points_lidar`，缓存最新单帧点云；`/initialpose` 和 `/agt/localization/relocalize` 统一进入同一候选、配准和质量路径。
+- 订阅 `/agt/mapping/registered_points`，缓存最新单帧点云；`/initialpose` 和 `/agt/localization/relocalize` 统一进入同一候选、配准和质量路径。
 - CandidateProvider 支持 configured、last pose、外部 coarse pose 和 Action 初值，执行有界、确定性的 SE(2) 展开、排序、去重和裁剪。
 - 质量门禁区分 backend convergence 与 localization acceptance；只有接受结果才允许基准模式更新唯一 `map -> odom`，并发布结构化 status/global pose。
 - LocalizationSupervisor 已提供有界状态计数和 `TRACKING -> DEGRADED -> RECOVERING -> LOST` 迁移；接受后按周期执行只读 tracking 验证，验证不改写 `map -> odom`。

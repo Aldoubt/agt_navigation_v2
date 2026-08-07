@@ -107,7 +107,7 @@ PCD 和强制录制的 mapping bag；随后保存 `online_preview`，从同一 b
 离线后端可以先启动离线模拟建图、再在实验页选择完整 bag 执行“模拟回放”；建图预览会显示带有“模拟”标记的二维栅格和点云，便于检查拖动、缩放、机器人居中和结束建图按钮，但不会读取 bag 消息。离线保留最多占用一个模拟地图槽位，不能导出真实 PGM/YAML/PCD；删除后才能重新创建离线模拟地图。需要语义撰写、实车导航或重定位使用的真实资产，必须切换 ROS 2 后端按上一段流程生成并登记。
 
 启动导航前，必须在“导航链”面板选择地图版本。下拉框只列出资产完整、状态为 `READY` 且已激活的版本，
-启动请求中的 YAML、PCD 和 processing record 路径由版本 manifest 生成，浏览器不能自行替换这些路径。
+启动请求中的 YAML、PCD 和 processing record 路径由 map manager 的版本摘要返回，浏览器不能自行替换这些路径。
 服务器端还会再次校验版本状态、激活状态和三项资产的一致性。
 
 页面顶部的“运行后端”可以在 `ROS 2 真实模式` 和 `离线测试模式`之间切换；
@@ -128,9 +128,10 @@ token: "replace-with-a-long-random-token"
 `http://192.168.x.x:8080/`。工控机防火墙还必须允许来自受信任局域网网段的
 TCP 8080；不建议直接暴露到公共网络。
 
-Web 进程只调用 `ChangeSystemMode`、`SetLocalizationMode` 和现有的有界
-`Relocalize` Action，不自行执行 launch 命令。Localization 页面中的一次性
-操作调用现有的 `/agt/localization/relocalize` Action。所有 launch 命令只能
+Web 进程只调用生成的 mode、Mission、mapping、map、experiment/Bag 和 localization
+topic/service/action，不自行执行 launch 命令，也不读取 manager manifest。Localization 页面中的一次性
+操作调用现有的 `/agt/localization/relocalize` Action；Mission REST 调用
+`/agt/missions/execute`、run-state service 和 Action cancel。所有 launch 命令只能
 来自系统管理器的 profile 配置。监听地址不是 loopback 时必须配置 token，
 并通过 `X-AGT-Token` 访问；不要在局域网中暴露空 token 默认配置。
 
@@ -149,7 +150,8 @@ tail -f runtime/logs/system_manager/sensor_only.log
 `ros2 topic hz /agt/sensors/imu/data` 能收到数据。控制台的 MID360 网络配置输入框可以
 传入白名单 `user_config_path`，用于选择与实车网卡匹配的 JSON。
 
-激活地图前，必须先注册已经明确打包的地图版本：
+激活地图前，必须先注册已经明确打包的地图版本。以下 registry CLI 仅保留为管理员兼容入口；
+Web/Qt 正式流程必须调用 `/agt/maps/list` 和 `/agt/maps/manage`：
 
 ```bash
 ros2 run agt_map_manager map_registry.py --root /absolute/path/to/runtime/maps \
@@ -169,8 +171,9 @@ Map Library 通过 Web API 提供相同的受保护操作，包括 pin、归档�
 `bag_profile:=minimal|mapping|localization|navigation|full_experiment`。
 录包始终使用版本化 profile 文件中的显式 topic 列表。
 
-实验页可以在 ROS 2 后端列出 `runtime/rosbag/` 下带 `metadata.yaml` 的完整 bag，并使用固定的
-`ros2 bag play --clock --rate <bounded-rate> <bag>` 回放。浏览器不能输入命令行。建图模式会自动追加
+实验页经 `/agt/data/bags/list` 列出 manager 验证过的完整 bag，并经
+`/agt/data/bags/manage` 请求固定的 `ros2 bag play --clock` 回放。只有 experiment manager
+解析 metadata、路径并持有子进程，浏览器不能输入命令行。建图模式会自动追加
 受控 `mapping_inputs` topic 白名单，只回放 `/clock`、`/tf_static`、`/agt/sensors/lidar/custom` 和
 `/agt/sensors/imu/data`，不会重复回放 `/agt/mapping/odometry`、注册点云、二维地图或 `/tf`。导航模式
 禁止 bag 回放。回放前应让被测节点使用 `use_sim_time:=true`，并单独确认传感器、定位、地图和安全门禁；
@@ -210,10 +213,10 @@ ros2 launch agt_chassis bunker.launch.py \
 真实导航控制时使用 `operation_mode:=control` 和明确的 `start_chassis:=true`，但仍必须经过
 `Nav2 -> agt_safety -> agt_chassis`；不能把监测终端当作运动控制终端。
 
-当前任务执行链不是 Qt5 直接下发底盘命令：Qt5 组织并提交 `map` 坐标系的 Pose 数组到
-`/agt/navigation/execute_waypoint_task`，项目任务服务校验地图、定位、安全状态和取消语义后，
+兼容的单 waypoint-task 能力不是 Qt5 直接下发底盘命令：项目任务服务校验地图、定位、安全状态和取消语义后，
 只调用 Nav2 `FollowWaypoints`。Nav2 输出经过 Collision Monitor、`agt_safety` 和底盘 watchdog，
-最终才到 BUNKER。Web 当前只显示门禁和启动状态，不替代 Qt5 或项目任务 Action。
+最终才到 BUNKER。正式多步骤任务由 Qt/Web 提交 `ExecuteMission`，Mission Manager 仍只调用该
+项目 waypoint Action；Web/Qt/Mission Manager 都不发布速度。
 
 例如只用历史 bag 验证建图链时，先让测试节点不启动真实传感器和底盘，再在 Web 实验页回放：
 

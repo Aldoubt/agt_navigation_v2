@@ -6,8 +6,6 @@ from pathlib import Path
 from ament_index_python.packages import get_package_share_directory
 import yaml
 
-from agt_experiment_manager.manager import ExperimentManager
-from agt_map_manager.registry import MapRegistry
 from agt_web_console.app import create_app
 from agt_web_console.instance_lock import WebConsoleInstanceLock
 from agt_web_console.offline_backend import OfflineConsoleBackend
@@ -37,15 +35,6 @@ def main(args=None) -> None:
         instance_lock.acquire()
     except RuntimeError as error:
         parser.error(str(error))
-    map_registry = MapRegistry(Path(config.runtime_dir) / "maps")
-    experiment_manager = ExperimentManager(
-        Path(config.runtime_dir) / "experiments",
-        rosbag_root=Path(config.runtime_dir) / "rosbag",
-    )
-    bag_profiles_value = str(config_data.get("bag_profiles_file", "")).strip()
-    bag_profiles_path = Path(bag_profiles_value).expanduser() if bag_profiles_value else Path(get_package_share_directory("agt_experiment_manager")) / "config" / "bag_profiles.yaml"
-    with open(bag_profiles_path, "r", encoding="utf-8") as stream:
-        bag_profiles = (yaml.safe_load(stream) or {}).get("profiles", {})
     profiles_file = Path(parsed.profiles_file).expanduser() if parsed.profiles_file else Path(get_package_share_directory("agt_system_manager")) / "config" / "mode_profiles.yaml"
     import rclpy
     rclpy.init()
@@ -62,9 +51,9 @@ def main(args=None) -> None:
         chassis_provider=ros_controller.chassis_status,
         mapping_session_controller=ros_controller,
         mode_controller=ros_controller,
-        map_registry=map_registry,
-        experiment_manager=experiment_manager,
-        bag_profiles=bag_profiles,
+        business_controller=ros_controller,
+        robot_state_provider=ros_controller.robot_state,
+        mission_provider=ros_controller.mission_status,
         localization_controller=ros_controller,
         backends={
             "ros": {
@@ -75,12 +64,18 @@ def main(args=None) -> None:
                 "chassis_provider": ros_controller.chassis_status,
                 "mapping_session_controller": ros_controller,
                 "mode_controller": ros_controller,
+                "business_controller": ros_controller,
+                "robot_state_provider": ros_controller.robot_state,
+                "mission_provider": ros_controller.mission_status,
                 "localization_controller": ros_controller,
             },
             "offline": {
                 "health_provider": offline_controller.health,
                 "readiness_provider": offline_controller.readiness,
                 "mode_controller": offline_controller,
+                "business_controller": None,
+                "robot_state_provider": offline_controller.robot_state,
+                "mission_provider": offline_controller.mission_status,
                 "localization_controller": offline_controller,
                 "mapping_provider": offline_controller.mapping_status,
                 "mapping_pointcloud_provider": offline_controller.mapping_pointcloud_status,
@@ -121,7 +116,6 @@ def main(args=None) -> None:
     try:
         uvicorn.run(app, host=config.host, port=config.port)
     finally:
-        experiment_manager.close()
         offline_controller.close()
         ros_controller.close()
         if rclpy.ok():

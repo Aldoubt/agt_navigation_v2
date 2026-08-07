@@ -1,0 +1,30 @@
+# colcon workspace artifacts
+/build/
+/install/
+/log/
+
+# Local rosbag data and generated trim outputs
+/test_data/bags/
+/test_data/output/
+*.db3
+*.db3-shm
+*.db3-wal
+*.mcap
+*.bag
+*.zstd
+
+# Python caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Editor and operating-system files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Crash dumps
+core
+core.*

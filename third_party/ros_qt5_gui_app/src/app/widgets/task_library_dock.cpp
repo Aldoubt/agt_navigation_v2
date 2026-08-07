@@ -7,11 +7,13 @@
 #include <QGridLayout>
 #include <QHBoxLayout>
 #include <QInputDialog>
+#include <QJsonDocument>
 #include <QMessageBox>
 #include <QHeaderView>
 #include <QItemSelectionModel>
 #include <QSignalBlocker>
 #include <QTableView>
+#include <QUuid>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -608,6 +610,7 @@ void TaskLibraryDock::SelectTaskWaypoint(int row) {
 }
 
 void TaskLibraryDock::UpdateTaskExecutionStatus(const TaskExecutionStatus &status) {
+  if (status.state == "IDLE" && status.task_group_id.empty()) return;
   QString message = QString::fromStdString(
       status.message.empty() ? status.state : status.state + ": " + status.message);
   if (!status.missed_waypoints.empty()) {
@@ -618,8 +621,15 @@ void TaskLibraryDock::UpdateTaskExecutionStatus(const TaskExecutionStatus &statu
                    .arg(missed.join(", "));
   }
   validation_label_->setText(message);
-  if (!status.terminal) return;
-  task_running_ = false;
+  const QString state = QString::fromStdString(status.state);
+  if (state == "ACCEPTED" || state == "RUNNING" || state == "CANCELING" ||
+      state == "VALIDATING") {
+    task_running_ = true;
+  }
+  if (status.terminal || state == "IDLE" || state == "REJECTED" ||
+      state == "FAILED" || state == "SUCCEEDED" || state == "CANCELED") {
+    task_running_ = false;
+  }
   UpdateButtons();
 }
 
@@ -839,8 +849,14 @@ TaskExecutionRequest TaskLibraryDock::requestFromCurrent() const {
   const auto draft = DraftTask();
   request.loop_count = draft.loop ? static_cast<uint32_t>(draft.loop_count) : 1U;
   for (const auto &point : draft.enabledPoints()) request.points.emplace_back(point.x, point.y, point.yaw, point.name.toStdString());
-  if (!dirty_ && !task_.task_group_id.isEmpty()) {
-    request.task_file = repository_.pathFor(task_.task_group_id).toStdString();
+  if (!dirty_ && !task_.task_group_id.isEmpty() && !task_.content_sha256.isEmpty()) {
+    request.map_id = task_.map_binding.map_id.toStdString();
+    request.map_version_id = task_.map_binding.map_version_id.toStdString();
+    request.task_group_id = task_.task_group_id.toStdString();
+    request.task_revision = static_cast<uint32_t>(task_.revision);
+    request.expected_content_sha256 = task_.content_sha256.toStdString();
+    request.task_json = QJsonDocument(task_.toJson()).toJson(QJsonDocument::Compact).toStdString();
+    request.client_request_id = QUuid::createUuid().toString(QUuid::WithoutBraces).toStdString();
   }
   return request;
 }

@@ -26,7 +26,7 @@ class RelocalizationModeController(Node):
             max_candidates=int(self.declare_parameter("max_candidates", 128).value),
         )
         self._action_name = self.declare_parameter("action_name", "/agt/localization/relocalize").value
-        self._cloud_topic = self.declare_parameter("cloud_topic", "/agt/mapping/registered_points_lidar").value
+        self._cloud_topic = self.declare_parameter("cloud_topic", "/agt/mapping/registered_points").value
         self._cloud_seen_at = float("-inf")
         self._cloud_timeout = float(self.declare_parameter("cloud_timeout_s", 2.0).value)
         self._status = LocalizationStatus()

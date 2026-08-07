@@ -11,7 +11,9 @@ import rclpy
 from ament_index_python.packages import get_package_share_directory
 import yaml
 from agt_interfaces.msg import ComponentHealth as ComponentHealthMsg
-from agt_interfaces.msg import LocalizationStatus, SystemHealth, TaskReadiness
+from agt_interfaces.msg import (
+    LocalizationStatus, MapVersionSummary, SystemHealth, TaskReadiness,
+)
 from agt_interfaces.srv import EvaluateTaskReadiness, GetSystemHealth
 from diagnostic_msgs.msg import DiagnosticArray
 from livox_ros_driver2.msg import CustomMsg
@@ -34,7 +36,7 @@ _TOPIC_TYPES = {
     "/agt/sensors/lidar/custom": (CustomMsg, "livox_ros_driver2/msg/CustomMsg"),
     "/agt/sensors/imu/data": (Imu, "sensor_msgs/msg/Imu"),
     "/agt/mapping/odometry": (Odometry, "nav_msgs/msg/Odometry"),
-    "/agt/mapping/registered_points_lidar": (PointCloud2, "sensor_msgs/msg/PointCloud2"),
+    "/agt/mapping/registered_points": (PointCloud2, "sensor_msgs/msg/PointCloud2"),
     "/agt/map/mapping_occupancy": (OccupancyGrid, "nav_msgs/msg/OccupancyGrid"),
     "/agt/chassis/connected": (Bool, "std_msgs/msg/Bool"),
     "/agt/chassis/odometry": (Odometry, "nav_msgs/msg/Odometry"),
@@ -42,6 +44,7 @@ _TOPIC_TYPES = {
     "/agt/safety/status": (DiagnosticArray, "diagnostic_msgs/msg/DiagnosticArray"),
     "/agt/safety/emergency_stop": (Bool, "std_msgs/msg/Bool"),
     "/agt/localization/status": (LocalizationStatus, "agt_interfaces/msg/LocalizationStatus"),
+    "/agt/maps/active": (MapVersionSummary, "agt_interfaces/msg/MapVersionSummary"),
     "/agt/map/global_occupancy": (OccupancyGrid, "nav_msgs/msg/OccupancyGrid"),
     "/global_costmap/costmap": (OccupancyGrid, "nav_msgs/msg/OccupancyGrid"),
 }
@@ -96,6 +99,23 @@ def _safety_gate_from_status(message: DiagnosticArray) -> tuple[bool, bool, bool
     return False, False, True, False
 
 
+def _active_map_gate(message: MapVersionSummary) -> tuple[str, str, str, bool, bool, bool]:
+    ready = bool(
+        message.active
+        and message.state == MapVersionSummary.STATE_READY
+        and message.valid
+        and message.map_hash
+    )
+    return (
+        str(message.map_id) if message.active else "",
+        str(message.map_version_id) if message.active else "",
+        str(message.map_hash) if message.active else "",
+        ready,
+        ready and bool(message.navigation_yaml),
+        ready and bool(message.localization_pcd) and bool(message.processing_record),
+    )
+
+
 class SystemHealthNode(Node):
     def __init__(self) -> None:
         super().__init__("agt_system_manager")
@@ -106,14 +126,16 @@ class SystemHealthNode(Node):
         self._evaluator = HealthEvaluator(contract)
         self._mode = str(self.declare_parameter("active_mode", "IDLE").value).upper()
         self._runtime_dir = Path(str(self.declare_parameter("runtime_dir", "runtime").value)).expanduser()
-        pointer_value = str(self.declare_parameter("active_map_pointer", "").value).strip()
-        self._active_map_pointer = Path(pointer_value).expanduser() if pointer_value else None
-        self._map_id = str(self.declare_parameter("map_id", "").value)
-        self._map_version_id = str(self.declare_parameter("map_version_id", "").value)
-        self._active_map_hash = str(self.declare_parameter("active_map_hash", "").value)
-        self._map_ready = bool(self.declare_parameter("map_ready", False).value)
-        self._navigation_map_valid = bool(self.declare_parameter("navigation_map_valid", False).value)
-        self._localization_pcd_valid = bool(self.declare_parameter("localization_pcd_valid", False).value)
+        # Kept only so older launch files do not fail parameter declaration.
+        # Active map identity itself comes exclusively from /agt/maps/active.
+        self.declare_parameter("active_map_pointer", "")
+        self._map_id = ""
+        self._map_version_id = ""
+        self._active_map_hash = ""
+        self._map_ready = False
+        self._navigation_map_valid = False
+        self._localization_pcd_valid = False
+        self._active_map_seen = float("-inf")
         # The waypoint Action remains the authoritative per-task validator. This
         # flag represents the shared runtime prerequisites until a future task
         # validator publishes a task-specific decision.
@@ -127,10 +149,14 @@ class SystemHealthNode(Node):
         self._chassis_status_timeout = float(
             self.declare_parameter("chassis_status_timeout", 1.0).value
         )
+        self._active_map_timeout = float(
+            self.declare_parameter("active_map_timeout", 3.0).value
+        )
         if min(
             self._localization_status_timeout,
             self._safety_status_timeout,
             self._chassis_status_timeout,
+            self._active_map_timeout,
         ) <= 0.0:
             raise ValueError("readiness status timeouts must be positive")
         self._min_free_space_bytes = int(float(self.declare_parameter("min_free_space_gb", 1.0).value) * 1024**3)
@@ -187,6 +213,16 @@ class SystemHealthNode(Node):
                 self._localization = message
             elif topic == "/agt/chassis/connected":
                 self._chassis_connected = bool(message.data)
+            elif topic == "/agt/maps/active":
+                (
+                    self._map_id,
+                    self._map_version_id,
+                    self._active_map_hash,
+                    self._map_ready,
+                    self._navigation_map_valid,
+                    self._localization_pcd_valid,
+                ) = _active_map_gate(message)
+                self._active_map_seen = now
             elif topic == "/agt/safety/status":
                 (
                     self._safety_status_seen,
@@ -209,43 +245,6 @@ class SystemHealthNode(Node):
         }
         # Lifecycle states are populated by an optional lifecycle adapter. An
         # unknown state remains a health failure for required lifecycle nodes.
-
-    def _refresh_active_map(self) -> None:
-        pointer = self._active_map_pointer or (self._runtime_dir / "maps" / "active_map.yaml")
-        if not pointer.is_file():
-            self._map_ready = False
-            self._navigation_map_valid = False
-            self._localization_pcd_valid = False
-            self._map_id = ""
-            self._map_version_id = ""
-            self._active_map_hash = ""
-            return
-        try:
-            with open(pointer, "r", encoding="utf-8") as stream:
-                active = yaml.safe_load(stream) or {}
-            manifest_path = (pointer.parent / str(active["manifest"])).resolve()
-            with open(manifest_path, "r", encoding="utf-8") as stream:
-                manifest = yaml.safe_load(stream) or {}
-            state = str(manifest.get("state", "")).upper()
-            assets = manifest.get("assets", {})
-            self._map_id = str(active.get("map_id", manifest.get("map_id", "")))
-            self._map_version_id = str(active.get("map_version_id", manifest.get("map_version_id", "")))
-            self._active_map_hash = str(active.get("map_hash", ""))
-            self._map_ready = state == "READY" and bool(self._active_map_hash)
-            self._navigation_map_valid = self._map_ready and all(
-                isinstance(assets.get(key), dict)
-                and (manifest_path.parent / str(assets[key]["path"])).is_file()
-                for key in ("navigation_yaml", "navigation_pgm")
-            )
-            self._localization_pcd_valid = self._map_ready and all(
-                isinstance(assets.get(key), dict)
-                and (manifest_path.parent / str(assets[key]["path"])).is_file()
-                for key in ("localization_pcd", "processing_record")
-            )
-        except (OSError, KeyError, TypeError, ValueError, yaml.YAMLError):
-            self._map_ready = False
-            self._navigation_map_valid = False
-            self._localization_pcd_valid = False
 
     def _refresh_lifecycle(self) -> None:
         for node, client in self._lifecycle_clients.items():
@@ -277,7 +276,6 @@ class SystemHealthNode(Node):
     def _tick(self) -> None:
         self._mode = str(self.get_parameter("active_mode").value).upper()
         self._refresh_graph()
-        self._refresh_active_map()
         self._refresh_lifecycle()
         self._refresh_tf()
         try:
@@ -363,15 +361,22 @@ class SystemHealthNode(Node):
             )
             chassis_connected = self._chassis_connected and chassis_fresh
             safety_allows_navigation = self._safety_allows_navigation and safety_fresh
+            active_map_fresh = now - self._active_map_seen <= self._active_map_timeout
+            map_id = self._map_id if active_map_fresh else ""
+            map_version_id = self._map_version_id if active_map_fresh else ""
+            active_map_hash = self._active_map_hash if active_map_fresh else ""
+            map_ready = self._map_ready and active_map_fresh
+            navigation_map_valid = self._navigation_map_valid and active_map_fresh
+            localization_pcd_valid = self._localization_pcd_valid and active_map_fresh
         return evaluate_task_readiness(
             ReadinessInputs(
                 active_mode=self._mode,
-                map_id=self._map_id,
-                map_version_id=self._map_version_id,
-                map_ready=self._map_ready,
-                navigation_map_valid=self._navigation_map_valid,
-                localization_pcd_valid=self._localization_pcd_valid,
-                active_map_hash=self._active_map_hash,
+                map_id=map_id,
+                map_version_id=map_version_id,
+                map_ready=map_ready,
+                navigation_map_valid=navigation_map_valid,
+                localization_pcd_valid=localization_pcd_valid,
+                active_map_hash=active_map_hash,
                 localization_map_id=localization.map_id,
                 localization_map_hash=localization.map_hash,
                 localization_state=self._localization_state(localization.state),

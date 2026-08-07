@@ -3,8 +3,9 @@
 主界面采用项目维护的
 [`Aldoubt/Ros_Qt5_Gui_App:agt-navigation-v2`](https://github.com/Aldoubt/Ros_Qt5_Gui_App/tree/agt-navigation-v2)，
 固定源码快照位于 `third_party/ros_qt5_gui_app`，原项目 GPL-2.0 许可证与署名保持不变。
-GUI 负责地图显示、机器人位姿、速度控制、重定位、单点/多点导航、路径显示、
-栅格和拓扑地图编辑，以及版本化任务组的离线编辑和基础栅格校验；本包负责 V2 配置、启动和地图 I/O。
+GUI 是 ROS 2 业务后端的客户端，负责地图与状态显示、受能力门控的操作入口、路径显示、
+栅格和拓扑地图编辑，以及版本化任务组的离线编辑和基础栅格校验；它不持有系统模式、
+Mission、活动地图、实验、Bag、安全或底盘状态。本包负责 V2 配置、启动和地图 I/O。
 
 ## 构建主界面
 
@@ -60,6 +61,27 @@ ros2 run agt_ui_bridge start_ros_qt5_gui_app.sh \
   --profile navigation --reset-config
 ```
 
+## 可替换壳层与统一业务接口
+
+默认 `UiLayoutId=control-center-v1` 使用顶部 RobotState 状态带、profile 驱动的左侧页面导航、
+中央工作区和右侧 blocker/操作区；`UiLayoutId=legacy` 保留原界面作为回退。两种壳层复用同一
+ROS2 channel、MessageBus 和 ViewModel，不复制业务状态机。`UiThemeId=agt-light|agt-dark` 与
+`UiDensity=comfortable|compact` 只改变表现，不能授予任何 capability。
+
+control-center 页面按 profile 注册：总览/平台状态、受管建图、导航与 Mission、地图资产、
+Bag/实验、地图与任务以及诊断。正式操作边界为：
+
+- `/agt/system/robot_state`、`/agt/missions/status` 作为只读状态；
+- `/agt/system/change_mode`、`/agt/missions/execute`、`/agt/missions/set_run_state`；
+- `/agt/mapping/manage_session`、`/agt/localization/relocalize`；
+- `/agt/maps/list`、`/agt/maps/manage`；
+- `/agt/data/bags/list`、`/agt/data/bags/manage`。
+
+ROS callback 只通过 queued Qt 调用更新 ViewModel；service/action 请求异步发送，不等待 GUI
+线程。手动速度只允许 `/agt/cmd_vel_manual`，且 publisher 仅在 profile 明确允许时创建；该 topic
+也是配置缺失时的 fail-safe 默认值。维护 fork 的固定 SHA 和同步说明见
+[`third_party/README.md`](../../third_party/README.md)。
+
 ## V2 默认映射
 
 Task Library 的完整离线编辑、地图绑定、旧格式迁移和执行流程见
@@ -80,8 +102,8 @@ Task Library 的拓扑点下拉框
 - navigation 地图：`/agt/map/global_occupancy`
 - 机器人里程计：`/agt/mapping/odometry`
 - 重定位初值：`/initialpose`
-- 单点导航目标：`/goal_pose`
-- 多点任务：`/agt/navigation/execute_waypoint_task` Action
+- 单点导航目标：`/goal_pose`，仅默认隐藏和禁用的高级调试兼容入口
+- 多点兼容能力：`/agt/navigation/execute_waypoint_task` Action；正式操作页通过 Mission manager
 - 手动速度：`/agt/cmd_vel_manual`
 - 全局/局部路径：`/plan`、`/local_plan`
 - 示教只读 profile：`/agt/teach/reference_path` 与 transient-local
@@ -92,8 +114,10 @@ Task Library 的拓扑点下拉框
 - GUI 显示 frame：mapping 为 `odom`，navigation 为 `map`
 - 拓扑地图：`/agt/map/topology`、`/agt/map/topology/update`
 
-单点 `/goal_pose` 由项目桥接为 Nav2 `NavigateToPose`；Qt 的 **Start Task Chain** 直接调用
-项目 `ExecuteWaypointTask` Action，并以 Nav2 Action 反馈、结果和 missed waypoint 判断成败。
+单点 `/goal_pose` 和旧 **Start Task Chain** 在兼容期保留；前者只有
+`EnableDebugGoalPose=true` 才创建 publisher，后者只有 `EnableLegacyWaypointExecution=true` 才可
+调用项目 `ExecuteWaypointTask` Action。新的导航与任务页面通过 `/agt/missions/execute` 运行
+Mission，并使用 Action feedback/result 和 pause/resume/cancel 语义判断状态，不做距离轮询。
 添加导航点采用两次点击：第一次固定位置，第二次从位置指向朝向点并计算 yaw；
 右键、Esc 或切换工具会丢弃未完成的点。拓扑线装饰刷新固定为 10 Hz，避免抢占大地图交互。
 手动速度已经接入 `agt_safety -> agt_chassis`，但必须先显式使能安全层。navigation/offline/

@@ -1,5 +1,9 @@
 # AGT Navigation Data Stream
 
+统一业务控制流为 `Qt/Web/CLI -> ROS 2 business API -> manager -> robot capability`。正式
+Mission 通过 `/agt/missions/execute` 调用项目 waypoint Action；活动地图、Bag 和 RobotState
+分别由 map、experiment 和 system manager 发布。界面不读取权威资产路径，也不启动 launch。
+
 本文记录当前 Bunker Qt5/FAST-LIO 导航基线的两种启动方式：命令行直接启动，以及 Web 控制台通过系统管理器启动。文档只描述当前代码已经实现的链路，不把语义地图、覆盖规划和实车运动验收描述成默认已开启能力。
 
 ## 1. 启动前环境
@@ -16,7 +20,7 @@ source "$AGT_WS/install/setup.bash"
 Web 使用 `.venv-web` 中的 Python，但仍然需要先 source ROS 工作区。否则会出现：
 
 ```text
-ModuleNotFoundError: No module named 'agt_experiment_manager'
+ModuleNotFoundError: No module named 'agt_interfaces'
 ```
 
 FastAPI、Starlette 和 Uvicorn 只负责 Web HTTP/WebSocket 运行时；Node.js 不是当前前端运行依赖。
@@ -33,13 +37,23 @@ ros2 launch agt_system_manager system_manager.launch.py \
   runtime_dir:="$AGT_WS/runtime"
 ```
 
-该 launch 会启动三个节点：
+该 launch 会启动八个业务节点：
 
 - `agt_system_manager_health`：发布 `/agt/system/health` 和 `/agt/system/task_readiness`。
 - `agt_system_mode_manager`：提供 `/agt/system/change_mode` Action，管理 profile 进程组。
+- `agt_map_manager`：提供地图版本服务并发布唯一 `/agt/maps/active` 上下文。
+- `agt_experiment_manager`：提供实验/Bag 服务并持有唯一 record/playback 子进程。
+- `agt_robot_state_aggregator`：发布 `/agt/system/robot_state` 统一只读快照。
+- `agt_mission_manager`：提供有限 Mission Action、暂停恢复、事件和审计。
+- `agt_mapping_session_manager`：编排受管建图，但地图与录包仍委托对应 manager。
 - `agt_relocalization_mode_controller`：管理 `MANUAL_ONLY`、`AUTO_ON_START` 和 `AUTO_RECOVERY`。
 
-系统管理器的实现入口是 [system_manager.launch.py](/home/yangxuan/agt_navigation_v2/src/agt_system_manager/launch/system_manager.launch.py:10) 和 [system_mode_manager.py](/home/yangxuan/agt_navigation_v2/src/agt_system_manager/scripts/system_mode_manager.py:21)。
+系统管理器的实现入口是 [system_manager.launch.py](../../src/agt_system_manager/launch/system_manager.launch.py:10) 和 [system_mode_manager.py](../../src/agt_system_manager/scripts/system_mode_manager.py:21)。
+
+正式建图使用 `/agt/mapping/manage_session`。START 先通过 experiment manager 创建实验并启动
+`mapping` bag profile，再以 `record_bag:=false` 启动能力链；FINALIZE 正常刷新 PCD、停止录包并
+完成实验；COMMIT 通过 map manager 导入并可选激活新版本。Qt/Web 不创建 Bag 子进程或直接写
+registry。
 
 ### 2.2 直接启动建图链
 
@@ -91,7 +105,7 @@ ros2 bag play --clock --rate 1.0 \
 `start_sensor` 启动并发布 `/agt/sensors/lidar/custom_filtered`，随后才进入 FAST-LIVO2。
 `start_lidar_self_filter:=false` 仅用于显式 A/B 基线，此时 FAST-LIVO2 回退到原始 topic。
 
-`system.launch.py` 是总分流入口；`mode:=mapping` 实际包含 [mapping_mode.launch.py](/home/yangxuan/agt_navigation_v2/src/agt_bringup/launch/mapping_mode.launch.py:36) 的以下节点：
+`system.launch.py` 是总分流入口；`mode:=mapping` 实际包含 [mapping_mode.launch.py](../../src/agt_bringup/launch/mapping_mode.launch.py:36) 的以下节点：
 
 1. `agt_description/bunker_description.launch.py`：机器人和传感器静态描述。
 2. `agt_sensor_adapters/mid360.launch.py`：MID360 驱动，原始输入为 `/agt/sensors/lidar/custom` 和 `/agt/sensors/imu/data`。
@@ -167,7 +181,7 @@ ros2 run agt_map_manager map_registry.py \
   --root "$AGT_WS/runtime/maps" validate <map_version_id>
 ```
 
-导航模式的主要内容来自 [navigation_system.launch.py](/home/yangxuan/agt_navigation_v2/src/agt_bringup/launch/navigation_system.launch.py:122)：
+导航模式的主要内容来自 [navigation_system.launch.py](../../src/agt_bringup/launch/navigation_system.launch.py:122)：
 
 - 描述、MID360、FAST-LIVO2 adapter 和局部障碍过滤器。
 - `agt_localization/relocalization.launch.py`：读取 `global_map_pcd` 和 processing record，唯一负责 `map -> odom`。
@@ -216,7 +230,7 @@ source "$AGT_WS/install/setup.bash"
   --backend ros
 ```
 
-当前配置文件 [web_console.yaml](/home/yangxuan/agt_navigation_v2/src/agt_web_console/config/web_console.yaml:1) 默认：
+当前配置文件 [web_console.yaml](../../src/agt_web_console/config/web_console.yaml:1) 默认：
 
 ```yaml
 host: 127.0.0.1
@@ -233,12 +247,12 @@ backend: ros
 
 | 代码 | 作用 |
 | --- | --- |
-| [web_console.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/scripts/web_console.py:18) | 读取 YAML，建立 instance lock、MapRegistry、ExperimentManager、ROS bridge、FastAPI 和 Uvicorn。 |
-| [ros_bridge.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/agt_web_console/ros_bridge.py:31) | 创建 ROS Action/SRV/client、订阅健康/地图/点云/里程计/底盘状态。 |
-| [service.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/agt_web_console/service.py:35) | 独立于 HTTP 的业务层，负责 profile、会话、地图登记、bag 回放和状态校验。 |
-| [app.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/agt_web_console/app.py:8) | FastAPI REST/WebSocket 路由，只调用 `WebConsoleService`。 |
-| [mode_profiles.yaml](/home/yangxuan/agt_navigation_v2/src/agt_system_manager/config/mode_profiles.yaml:1) | profile argv 白名单；Web 不能传入任意 shell 命令。 |
-| [system_mode_manager.py](/home/yangxuan/agt_navigation_v2/src/agt_system_manager/scripts/system_mode_manager.py:159) | 接收 `ChangeSystemMode`，创建独立进程组，切换主链并写入进程状态。 |
+| [web_console.py](../../src/agt_web_console/scripts/web_console.py:18) | 读取前端配置，建立 instance lock、ROS bridge、离线模拟器、FastAPI 和 Uvicorn；不构造业务 manager。 |
+| [ros_bridge.py](../../src/agt_web_console/agt_web_console/ros_bridge.py:31) | 创建 ROS Action/SRV/client、订阅健康/地图/点云/里程计/底盘状态。 |
+| [service.py](../../src/agt_web_console/agt_web_console/service.py:35) | 独立于 HTTP 的业务层，负责 profile、会话、地图登记、bag 回放和状态校验。 |
+| [app.py](../../src/agt_web_console/agt_web_console/app.py:8) | FastAPI REST/WebSocket 路由，只调用 `WebConsoleService`。 |
+| [mode_profiles.yaml](../../src/agt_system_manager/config/mode_profiles.yaml:1) | profile argv 白名单；Web 不能传入任意 shell 命令。 |
+| [system_mode_manager.py](../../src/agt_system_manager/scripts/system_mode_manager.py:159) | 接收 `ChangeSystemMode`，创建独立进程组，切换主链并写入进程状态。 |
 
 Web 的启动调用路径是：
 
@@ -274,17 +288,17 @@ Web 建图不是直接执行一个浏览器传来的命令，而是以下固定�
 1. 页面调用 `/api/v1/mapping/session/prepare`，服务创建 `runtime/mapping_sessions/<map_name>/<session_id>/`，并生成受管 `pcd_output_dir`。
 2. 页面调用 `/api/v1/system/mode`，`profile=mapping`。Web 把 `map_name`、`mapping_output_dir`、`start_sensor`、`use_sim_time` 等声明参数传入 Action。
 3. 系统管理器发现 `start_sensor:=true` 时，先启动独立的 `sensor_only` 进程组，再以 `start_sensor:=false` 启动 mapping 主链；历史 bag 模式本身传入 `start_sensor:=false`。
-4. 页面调用 `/api/v1/bags/play` 时，`ExperimentManager` 只允许相对 `runtime/rosbag` 根目录下的完整 bag，并按状态强制选择 `mapping_inputs`：`/clock`、`/tf_static`、MID360 CustomMsg 和 IMU。
+4. 页面调用 `/api/v1/bags/play` 时，Web 经 `/agt/data/bags/manage` 请求 experiment manager；manager 只允许相对 runtime 根目录下的完整 bag，并按状态强制选择 `mapping_inputs`：`/clock`、`/tf_static`、MID360 CustomMsg 和 IMU。
 5. 页面点“完成建图”后先读取会话状态，要求确认采集完成并输入最终地图名。选择保留时，Web 调用 `/agt_mapping_map_saver/save_map` 保存 PGM/YAML，随后通过 `ChangeSystemMode` 正常停止 mapping。
 6. 服务等待 PGM/YAML 和 `state: ready` 的 FAST-LIVO2 PCD record。受管会话中如果 record 缺少 `pcd_sha256`，服务在进程停止后计算并补写实际 PCD 哈希；已有哈希不匹配则失败闭环。
 7. `agt_map_manager.import_legacy()` 将资产复制到不可变 `runtime/maps/<map_id>/versions/<version_id>/`。只有 READY 版本才可以进一步激活和用于导航。
 8. 选择删除时，只删除受管临时会话；如果保留流程创建了 INVALID 版本，删除动作同时清理该失败版本。
 
-对应实现集中在 [service.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/agt_web_console/service.py:301)、[ros_bridge.py](/home/yangxuan/agt_navigation_v2/src/agt_web_console/agt_web_console/ros_bridge.py:352) 和 [app.js](/home/yangxuan/agt_navigation_v2/src/agt_web_console/static/app.js:781)。
+对应实现集中在 [service.py](../../src/agt_web_console/agt_web_console/service.py:301)、[ros_bridge.py](../../src/agt_web_console/agt_web_console/ros_bridge.py:352) 和 [app.js](../../src/agt_web_console/static/app.js:781)。
 
 ### 3.4 Web 导航逻辑
 
-Web 导航启动前不会接受浏览器任意地图路径。页面只选择地图版本，`profileArguments()` 从当前 `READY + active` manifest 派生：
+Web 导航启动前不会接受浏览器任意地图路径。页面只选择地图版本，`profileArguments()` 使用 map manager 返回的当前 `READY + active` 资产：
 
 ```text
 map                         -> navigation/map.yaml
@@ -301,7 +315,7 @@ ros2 action info /agt/system/change_mode
 ros2 node list
 ros2 topic hz /agt/sensors/lidar/custom
 ros2 topic hz /agt/sensors/imu/data
-ros2 topic hz /agt/mapping/registered_points_lidar
+ros2 topic hz /agt/mapping/registered_points
 curl http://127.0.0.1:8080/api/v1/system/status
 curl http://127.0.0.1:8080/api/v1/mapping/session
 ```

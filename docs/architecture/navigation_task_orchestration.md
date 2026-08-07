@@ -19,8 +19,8 @@ navigation Actions          future arm Actions
 Nav2 -> agt_safety -> chassis
 ```
 
-mission orchestrator 尚未实现。当前 Qt 直接调用
-`/agt/navigation/execute_waypoint_task` 是第一阶段稳定边界。
+第一版 `agt_mission_manager` 实现有限顺序编排。它只支持版本化 waypoint task、有限时长等待
+和带 timeout 的结构化事件等待；底层 `/agt/navigation/execute_waypoint_task` 继续作为稳定能力边界。
 
 ## 模式合同
 
@@ -52,9 +52,14 @@ navigation/offline profile 的任务中心只保留版本化 Task Library，并�
 - 多点稳定入口：`/agt/navigation/execute_waypoint_task`；
 - 多点执行权：项目 server 调用 Nav2 `FollowWaypoints`，以 Action 状态和 missed waypoint
   决定结果；
+- 任务权威：`agt_navigation` Task Registry 根据 map/task ID 读取
+  `runtime/maps/<map_id>/versions/<map_version_id>/tasks/`，Qt/Web 不提交执行文件路径；
+- 会话权威：`/agt/navigation/session_status` 与 `/agt/navigation/session/get` 保留当前或最近一次
+  waypoint 会话，GUI 断联不取消任务，重连后按机器人端状态恢复；
 - 运动输出：只能经过 Nav2、Collision Monitor、`agt_safety` 和底盘 watchdog；
-- 解释信息：Action feedback/result 与 `/agt/navigation/task_status`，必须保留拒绝、取消、
-  安全状态丢失、地图越界和 Nav2 失败原因。
+- 解释信息：Action feedback/result、结构化 blocker code、operator/technical message 与
+  deprecated `/agt/navigation/task_status`，必须保留拒绝、取消、安全状态丢失、地图越界和
+  Nav2 失败原因。
 
 后续应逐步淘汰 `/goal_pose` 作为自动流程接口，但在人工单点操作兼容期继续保留。
 

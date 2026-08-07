@@ -72,7 +72,7 @@ Nav2 planner_server/静态全局 costmap；不启动定位、BT Navigator、Nav2
 底盘，也不发布 TF。以当前 `mid360_map` 为例：
 
 ```bash
-cd ~/agt_navigation_v2
+cd "$AGT_WS"
 source /opt/ros/humble/setup.bash
 COVERAGE_WS=${COVERAGE_WS:-$HOME/agt_coverage_ws}
 source "$COVERAGE_WS/install/setup.bash"

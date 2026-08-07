@@ -6,6 +6,7 @@ import time
 from typing import Any, Callable, Mapping
 
 from agt_system_manager.process_manager import ProfileRegistry
+import yaml
 
 
 class OfflineConsoleBackend:
@@ -84,6 +85,8 @@ class OfflineConsoleBackend:
             listeners = list(self._listeners)
         event = {
             "type": "status",
+            "robot_state": self.robot_state(),
+            "mission": self.mission_status(),
             "health": self.health(),
             "task_readiness": self.readiness(),
             "localization": self.localization(),
@@ -91,6 +94,47 @@ class OfflineConsoleBackend:
         }
         for callback in listeners:
             callback(event)
+
+    def robot_state(self) -> dict[str, Any]:
+        with self._lock:
+            active_mode = self._active_mode
+            active_profile = self._active_profile
+        return {
+            "revision": int(time.monotonic() * 10),
+            "system_mode": active_mode,
+            "active_profile": active_profile,
+            "managed_process_count": int(bool(active_profile)),
+            "running_process_count": int(bool(active_profile)),
+            "system_health_known": True,
+            "task_readiness_known": True,
+            "active_map_known": False,
+            "localization_status_known": True,
+            "mission_status_known": True,
+            "mission": self.mission_status(),
+            "nav2_state": "INACTIVE",
+            "safety_status_known": True,
+            "safety_motion_enabled": False,
+            "emergency_stop": False,
+            "estop_latched": False,
+            "navigation_ready": False,
+            "chassis_status_known": False,
+            "chassis_connected": False,
+            "bag_status_known": True,
+            "bag_session": self.playback_status(),
+            "blocker_codes": ["OFFLINE_MODE"],
+            "blocker_messages": ["离线模拟后端不会进入可执行状态"],
+            "message": "离线模拟状态；不可作为真实机器人 READY 证据",
+            "simulated": True,
+        }
+
+    @staticmethod
+    def mission_status() -> dict[str, Any]:
+        return {
+            "state": "IDLE",
+            "mission_id": "",
+            "message": "离线模式禁止执行 Mission",
+            "simulated": True,
+        }
 
     def _sensor_active(self) -> bool:
         return self._active_profile in {"sensor_only", "mapping", "navigation"}
@@ -114,7 +158,7 @@ class OfflineConsoleBackend:
                 self._component("agt_safety", "安全链", False, "离线模式不启动安全链"),
                 self._component("agt_chassis", "底盘", False, "未连接车辆，离线模式不发送底盘命令"),
                 self._component("fast_livo_odometry", "FAST-LIVO2 里程计", mapping_preview, "离线 bag 建图预览输入"),
-                self._component("registered_cloud", "注册点云", mapping_preview, "离线 bag 建图预览输入"),
+                self._component("registered_points", "注册点云", mapping_preview, "离线 bag 建图预览输入"),
                 self._component("mapping_occupancy", "二维建图地图", mapping_preview, "离线 bag 建图预览输入"),
             ],
         }
@@ -272,6 +316,31 @@ class OfflineConsoleBackend:
         if not path.is_dir() or not (path / "metadata.yaml").is_file():
             raise ValueError("指定 bag 不是完整的 metadata.yaml bundle")
         return path
+
+    def list_bags(self) -> list[dict[str, Any]]:
+        root = (self._runtime_dir / "rosbag").resolve()
+        result = []
+        for metadata_path in sorted(root.glob("*/metadata.yaml"), reverse=True):
+            try:
+                with open(metadata_path, "r", encoding="utf-8") as stream:
+                    metadata = yaml.safe_load(stream) or {}
+                information = metadata.get("rosbag2_bagfile_information", {})
+                result.append(
+                    {
+                        "bag_id": metadata_path.parent.name,
+                        "message_count": int(information.get("message_count", 0)),
+                        "storage_identifier": str(
+                            information.get("storage_identifier", "")
+                        ),
+                        "mapping_input_ready": False,
+                        "contains_mapping_outputs": False,
+                        "contains_navigation_outputs": False,
+                        "simulated": True,
+                    }
+                )
+            except (OSError, TypeError, ValueError, yaml.YAMLError):
+                continue
+        return result
 
     def start_playback(self, bag_id: str, *, rate: float = 1.0) -> dict[str, Any]:
         path = self._bag_path(bag_id)

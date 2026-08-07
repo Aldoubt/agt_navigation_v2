@@ -141,7 +141,8 @@ def test_prepare_owns_artifact_paths_and_rejects_unsafe_overrides(tmp_path):
     assert arguments["runtime_dir"] == session["root"]
     assert arguments["map_name"] == "greenhouse_01"
     assert arguments["mapping_output_dir"] == session["pcd_output_dir"]
-    assert arguments["record_bag"] == "true"
+    assert session["record_bag"] is True
+    assert arguments["record_bag"] == "false"
     assert arguments["bag_profile"] == "mapping"
     assert arguments["start_sensor"] == "false"
 

@@ -17,7 +17,6 @@ RECORDED_TOPICS = [
     "/agt/sensors/imu/data",
     "/agt/mapping/odometry",
     "/agt/mapping/registered_points",
-    "/agt/mapping/registered_points_lidar",
     "/agt/mapping/octomap_points",
     "/agt/map/mapping_occupancy",
     "/agt/map/global_occupancy",
