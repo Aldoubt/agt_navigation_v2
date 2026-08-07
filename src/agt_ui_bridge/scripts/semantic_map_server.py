@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from agt_interfaces.msg import SemanticWaypointArray
 from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import Point
 from nav2_msgs.srv import LoadMap
@@ -24,7 +25,12 @@ from agt_ui_bridge.platform_profile import (
 )
 from agt_ui_bridge.semantic_io import SemanticFileError, load_semantic_task
 from agt_ui_bridge.semantic_rasterizer import rasterize_keepout_mask
-from agt_ui_bridge.semantic_validation import ValidationContext, validate_task
+from agt_ui_bridge.semantic_validation import (
+    ValidationContext,
+    validate_task,
+    validate_waypoint_task,
+)
+from agt_ui_bridge.semantic_waypoints import waypoint_array_message
 
 
 LATCHED_QOS = QoSProfile(
@@ -40,6 +46,7 @@ FEATURE_COLORS = {
     "row_centerline": (0.90, 0.74, 0.33, 0.95),
     "access_lane": (0.10, 0.52, 0.68, 0.95),
     "entry_pose": (0.25, 0.51, 0.84, 0.95),
+    "waypoint": (0.62, 0.28, 0.86, 0.95),
     "work_direction": (0.21, 0.66, 0.71, 0.95),
     "headland_zone": (0.82, 0.54, 0.25, 0.95),
     "keepout_zone": (0.73, 0.29, 0.38, 0.95),
@@ -50,7 +57,8 @@ FEATURE_COLORS = {
 class SemanticCandidate:
     task: object
     markers: MarkerArray
-    mask: OccupancyGrid
+    waypoints: SemanticWaypointArray
+    mask: object = None
 
 
 class SemanticMapServer(Node):
@@ -61,6 +69,7 @@ class SemanticMapServer(Node):
         self.declare_parameter("semantic_map", "")
         self.declare_parameter("platform_profile", "")
         self.declare_parameter("base_map_topic", "/agt/map/global_occupancy")
+        self.declare_parameter("semantic_mode", "coverage")
         self.declare_parameter("auto_load", True)
         self.declare_parameter("minimum_boundary_clearance", 0.0)
         self.declare_parameter("outside_field_is_keepout", True)
@@ -71,6 +80,9 @@ class SemanticMapServer(Node):
         self.platform_profile_path = str(
             self.get_parameter("platform_profile").value
         )
+        self.semantic_mode = str(self.get_parameter("semantic_mode").value).strip().lower()
+        if self.semantic_mode not in {"coverage", "waypoint"}:
+            raise ValueError("semantic_mode must be coverage or waypoint")
         self.minimum_boundary_clearance = float(
             self.get_parameter("minimum_boundary_clearance").value
         )
@@ -91,8 +103,15 @@ class SemanticMapServer(Node):
         self.marker_publisher = self.create_publisher(
             MarkerArray, "/agt/map/semantic_markers", LATCHED_QOS
         )
-        self.mask_publisher = self.create_publisher(
-            OccupancyGrid, "/agt/map/keepout_mask", LATCHED_QOS
+        self.waypoint_publisher = self.create_publisher(
+            SemanticWaypointArray, "/agt/map/waypoints", LATCHED_QOS
+        )
+        self.mask_publisher = (
+            self.create_publisher(
+                OccupancyGrid, "/agt/map/keepout_mask", LATCHED_QOS
+            )
+            if self.semantic_mode == "coverage"
+            else None
         )
         self.status_publisher = self.create_publisher(
             DiagnosticArray, "/agt/map/semantic_status", LATCHED_QOS
@@ -171,10 +190,16 @@ class SemanticMapServer(Node):
         self.active_candidate = candidate
         self.semantic_path = str(candidate.task.semantic_path)
         self.marker_publisher.publish(candidate.markers)
-        self.mask_publisher.publish(candidate.mask)
+        self.waypoint_publisher.publish(candidate.waypoints)
+        if candidate.mask is not None and self.mask_publisher is not None:
+            self.mask_publisher.publish(candidate.mask)
         self._publish_status(
             "LOADED",
-            "semantic task loaded and keepout mask rasterized",
+            (
+                "semantic coverage task loaded"
+                if self.semantic_mode == "coverage"
+                else "semantic waypoint library loaded"
+            ),
         )
         return True, "LOADED", "semantic task loaded"
 
@@ -194,36 +219,47 @@ class SemanticMapServer(Node):
             )
             return False, state, ", ".join(task.warnings), None
 
-        try:
-            profile_path = resolve_platform_profile(
-                task.coverage.robot_profile,
-                explicit_path=self.platform_profile_path or None,
-            )
-            if profile_path is None:
-                raise FileNotFoundError(
-                    f"platform profile not found: {task.coverage.robot_profile}"
-                )
-            platform = load_platform_profile(profile_path)
-        except (KeyError, OSError, TypeError, ValueError) as exc:
-            return False, "GEOMETRY_INVALID", str(exc), None
-
-        if platform["name"] != task.coverage.robot_profile:
-            return False, "GEOMETRY_INVALID", "robot profile name mismatch", None
-        if not math.isclose(
-            platform["robot_width"], task.coverage.robot_width, abs_tol=1e-6
-        ):
-            return False, "GEOMETRY_INVALID", "robot width differs from profile", None
-
         expected_geometry = MapGeometry.from_nav2_yaml(task.base_map_path)
         context = ValidationContext(
             map_geometry=expected_geometry,
-            navigation_footprint=tuple(
-                tuple(point) for point in platform["footprint"]
-            ),
-            minimum_boundary_clearance=self.minimum_boundary_clearance,
             base_map_path=task.base_map_path,
         )
-        report = validate_task(task.semantic_map, task.coverage, context=context)
+
+        if self.semantic_mode == "coverage":
+            try:
+                profile_path = resolve_platform_profile(
+                    task.coverage.robot_profile,
+                    explicit_path=self.platform_profile_path or None,
+                )
+                if profile_path is None:
+                    raise FileNotFoundError(
+                        f"platform profile not found: {task.coverage.robot_profile}"
+                    )
+                platform = load_platform_profile(profile_path)
+            except (KeyError, OSError, TypeError, ValueError) as exc:
+                return False, "GEOMETRY_INVALID", str(exc), None
+
+            if platform["name"] != task.coverage.robot_profile:
+                return False, "GEOMETRY_INVALID", "robot profile name mismatch", None
+            if not math.isclose(
+                platform["robot_width"], task.coverage.robot_width, abs_tol=1e-6
+            ):
+                return False, "GEOMETRY_INVALID", "robot width differs from profile", None
+
+            context = ValidationContext(
+                map_geometry=expected_geometry,
+                navigation_footprint=tuple(
+                    tuple(point) for point in platform["footprint"]
+                ),
+                minimum_boundary_clearance=self.minimum_boundary_clearance,
+                base_map_path=task.base_map_path,
+            )
+            report = validate_task(task.semantic_map, task.coverage, context=context)
+        else:
+            report = validate_waypoint_task(
+                task.semantic_map, task.coverage, context=context
+            )
+
         if not report.valid:
             codes = ", ".join(
                 f"{issue.code}[{issue.object_id}]" for issue in report.issues
@@ -241,18 +277,29 @@ class SemanticMapServer(Node):
             return False, "GEOMETRY_INVALID", "base map metadata mismatch", None
 
         try:
-            markers = self._build_markers(task.semantic_map)
-            mask = self._build_keepout_mask(task.semantic_map, expected_geometry)
+            now = self.get_clock().now().to_msg()
+            markers = self._build_markers(task.semantic_map, now)
+            waypoints = waypoint_array_message(
+                task.semantic_map,
+                task.coverage.base_map_sha256,
+                now,
+            )
+            mask = (
+                self._build_keepout_mask(task.semantic_map, expected_geometry, now)
+                if self.semantic_mode == "coverage"
+                else None
+            )
         except Exception as exc:
-            return False, "RASTERIZATION_FAILED", str(exc), None
+            return False, "PRODUCT_BUILD_FAILED", str(exc), None
         return True, "LOADED", "semantic task is valid", SemanticCandidate(
             task=task,
             markers=markers,
+            waypoints=waypoints,
             mask=mask,
         )
 
-    def _build_markers(self, semantic_map):
-        now = self.get_clock().now().to_msg()
+    def _build_markers(self, semantic_map, now=None):
+        now = now or self.get_clock().now().to_msg()
         output = MarkerArray()
         clear = Marker()
         clear.header.frame_id = "map"
@@ -297,7 +344,7 @@ class SemanticMapServer(Node):
             output.markers.append(marker)
         return output
 
-    def _build_keepout_mask(self, semantic_map, map_geometry):
+    def _build_keepout_mask(self, semantic_map, map_geometry, now=None):
         rasterized = rasterize_keepout_mask(
             semantic_map,
             map_geometry,
@@ -308,7 +355,7 @@ class SemanticMapServer(Node):
         mask = OccupancyGrid()
         mask.header = deepcopy(self.base_map.header)
         mask.header.frame_id = "map"
-        mask.header.stamp = self.get_clock().now().to_msg()
+        mask.header.stamp = now or self.get_clock().now().to_msg()
         mask.info = deepcopy(self.base_map.info)
         mask.info.map_load_time = mask.header.stamp
         mask.data = list(rasterized.data)
@@ -333,11 +380,25 @@ class SemanticMapServer(Node):
             if self.active_candidate is not None
             else ""
         )
+        waypoint_count = (
+            len(self.active_candidate.waypoints.waypoints)
+            if self.active_candidate is not None
+            else 0
+        )
         status.values = [
             KeyValue(key="detail", value=detail),
             KeyValue(key="semantic_path", value=self.semantic_path),
             KeyValue(key="active_map_id", value=active_map_id),
-            KeyValue(key="mask_mode", value="semantic_keepout_task06"),
+            KeyValue(key="semantic_mode", value=self.semantic_mode),
+            KeyValue(key="waypoint_count", value=str(waypoint_count)),
+            KeyValue(
+                key="mask_mode",
+                value=(
+                    "semantic_keepout_task06"
+                    if self.semantic_mode == "coverage"
+                    else "not_published"
+                ),
+            ),
             KeyValue(
                 key="outside_field_is_keepout",
                 value=str(self.outside_field_is_keepout).lower(),
