@@ -1,8 +1,8 @@
 # 核心接口兼容说明
 
-topic 的唯一正式名称、类型、frame 和 owner 以
-[`topic_contract.md`](topic_contract.md) 为准；本文保留较完整的历史接口说明和扩展 topic，
-不定义新的 canonical 名称。
+canonical cross-module topic 的唯一正式名称、类型、frame 和 owner 以
+[`topic_contract.md`](topic_contract.md) 为准；本文保留较完整的历史接口说明、package-local/debug
+和扩展 topic，不定义新的 canonical 名称。
 
 当前导航启动顺序、Qt5/Nav2/安全数据流以及门禁矩阵见
 [`current_navigation_startup_and_dataflow.md`](../architecture/current_navigation_startup_and_dataflow.md)。
@@ -10,10 +10,11 @@ topic 的唯一正式名称、类型、frame 和 owner 以
 ## Topics
 - `/agt/sensors/lidar/custom`：`livox_ros_driver2/msg/CustomMsg`，MID360 原始输入。
 - `/agt/sensors/lidar/custom_filtered`：`livox_ros_driver2/msg/CustomMsg`，由
-  `agt_livox_self_filter` 在 FAST-LIVO2 之前发布；保留通过点的完整字段和原始顺序。
-- `/agt/sensors/lidar/self_filter/boxes`：`visualization_msgs/msg/MarkerArray`，可选的
-  `base_footprint` 自滤除盒可视化。
-- `/diagnostics` 中的 `agt_livox_self_filter`：profile、帧、计数、无效点、TF 失败和耗时诊断。
+  `agt_livox_self_filter` 在 FAST-LIVO2 之前发布；保留通过点的原始 LiDAR 坐标、完整字段和原始顺序。
+- `/agt/sensors/lidar/self_filter/geometry`：`visualization_msgs/msg/MarkerArray`，package-local/debug；
+  默认显示 URDF collision primitive 与 profile supplemental geometry，不参与 FAST-LIVO2 数据合同。
+- `/agt/sensors/lidar/self_filter/removed_points`：`sensor_msgs/msg/PointCloud2`，package-local/debug，默认关闭。
+- `/diagnostics` 中的 `agt_livox_self_filter`：geometry source/readiness、帧、计数、无效点、TF/几何失败和耗时诊断。
 - `/agt/sensors/lidar/points`：通用 `sensor_msgs/msg/PointCloud2` 输出，不是当前 MID360 原始驱动输入。
 - `/agt/sensors/imu/data`
 - `/agt/mapping/odometry`
