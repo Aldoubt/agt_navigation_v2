@@ -17,7 +17,7 @@ order and migration evidence are kept under [`docs/archive/`](../archive/).
 | URDF self-filter geometry | P0 | V25-02 code/config/tests implemented on feature branch; raw/profile/URDF bag and vehicle validation remain. |
 | Sensor sync / health | P0 | IMPLEMENTED: stream monitor + system-manager integration; shared diagnostics are cached per stream with freshness expiry. Bag/vehicle threshold tuning remains PENDING. |
 | Semantic waypoint mode | P0 | CORE IMPLEMENTED on V25-04 branch: schema 1.1 validation split, typed waypoint messages/topic and waypoint server mode. Qt authoring + build/runtime verification remain. |
-| BT execution engine / first BT mission | P0 | Add BehaviorTree.CPP/Groot2 behind `agt_mission_manager`; compose project Actions, do not add a second mission owner. |
+| BT capability layer / first BT mission | P0 | CAPABILITY LAYER IMPLEMENTED in V25-05: BT.CPP 4.9 factory, project Action nodes, readiness condition, allowlisted smoke tree, and optional Groot2. First BT Mission backend integration remains V25-06. |
 | Rolling local map / ground factors | P1 | Robustness and sensor-factor work after the first mission. |
 | GNSS, wheel factor, GTSAM/iSAM2 | P1 | Research-backed localization robustness work. |
 | STD / Scan Context and long-term map | P2 | Long-term agricultural navigation research. |

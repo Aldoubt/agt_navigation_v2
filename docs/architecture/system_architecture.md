@@ -225,6 +225,12 @@ class LEG5 optional
 
 ### P0：首个 BT Demo 必须完成
 
+V25-05 的 `agt_bt_executor` 已实现 BehaviorTree.CPP capability layer：它由
+`agt_mission_manager` 的未来受控 backend 使用，集中注册项目 Action/Condition
+节点，并通过项目 Action 边界访问定位与航点能力。该包不进入默认 bringup，
+不发布速度或 TF，也不创建第二个 Mission owner；完整第一条 BT Mission 留在
+V25-06。
+
 - URDF 自体点云滤除：主体几何来自 `robot_description` 的 URDF collision；platform profile 仅保留
   enable/padding、显式临时 supplemental box 和 `geometry_source:=profile` A/B 回归路径。实现已加入
   V25-02，完成同 bag `raw/profile/urdf` 与实车误删/漏删验收后才能转 DONE。
