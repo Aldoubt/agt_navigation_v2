@@ -110,6 +110,8 @@ def generate_launch_description():
         "use_sim_time": LaunchConfiguration("use_sim_time"),
         "user_config_path": LaunchConfiguration("user_config_path"),
         "start_sensor": LaunchConfiguration("start_sensor"),
+        "start_sensor_monitor": LaunchConfiguration("start_sensor_monitor"),
+        "sensor_monitor_params_file": LaunchConfiguration("sensor_monitor_params_file"),
         "start_lidar_self_filter": LaunchConfiguration("start_lidar_self_filter"),
         "lidar_self_filter_params_file": LaunchConfiguration(
             "lidar_self_filter_params_file"
@@ -157,6 +159,11 @@ def generate_launch_description():
             DeclareLaunchArgument("health_contract", default_value=str(Path(get_package_share_directory("agt_system_manager")) / "config" / "health_contracts.yaml")),
             DeclareLaunchArgument("active_map_pointer", default_value=""),
             DeclareLaunchArgument("start_sensor", default_value="true"),
+            DeclareLaunchArgument("start_sensor_monitor", default_value="true"),
+            DeclareLaunchArgument(
+                "sensor_monitor_params_file",
+                default_value=str(Path(get_package_share_directory("agt_sensor_monitor")) / "config" / "sensor_monitor.yaml"),
+            ),
             DeclareLaunchArgument("start_lidar_self_filter", default_value="true"),
             DeclareLaunchArgument(
                 "lidar_self_filter_params_file",

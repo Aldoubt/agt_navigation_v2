@@ -21,6 +21,7 @@
   <exec_depend>agt_perception</exec_depend>
   <exec_depend>agt_safety</exec_depend>
   <exec_depend>agt_sensor_adapters</exec_depend>
+  <exec_depend>agt_sensor_monitor</exec_depend>
   <exec_depend>agt_system_manager</exec_depend>
   <exec_depend>agt_teach_repeat</exec_depend>
   <exec_depend>agt_ui_bridge</exec_depend>

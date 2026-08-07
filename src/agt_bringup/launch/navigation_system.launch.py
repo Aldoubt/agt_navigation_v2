@@ -175,6 +175,8 @@ def generate_launch_description():
             DeclareLaunchArgument("localization_status_timeout", default_value="10.0"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("start_sensor", default_value="true"),
+            DeclareLaunchArgument("start_sensor_monitor", default_value="true"),
+            DeclareLaunchArgument("sensor_monitor_params_file", default_value=str(Path(get_package_share_directory("agt_sensor_monitor")) / "config" / "sensor_monitor.yaml")),
             DeclareLaunchArgument("start_lidar_self_filter", default_value="true"),
             DeclareLaunchArgument(
                 "lidar_self_filter_params_file",
@@ -215,6 +217,12 @@ def generate_launch_description():
                     "use_sim_time": use_sim_time,
                 },
                 condition=IfCondition(LaunchConfiguration("start_sensor")),
+            ),
+            Node(
+                package="agt_sensor_monitor", executable="agt_sensor_monitor_node",
+                name="agt_sensor_monitor", output="screen",
+                parameters=[LaunchConfiguration("sensor_monitor_params_file"), {"use_sim_time": use_sim_time}],
+                condition=IfCondition(LaunchConfiguration("start_sensor_monitor")),
             ),
             include(
                 "agt_mapping",
