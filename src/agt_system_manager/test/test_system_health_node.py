@@ -50,6 +50,28 @@ def test_topic_freshness_expires_cached_readiness_inputs():
     assert not HEALTH._topic_is_fresh(stats, "/status", 1.0, 11.001)
 
 
+def test_sensor_diagnostics_ignore_unrelated_shared_bus_messages():
+    sensor = _status({"healthy": "true"}, name="agt_sensor_monitor/lidar")
+    unrelated = _status({"healthy": "false"}, name="agt_livox_self_filter")
+    assert HEALTH._sensor_health_updates(sensor) == {"lidar": True}
+    assert HEALTH._sensor_health_updates(unrelated) == {}
+
+
+def test_sensor_diagnostic_cache_expires_each_stream_independently():
+    values = {"lidar": True, "filtered_lidar": True, "imu": True}
+    seen = {"lidar": 10.0, "filtered_lidar": 10.0, "imu": 10.0}
+    states, ready = HEALTH._sensor_health_snapshot(values, seen, 2.0, 11.9)
+    assert states == {"lidar": True, "filtered_lidar": True, "imu": True}
+    assert ready
+
+    seen["imu"] = 8.0
+    states, ready = HEALTH._sensor_health_snapshot(values, seen, 2.0, 11.9)
+    assert states["lidar"] is True
+    assert states["filtered_lidar"] is True
+    assert states["imu"] is False
+    assert ready is False
+
+
 def test_active_map_gate_uses_typed_manager_context_only():
     message = MapVersionSummary()
     message.active = True
