@@ -8,6 +8,9 @@ project Action/Service boundaries.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+import sys
 import threading
 import time
 
@@ -17,6 +20,9 @@ from agt_interfaces.srv import EvaluateTaskReadiness
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from std_msgs.msg import String
+
+from agt_navigation.task_group import TaskGroup
 
 
 class P0CapabilityFakes(Node):
@@ -29,7 +35,19 @@ class P0CapabilityFakes(Node):
         self._relocalize_cancels = 0
         self._waypoint_goals = 0
         self._waypoint_cancels = 0
+        self._events: list[str] = []
+        self._validation_errors: list[str] = []
+        self._last_relocalize_goal = {}
+        self._last_waypoint_goal = {}
+        self._expected_hashes = {}
+        if len(sys.argv) > 1:
+            for path in Path(sys.argv[1]).glob("maps/*/versions/*/tasks/*.json"):
+                task = TaskGroup.from_json(path)
+                self._expected_hashes[task.task_group_id] = task.canonical_hash()
         self._cancel_events: dict[str, threading.Event] = {}
+        self._evidence_publisher = self.create_publisher(
+            String, "/agt/test/p0_bt/capability_evidence", 10
+        )
         self.create_service(
             EvaluateTaskReadiness,
             "/agt/system/evaluate_task_readiness",
@@ -51,9 +69,34 @@ class P0CapabilityFakes(Node):
     def _scenario(self) -> str:
         return self._active_task.removeprefix("p0_")
 
+    def _publish_evidence(self) -> None:
+        with self._lock:
+            payload = {
+                "readiness_calls": dict(self._readiness_calls),
+                "relocalize_goal_count": self._relocalize_goals,
+                "relocalize_cancel_count": self._relocalize_cancels,
+                "waypoint_goal_count": self._waypoint_goals,
+                "waypoint_cancel_count": self._waypoint_cancels,
+                "last_relocalize_goal": self._last_relocalize_goal,
+                "last_waypoint_goal": self._last_waypoint_goal,
+                "events": list(self._events),
+                "validation_errors": list(self._validation_errors),
+            }
+        self._evidence_publisher.publish(String(data=json.dumps(payload, sort_keys=True)))
+
     def _readiness(self, request, response):
         task = str(request.task_id)
         with self._lock:
+            if task != self._active_task:
+                self._readiness_calls = {}
+                self._relocalize_goals = 0
+                self._relocalize_cancels = 0
+                self._waypoint_goals = 0
+                self._waypoint_cancels = 0
+                self._events = []
+                self._validation_errors = []
+                self._last_relocalize_goal = {}
+                self._last_waypoint_goal = {}
             self._active_task = task
             index = self._readiness_calls.get(task, 0)
             self._readiness_calls[task] = index + 1
@@ -63,7 +106,10 @@ class P0CapabilityFakes(Node):
         blocker = ""
         if scenario == "preflight_failure":
             ready, blocker = False, "SENSOR_INPUT_UNHEALTHY"
-        elif scenario in {"lost_localization", "relocalize_failure", "post_relocalization"}:
+        elif scenario in {
+            "lost_localization", "relocalize_failure", "post_relocalization",
+            "cancel_relocalize",
+        }:
             if profile == EvaluateTaskReadiness.Request.PROFILE_TASK_EXECUTION:
                 ready = scenario == "lost_localization" and index >= 2
                 if not ready:
@@ -74,15 +120,38 @@ class P0CapabilityFakes(Node):
         response.readiness.localization_state = "TRACKING" if ready else "LOST"
         response.readiness.blocker_codes = [] if ready else [blocker]
         response.readiness.blocker_messages = [] if ready else [blocker]
+        self._publish_evidence()
         return response
 
     def _waypoint_goal(self, goal) -> GoalResponse:
+        expected_hash = self._expected_hashes.get(str(goal.task_group_id), "")
+        fields = {
+            "map_id": str(goal.map_id),
+            "map_version_id": str(goal.map_version_id),
+            "task_group_id": str(goal.task_group_id),
+            "task_revision": int(goal.task_revision),
+            "expected_content_sha256": str(goal.expected_content_sha256),
+            "loop_count": int(goal.loop_count),
+            "client_request_id": str(goal.client_request_id),
+            "task_file": str(goal.task_file),
+            "poses_count": len(goal.poses),
+        }
+        errors = []
+        if fields["expected_content_sha256"] != expected_hash:
+            errors.append("expected_content_sha256 does not equal TaskGroup canonical hash")
         if (
             goal.task_file or goal.poses or goal.map_id != "map_demo"
             or goal.map_version_id != "v1" or not goal.task_group_id
             or goal.task_revision <= 0 or not goal.expected_content_sha256.startswith("sha256:")
             or goal.loop_count <= 0 or not goal.client_request_id.startswith("bt_")
         ):
+            errors.append("formal waypoint goal identity/shape contract failed")
+        with self._lock:
+            self._last_waypoint_goal = fields
+            self._validation_errors.extend(errors)
+            self._events.append("waypoint_goal_rejected" if errors else "waypoint_goal_accepted")
+        self._publish_evidence()
+        if errors:
             return GoalResponse.REJECT
         return GoalResponse.ACCEPT
 
@@ -100,8 +169,11 @@ class P0CapabilityFakes(Node):
                 event.set()
             if self._scenario() == "cancel_relocalize":
                 self._relocalize_cancels += 1
+                self._events.append("relocalize_cancel")
             else:
                 self._waypoint_cancels += 1
+                self._events.append("waypoint_cancel")
+        self._publish_evidence()
         return CancelResponse.ACCEPT
 
     def _finish_event(self, handle) -> None:
@@ -112,6 +184,12 @@ class P0CapabilityFakes(Node):
         with self._lock:
             self._relocalize_goals += 1
             scenario = self._scenario()
+            self._last_relocalize_goal = {
+                "mode": int(handle.request.mode),
+                "timeout_s": float(handle.request.timeout_s),
+            }
+            self._events.append("relocalize_goal")
+        self._publish_evidence()
         event = self._event_for(handle)
         if scenario == "cancel_relocalize":
             while not event.wait(0.02) and rclpy.ok():
@@ -131,6 +209,8 @@ class P0CapabilityFakes(Node):
         with self._lock:
             self._waypoint_goals += 1
             scenario = self._scenario()
+            self._events.append("waypoint_goal")
+        self._publish_evidence()
         event = self._event_for(handle)
         feedback = ExecuteWaypointTask.Feedback()
         feedback.state = "RUNNING"

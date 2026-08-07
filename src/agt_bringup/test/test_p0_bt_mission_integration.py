@@ -23,6 +23,7 @@ import rclpy
 from rclpy.action import ActionClient
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node as RosNode
+from std_msgs.msg import String
 
 
 MAP_ID = "map_demo"
@@ -80,7 +81,7 @@ def generate_test_description():
     ):
         _write_fixture(root, scenario)
     fake = launch.actions.ExecuteProcess(
-        cmd=["python3", str(Path(__file__).with_name("p0_bt_fake_nodes.py"))], output="screen",
+        cmd=["python3", str(Path(__file__).with_name("p0_bt_fake_nodes.py")), str(root)], output="screen",
         sigterm_timeout="1.0", sigkill_timeout="1.0",
     )
     mission = LaunchNode(
@@ -113,6 +114,13 @@ class TestP0BTMissionIntegration(unittest.TestCase):
         cls.node = RosNode("p0_bt_test_client")
         cls.executor = SingleThreadedExecutor()
         cls.executor.add_node(cls.node)
+        cls.evidence_messages = []
+        cls.node.create_subscription(
+            String,
+            "/agt/test/p0_bt/capability_evidence",
+            lambda message: cls.evidence_messages.append(message.data),
+            10,
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -124,6 +132,7 @@ class TestP0BTMissionIntegration(unittest.TestCase):
 
     def _run(self, scenario, *, cancel=False):
         node, executor = self.node, self.executor
+        self.evidence_messages.clear()
         client = ActionClient(node, ExecuteMission, "/agt/missions/execute")
         self.assertTrue(client.wait_for_server(timeout_sec=10.0))
         request = ExecuteMission.Goal()
@@ -136,10 +145,27 @@ class TestP0BTMissionIntegration(unittest.TestCase):
             time.sleep(0.2)
             _spin(executor, handle.cancel_goal_async())
         wrapped = _spin(executor, handle.get_result_async(), 20.0)
-        return wrapped.result, feedback
+        evidence = self._evidence()
+        return wrapped.result, feedback, evidence
+
+    def _evidence(self):
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            if self.evidence_messages:
+                return json.loads(self.evidence_messages[-1])
+            self.executor.spin_once(timeout_sec=0.05)
+        self.fail("test-only capability evidence timed out")
+
+    def _assert_counts(self, evidence, *, relocalize_goals, relocalize_cancels,
+                       waypoint_goals, waypoint_cancels):
+        self.assertEqual(evidence["relocalize_goal_count"], relocalize_goals, evidence)
+        self.assertEqual(evidence["relocalize_cancel_count"], relocalize_cancels, evidence)
+        self.assertEqual(evidence["waypoint_goal_count"], waypoint_goals, evidence)
+        self.assertEqual(evidence["waypoint_cancel_count"], waypoint_cancels, evidence)
+        self.assertEqual(evidence["validation_errors"], [], evidence)
 
     def test_full_chain_success_and_feedback(self):
-        result, feedback = self._run("already_localized")
+        result, feedback, evidence = self._run("already_localized")
         self.assertTrue(result.success, f"{result.error_code}: {result.message}; {result.final_status.message}")
         self.assertEqual(result.final_status.state, MissionStatus.STATE_SUCCEEDED)
         self.assertTrue(
@@ -149,9 +175,16 @@ class TestP0BTMissionIntegration(unittest.TestCase):
         self.assertIn("bt_backend_started", Path(result.audit_log_uri).read_text())
         audit = Path(result.audit_log_uri).read_text()
         self.assertTrue(all(event in audit for event in ("bt_tree_started", "bt_tree_succeeded")))
+        self._assert_counts(evidence, relocalize_goals=0, relocalize_cancels=0,
+                            waypoint_goals=1, waypoint_cancels=0)
+        self.assertEqual(evidence["last_waypoint_goal"]["expected_content_sha256"],
+                         TaskGroup.from_json(
+                             RUNTIME_ROOT / "maps" / MAP_ID / "versions" / MAP_VERSION
+                             / "tasks" / "p0_already_localized.json"
+                         ).canonical_hash())
 
     def _assert_failure(self, scenario):
-        result, _ = self._run(scenario)
+        result, _, evidence = self._run(scenario)
         self.assertFalse(result.success, result.message)
         if scenario == "relocalize_failure":
             self.assertEqual(result.error_code, MissionStatus.ERROR_CHILD_FAILED)
@@ -160,19 +193,41 @@ class TestP0BTMissionIntegration(unittest.TestCase):
             self.assertIn("SENSOR_INPUT_UNHEALTHY", result.final_status.blocker_codes)
         if scenario == "post_relocalization":
             self.assertIn("LOCALIZATION_NOT_TRACKING", result.final_status.blocker_codes)
+        audit = Path(result.audit_log_uri).read_text()
+        self.assertIn("bt_tree_failed", audit)
+        if scenario == "preflight_failure":
+            expected = (0, 0, 0, 0)
+        elif scenario == "relocalize_failure":
+            expected = (1, 0, 0, 0)
+        elif scenario == "post_relocalization":
+            expected = (1, 0, 0, 0)
+        else:
+            expected = (0, 0, 0, 0) if scenario == "preflight_failure" else (0, 0, 1, 0)
+        self._assert_counts(evidence, relocalize_goals=expected[0], relocalize_cancels=expected[1],
+                            waypoint_goals=expected[2], waypoint_cancels=expected[3])
 
     def test_lost_localization(self):
-        result, _ = self._run("lost_localization")
+        result, _, evidence = self._run("lost_localization")
         self.assertTrue(result.success, result.message)
+        self._assert_counts(evidence, relocalize_goals=1, relocalize_cancels=0,
+                            waypoint_goals=1, waypoint_cancels=0)
     def test_preflight_failure(self): self._assert_failure("preflight_failure")
     def test_relocalize_failure(self): self._assert_failure("relocalize_failure")
     def test_post_relocalization_failure(self): self._assert_failure("post_relocalization")
     def test_waypoint_failure(self): self._assert_failure("waypoint_failure")
 
     def _assert_cancel(self, scenario):
-        result, _ = self._run(scenario, cancel=True)
+        result, _, evidence = self._run(scenario, cancel=True)
         self.assertFalse(result.success)
         self.assertEqual(result.final_status.state, MissionStatus.STATE_CANCELED)
+        self.assertIn("bt_tree_canceled", Path(result.audit_log_uri).read_text())
+        if scenario == "cancel_relocalize":
+            self._assert_counts(evidence, relocalize_goals=1, relocalize_cancels=1,
+                                waypoint_goals=0, waypoint_cancels=0)
+            self.assertNotIn("waypoint_goal", evidence["events"])
+        else:
+            self._assert_counts(evidence, relocalize_goals=0, relocalize_cancels=0,
+                                waypoint_goals=1, waypoint_cancels=1)
 
     def test_parent_cancel_during_waypoint(self): self._assert_cancel("cancel_waypoint")
     def test_parent_cancel_during_relocalize(self): self._assert_cancel("cancel_relocalize")
