@@ -396,7 +396,7 @@ class SystemHealthNode(Node):
             message.components.append(component)
         return message
 
-    def _evaluate(self):
+    def _evaluate(self, gate_profile: int = 0):
         now = time.monotonic()
         with self._stats_lock:
             self._refresh_sensor_health_locked(now)
@@ -455,12 +455,15 @@ class SystemHealthNode(Node):
                     self._lifecycle_states.get(node) == "active"
                     for node in _NAV2_LIFECYCLE_NODES
                 ),
+                map_to_odom_fresh="map->odom" in self._frames,
+                odom_to_base_fresh="odom->base_footprint" in self._frames,
+                base_to_lidar_fresh="base_link->lidar_link" in self._frames,
                 tf_chain_fresh={"map->odom", "odom->base_footprint", "base_link->lidar_link"}.issubset(self._frames),
                 task_valid=self._task_valid,
                 sensor_input_ready=self._sensor_required_ready,
                 health_revision=self._health.revision if self._health else 0,
             )
-        )
+        , gate_profile=gate_profile)
 
     @staticmethod
     def _localization_state(value: int) -> str:
@@ -498,8 +501,8 @@ class SystemHealthNode(Node):
         return response
 
     def _evaluate_readiness(self, request, response):
-        del request
-        response.readiness = self._readiness_message(self._evaluate())
+        response.readiness = self._readiness_message(
+            self._evaluate(gate_profile=int(request.gate_profile)))
         return response
 
 

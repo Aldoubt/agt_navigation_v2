@@ -11,13 +11,26 @@ BT::PortsList IsTaskReady::providedPorts()
 {
   return {
     BT::InputPort<std::string>("task_id", "", "optional project task identity"),
+    BT::InputPort<std::string>("gate_profile", "task_execution", "system-manager readiness profile"),
     BT::InputPort<double>("timeout_s", 3.0, "service timeout in seconds"),
     BT::OutputPort<std::string>("last_blocker_code"),
     BT::OutputPort<std::string>("last_blocker_message")};
 }
 
+BT::NodeStatus IsTaskReady::executeTick()
+{
+  // Readiness is a repeatable query capability. A later tree execution must
+  // not reuse a terminal result from an earlier execution.
+  if (status() != BT::NodeStatus::IDLE && status() != BT::NodeStatus::RUNNING) {
+    resetStatus();
+  }
+  return StatefulActionNode::executeTick();
+}
+
 BT::NodeStatus IsTaskReady::onStart()
 {
+  setOutput("last_blocker_code", std::string{});
+  setOutput("last_blocker_message", std::string{});
   future_ = {};
   client_ = node_->create_client<agt_interfaces::srv::EvaluateTaskReadiness>(
     "/agt/system/evaluate_task_readiness");
@@ -29,6 +42,17 @@ BT::NodeStatus IsTaskReady::onStart()
   auto request = std::make_shared<agt_interfaces::srv::EvaluateTaskReadiness::Request>();
   getInput("task_id", request->task_id);
   request->validate_task = true;
+  std::string profile = "task_execution";
+  getInput("gate_profile", profile);
+  if (profile == "relocalization") {
+    request->gate_profile = agt_interfaces::srv::EvaluateTaskReadiness::Request::PROFILE_RELOCALIZATION;
+  } else if (profile == "task_execution") {
+    request->gate_profile = agt_interfaces::srv::EvaluateTaskReadiness::Request::PROFILE_TASK_EXECUTION;
+  } else {
+    setOutput("last_blocker_code", std::string{"INVALID_READINESS_PROFILE"});
+    setOutput("last_blocker_message", std::string{"readiness gate profile is not supported"});
+    return BT::NodeStatus::FAILURE;
+  }
   future_ = client_->async_send_request(request).future.share();
   started_ = std::chrono::steady_clock::now();
   return BT::NodeStatus::RUNNING;

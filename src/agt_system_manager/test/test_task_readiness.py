@@ -20,6 +20,9 @@ def ready_inputs() -> ReadinessInputs:
         chassis_connected=True,
         safety_allows_navigation=True,
         nav2_active=True,
+        map_to_odom_fresh=True,
+        odom_to_base_fresh=True,
+        base_to_lidar_fresh=True,
         tf_chain_fresh=True,
         task_valid=True,
         health_revision=7,
@@ -30,6 +33,17 @@ def test_readiness_is_ready_only_when_all_contracts_hold():
     result = evaluate_task_readiness(ready_inputs())
     assert result.ready
     assert result.blocker_codes == []
+
+
+def test_relocalization_profile_does_not_require_tracking_pose_or_localization_tf():
+    inputs = ready_inputs()
+    inputs.localization_state = "LOST"
+    inputs.pose_valid = False
+    inputs.localization_accepted = False
+    inputs.status_stale = True
+    inputs.map_to_odom_fresh = False
+    result = evaluate_task_readiness(inputs, gate_profile=1)
+    assert result.ready
 
 
 def test_readiness_reports_independent_blockers():
@@ -46,6 +60,12 @@ def test_readiness_reports_independent_blockers():
         "EMERGENCY_STOP",
         "TASK_INVALID",
     ]
+
+
+def test_unknown_readiness_profile_fails_closed_without_fallback():
+    result = evaluate_task_readiness(ready_inputs(), gate_profile=99)
+    assert not result.ready
+    assert result.blocker_codes == ["INVALID_READINESS_PROFILE"]
 
 
 def test_stale_localization_and_missing_runtime_inputs_fail_closed():

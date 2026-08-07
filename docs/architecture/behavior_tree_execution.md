@@ -6,7 +6,7 @@ manager. The authoritative business boundary remains:
 ```text
 /agt/missions/execute
         -> agt_mission_manager
-        -> future controlled BT backend (V25-06)
+        -> controlled BT backend (V25-06)
         -> BehaviorTree.CPP
         -> project Action nodes
         -> Relocalize / ExecuteWaypointTask / other project capabilities
@@ -22,3 +22,18 @@ unavailable, timed-out, aborted, or unconfirmed-cancelled operations.
 The V25-05 smoke runner loads the allowlisted installed smoke tree and executes
 no motion capability. It is not part of default bringup. Groot2 monitoring, if
 available in the deployment, is diagnostic only and disabled by default.
+
+## V25-06 first mission status
+
+The first production-style tree is implemented behind the `behavior_tree`
+backend of `agt_mission_manager`. It accepts exactly one `WAYPOINT_TASK` step,
+uses a per-execution safe id for both internal BT and waypoint requests, and
+requires a non-empty canonical task content hash. Readiness blockers are
+returned as structured Mission status evidence; internal BT failures are not
+guessed to be localization failures. Parent cancellation has bounded goal,
+result, and cancel waits and propagates through `haltTree()` to project Action
+nodes.
+
+Status: `IMPLEMENTED`; unit/contract validated; fake integration pending V25-07;
+vehicle validation pending.
+The default backend remains `sequential`.
