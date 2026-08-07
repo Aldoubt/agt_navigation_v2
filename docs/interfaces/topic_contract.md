@@ -23,9 +23,25 @@
 | `/agt/perception/ground_plane` | `not implemented in baseline` | `base_footprint` | reserved perception interface | diagnostics/consumers |
 | `/agt/map/local_occupancy` | `nav_msgs/msg/OccupancyGrid` | map-local working grid | reserved map interface | mapping UI/audit |
 | `/agt/map/global_occupancy` | `nav_msgs/msg/OccupancyGrid` | `map` | Nav2 map server | global costmap/planner |
-| `/agt/map/waypoints` | `geometry_msgs/msg/PoseArray` | `map` | reserved task/UI interface | preview/task authoring |
+| `/agt/map/waypoints` | `agt_interfaces/msg/SemanticWaypointArray` | `map`；命名语义路点库，不表示执行顺序 | `agt_semantic_map_server` | task authoring、mission/navigation clients |
 | `/agt/system/health` | `agt_interfaces/msg/SystemHealth` | structured health snapshot | `agt_system_manager` | all clients |
 | `/agt/system/task_readiness` | `agt_interfaces/msg/TaskReadiness` | shared fail-closed task gate | `agt_system_manager` | navigation/safety/clients |
+
+## Semantic waypoint boundary
+
+`/agt/map/waypoints` 是地图语义产品，不是 Nav2 goal 列表。每个 `SemanticWaypoint` 保留稳定
+`id/name/role`、`map` 位姿、位置/朝向容差、建议速度和 tags；数组同时绑定 `map_id`、语义
+schema version 与基础地图 SHA256。
+
+必须保持：
+
+```text
+Semantic Waypoint Library != Waypoint Task
+```
+
+Waypoint Library 描述“地图上有哪些有名字的锚点”；Waypoint Task/Task Group 描述“本次按什么
+顺序执行哪些目标”。正式运动仍通过 `/agt/navigation/execute_waypoint_task` 等 project Action，
+不得把 `/agt/map/waypoints` 直接当作可执行 `PoseArray`。
 
 ## Package-local / debug topic boundary
 
