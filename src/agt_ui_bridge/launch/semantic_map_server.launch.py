@@ -17,6 +17,11 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "base_map_topic", default_value="/agt/map/global_occupancy"
             ),
+            DeclareLaunchArgument(
+                "semantic_mode",
+                default_value="coverage",
+                choices=["coverage", "waypoint"],
+            ),
             DeclareLaunchArgument("outside_field_is_keepout", default_value="true"),
             DeclareLaunchArgument("use_sim_time", default_value="false"),
             DeclareLaunchArgument("config", default_value=str(default_config)),
@@ -31,6 +36,7 @@ def generate_launch_description():
                         "semantic_map": LaunchConfiguration("semantic_map"),
                         "platform_profile": LaunchConfiguration("platform_profile"),
                         "base_map_topic": LaunchConfiguration("base_map_topic"),
+                        "semantic_mode": LaunchConfiguration("semantic_mode"),
                         "outside_field_is_keepout": LaunchConfiguration(
                             "outside_field_is_keepout"
                         ),

@@ -1,4 +1,4 @@
-"""Semantic task validation shared by file I/O and the Qt editor."""
+"""Semantic-map validation shared by file I/O, servers and the Qt editor."""
 
 from dataclasses import dataclass, field
 import hashlib
@@ -10,24 +10,35 @@ from shapely.geometry import LineString, Point, Polygon
 from shapely.validation import explain_validity
 
 
+SUPPORTED_SEMANTIC_SCHEMA_VERSIONS = {"1.0", "1.1"}
+WAYPOINT_MINIMUM_SCHEMA = "1.1"
 FEATURE_GEOMETRY = {
     "field_boundary": "Polygon",
     "exclusion_zone": "Polygon",
     "entry_pose": "Point",
     "work_direction": "LineString",
+    "waypoint": "Point",
     "row_centerline": "LineString",
     "access_lane": "LineString",
     "headland_zone": "Polygon",
     "keepout_zone": "Polygon",
 }
-REQUIRED_FEATURE_COUNTS = {
+COVERAGE_REQUIRED_FEATURE_COUNTS = {
     "field_boundary": 1,
     "exclusion_zone": 1,
     "entry_pose": 1,
     "work_direction": 1,
 }
+# Backward-compatible public name used by existing tests/callers.
+REQUIRED_FEATURE_COUNTS = COVERAGE_REQUIRED_FEATURE_COUNTS
+WAYPOINT_REQUIRED_FEATURE_COUNTS = {"waypoint": 1}
 FEATURE_ID = re.compile(r"^[a-z][a-z0-9_]*$")
 GEOMETRY_EPSILON = 1e-9
+
+WAYPOINT_DEFAULT_ROLE = "navigation"
+WAYPOINT_DEFAULT_POSITION_TOLERANCE = 0.30
+WAYPOINT_DEFAULT_YAW_TOLERANCE = 0.35
+WAYPOINT_DEFAULT_PREFERRED_SPEED = 0.0
 
 
 @dataclass(frozen=True)
@@ -62,9 +73,45 @@ class ValidationContext:
     base_map_path: object = None
 
 
+def validate_semantic_document(semantic_map, context=None):
+    """Validate a semantic document without assuming one task/application profile."""
+
+    return _validate_semantic_map(
+        semantic_map,
+        context=context,
+        required_feature_counts={},
+    )
+
+
 def validate_semantic_map(semantic_map, context=None):
+    """Backward-compatible coverage semantic validation.
+
+    Existing callers historically treated ``validate_semantic_map`` as the
+    coverage-task validator, including required coverage feature counts. Keep
+    that behavior while new V2.5 code uses ``validate_semantic_document`` or
+    ``validate_waypoint_map`` explicitly.
+    """
+
+    return _validate_semantic_map(
+        semantic_map,
+        context=context,
+        required_feature_counts=COVERAGE_REQUIRED_FEATURE_COUNTS,
+    )
+
+
+def validate_waypoint_map(semantic_map, context=None):
+    """Validate a semantic waypoint library independently from coverage semantics."""
+
+    return _validate_semantic_map(
+        semantic_map,
+        context=context,
+        required_feature_counts=WAYPOINT_REQUIRED_FEATURE_COUNTS,
+    )
+
+
+def _validate_semantic_map(semantic_map, context, required_feature_counts):
     report = ValidationReport()
-    if semantic_map.schema_version != "1.0":
+    if semantic_map.schema_version not in SUPPORTED_SEMANTIC_SCHEMA_VERSIONS:
         report.add(
             "unsupported_schema_version",
             f"unsupported schema version: {semantic_map.schema_version}",
@@ -112,6 +159,12 @@ def validate_semantic_map(semantic_map, context=None):
                 object_id,
             )
             continue
+        if feature.feature_type == "waypoint" and semantic_map.schema_version != WAYPOINT_MINIMUM_SCHEMA:
+            report.add(
+                "waypoint_requires_schema_1_1",
+                "waypoint features require semantic-map schema 1.1",
+                object_id,
+            )
         if feature.enabled:
             enabled_counts[feature.feature_type] += 1
         if feature.geometry_type != expected_geometry:
@@ -136,8 +189,8 @@ def validate_semantic_map(semantic_map, context=None):
                     object_id,
                 )
 
-    for feature_type, minimum_count in REQUIRED_FEATURE_COUNTS.items():
-        if enabled_counts[feature_type] < minimum_count:
+    for feature_type, minimum_count in required_feature_counts.items():
+        if enabled_counts.get(feature_type, 0) < minimum_count:
             report.add(
                 "missing_feature_type",
                 f"at least {minimum_count} enabled {feature_type} is required",
@@ -149,16 +202,15 @@ def validate_semantic_map(semantic_map, context=None):
 
 
 def validate_task(semantic_map, coverage, context=None):
+    """Validate the existing coverage task contract."""
+
     report = validate_semantic_map(semantic_map, context=context)
+    _validate_binding_identity(semantic_map, coverage, report)
     if coverage.schema_version != "1.0":
         report.add(
             "unsupported_coverage_schema",
             f"unsupported coverage schema: {coverage.schema_version}",
         )
-    if coverage.map_id != semantic_map.map_id:
-        report.add("map_id_mismatch", "semantic map and coverage map_id differ")
-    if coverage.frame_id != "map" or coverage.frame_id != semantic_map.frame_id:
-        report.add("coverage_frame_mismatch", "coverage frame_id must be map")
     if coverage.planning_mode not in {"polygon", "annotated_rows"}:
         report.add(
             "invalid_planning_mode",
@@ -189,6 +241,32 @@ def validate_task(semantic_map, coverage, context=None):
     return report
 
 
+def validate_waypoint_task(semantic_map, coverage, context=None):
+    """Validate a waypoint library plus the existing map-binding metadata.
+
+    ``coverage.yaml`` remains schema 1.0 in V25-04 and is reused only for the
+    map/frame/base-map binding here; coverage planning parameters do not become
+    waypoint requirements.
+    """
+
+    report = validate_waypoint_map(semantic_map, context=context)
+    _validate_binding_identity(semantic_map, coverage, report)
+    if coverage.schema_version != "1.0":
+        report.add(
+            "unsupported_binding_schema",
+            f"waypoint map binding requires coverage schema 1.0, got {coverage.schema_version}",
+        )
+    _validate_base_map_hash(coverage, context, report)
+    return report
+
+
+def _validate_binding_identity(semantic_map, coverage, report):
+    if coverage.map_id != semantic_map.map_id:
+        report.add("map_id_mismatch", "semantic map and coverage map_id differ")
+    if coverage.frame_id != "map" or coverage.frame_id != semantic_map.frame_id:
+        report.add("coverage_frame_mismatch", "coverage frame_id must be map")
+
+
 def _validate_geometry(feature, report):
     object_id = feature.id or "<missing>"
     coordinates = feature.coordinates
@@ -196,12 +274,14 @@ def _validate_geometry(feature, report):
         if not _is_point(coordinates):
             report.add("invalid_point", "Point requires two finite values", object_id)
             return False
-        yaw = feature.properties.get("yaw")
-        if not _is_finite_number(yaw):
-            report.add(
-                "invalid_entry_yaw", "entry_pose requires finite yaw", object_id
-            )
-            return False
+        if feature.feature_type in {"entry_pose", "waypoint"}:
+            yaw = feature.properties.get("yaw")
+            if not _is_finite_number(yaw):
+                code = "invalid_entry_yaw" if feature.feature_type == "entry_pose" else "invalid_waypoint_yaw"
+                report.add(code, f"{feature.feature_type} requires finite yaw", object_id)
+                return False
+        if feature.feature_type == "waypoint":
+            _validate_waypoint_properties(feature, report)
     elif feature.geometry_type == "LineString":
         if not isinstance(coordinates, list) or len(coordinates) < 2:
             report.add(
@@ -285,6 +365,35 @@ def _validate_geometry(feature, report):
             valid = False
         return valid
     return True
+
+
+def _validate_waypoint_properties(feature, report):
+    object_id = feature.id or "<missing>"
+    role = feature.properties.get("role", WAYPOINT_DEFAULT_ROLE)
+    if not isinstance(role, str) or not role.strip():
+        report.add("invalid_waypoint_role", "waypoint role must be a non-empty string", object_id)
+
+    numeric = {
+        "position_tolerance": WAYPOINT_DEFAULT_POSITION_TOLERANCE,
+        "yaw_tolerance": WAYPOINT_DEFAULT_YAW_TOLERANCE,
+        "preferred_speed": WAYPOINT_DEFAULT_PREFERRED_SPEED,
+    }
+    for field_name, default in numeric.items():
+        value = feature.properties.get(field_name, default)
+        if not _is_finite_number(value) or value < 0.0:
+            report.add(
+                "invalid_waypoint_property",
+                f"waypoint {field_name} must be finite and non-negative",
+                object_id,
+            )
+
+    tags = feature.properties.get("tags", [])
+    if not isinstance(tags, list) or any(not isinstance(tag, str) for tag in tags):
+        report.add(
+            "invalid_waypoint_tags",
+            "waypoint tags must be a list of strings",
+            object_id,
+        )
 
 
 def _validate_spatial_relationships(semantic_map, geometries, context, report):

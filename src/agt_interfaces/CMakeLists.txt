@@ -19,6 +19,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BagSessionSummary.msg"
   "msg/ExperimentSummary.msg"
   "msg/RobotState.msg"
+  "msg/SemanticWaypoint.msg"
+  "msg/SemanticWaypointArray.msg"
   "msg/SystemHealth.msg"
   "msg/TaskReadiness.msg"
   "srv/EvaluateTaskReadiness.srv"
@@ -60,6 +62,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_execute_waypoint_task_serialization
     test/test_execute_waypoint_task_serialization.py
+  )
+  ament_add_pytest_test(
+    test_semantic_waypoint_interfaces
+    test/test_semantic_waypoint_interfaces.py
   )
   ament_add_pytest_test(
     test_localization_interfaces

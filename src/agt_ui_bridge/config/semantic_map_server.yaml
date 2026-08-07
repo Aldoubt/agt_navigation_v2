@@ -3,6 +3,9 @@ agt_semantic_map_server:
     semantic_map: ""
     platform_profile: ""
     base_map_topic: /agt/map/global_occupancy
+    # coverage preserves the existing keepout/coverage contract; waypoint loads
+    # a waypoint-only semantic library and does not publish/replace keepout mask.
+    semantic_mode: coverage
     auto_load: true
     # Extra clearance after applying the canonical navigation footprint.
     minimum_boundary_clearance: 0.0

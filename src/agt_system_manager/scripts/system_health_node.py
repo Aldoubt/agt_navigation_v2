@@ -63,6 +63,10 @@ _NAV2_LIFECYCLE_NODES = (
     "waypoint_follower",
     "collision_monitor",
 )
+_SENSOR_STREAMS = ("lidar", "filtered_lidar", "imu")
+_SENSOR_DIAGNOSTIC_NAMES = {
+    stream: f"agt_sensor_monitor/{stream}" for stream in _SENSOR_STREAMS
+}
 
 
 def _topic_is_fresh(stats, topic: str, timeout: float, now: float) -> bool:
@@ -72,6 +76,35 @@ def _topic_is_fresh(stats, topic: str, timeout: float, now: float) -> bool:
         and int(observation.get("count", 0)) > 0
         and now - float(observation.get("last_seen", float("-inf"))) <= timeout
     )
+
+
+def _sensor_health_updates(message: DiagnosticArray) -> dict[str, bool]:
+    """Return only sensor-monitor statuses actually present in this array.
+
+    /diagnostics is shared by many publishers. Absence from one DiagnosticArray
+    must never be interpreted as a negative update for a cached sensor status.
+    """
+
+    by_name = {status.name: status for status in message.status}
+    updates = {}
+    for stream, status_name in _SENSOR_DIAGNOSTIC_NAMES.items():
+        status = by_name.get(status_name)
+        if status is None:
+            continue
+        values = {item.key: item.value.strip().lower() for item in status.values}
+        updates[stream] = values.get("healthy") == "true"
+    return updates
+
+
+def _sensor_health_snapshot(values, seen, timeout: float, now: float):
+    """Apply per-status freshness to cached sensor health values."""
+
+    states = {
+        stream: bool(values.get(stream, False))
+        and now - float(seen.get(stream, float("-inf"))) <= timeout
+        for stream in _SENSOR_STREAMS
+    }
+    return states, all(states.values())
 
 
 def _safety_gate_from_status(message: DiagnosticArray) -> tuple[bool, bool, bool, bool]:
@@ -153,11 +186,15 @@ class SystemHealthNode(Node):
         self._active_map_timeout = float(
             self.declare_parameter("active_map_timeout", 3.0).value
         )
+        self._sensor_diagnostics_timeout = float(
+            self.declare_parameter("sensor_diagnostics_timeout", 2.0).value
+        )
         if min(
             self._localization_status_timeout,
             self._safety_status_timeout,
             self._chassis_status_timeout,
             self._active_map_timeout,
+            self._sensor_diagnostics_timeout,
         ) <= 0.0:
             raise ValueError("readiness status timeouts must be positive")
         self._min_free_space_bytes = int(float(self.declare_parameter("min_free_space_gb", 1.0).value) * 1024**3)
@@ -173,6 +210,10 @@ class SystemHealthNode(Node):
             "sensor_input.lidar_healthy": False,
             "sensor_input.filtered_lidar_healthy": False,
             "sensor_input.imu_healthy": False,
+        }
+        self._sensor_health_values = {stream: False for stream in _SENSOR_STREAMS}
+        self._sensor_health_seen = {
+            stream: float("-inf") for stream in _SENSOR_STREAMS
         }
         self._sensor_required_ready = False
         self._frames: set[str] = set()
@@ -207,6 +248,17 @@ class SystemHealthNode(Node):
             )
         self.create_timer(self._evaluator.period_sec, self._tick, callback_group=self._control_callback_group)
         self._tick()
+
+    def _refresh_sensor_health_locked(self, now: float) -> None:
+        states, ready = _sensor_health_snapshot(
+            self._sensor_health_values,
+            self._sensor_health_seen,
+            self._sensor_diagnostics_timeout,
+            now,
+        )
+        for stream, healthy in states.items():
+            self._conditions[f"sensor_input.{stream}_healthy"] = healthy
+        self._sensor_required_ready = ready
 
     def _topic_callback(self, topic: str, type_name: str, message) -> None:
         now = time.monotonic()
@@ -243,18 +295,10 @@ class SystemHealthNode(Node):
                     self._safety_status_seen and self._safety_allows_navigation
                 )
             elif topic == "/diagnostics":
-                values_by_name = {
-                    status.name: {item.key: item.value.strip().lower() for item in status.values}
-                    for status in message.status
-                }
-                for stream in ("lidar", "filtered_lidar", "imu"):
-                    self._conditions[f"sensor_input.{stream}_healthy"] = (
-                        values_by_name.get(f"agt_sensor_monitor/{stream}", {}).get("healthy") == "true"
-                    )
-                self._sensor_required_ready = all(
-                    self._conditions[f"sensor_input.{stream}_healthy"]
-                    for stream in ("lidar", "filtered_lidar", "imu")
-                )
+                for stream, healthy in _sensor_health_updates(message).items():
+                    self._sensor_health_values[stream] = healthy
+                    self._sensor_health_seen[stream] = now
+                self._refresh_sensor_health_locked(now)
 
     def _refresh_graph(self) -> None:
         self._nodes = {
@@ -292,6 +336,7 @@ class SystemHealthNode(Node):
         self._frames = frames
 
     def _tick(self) -> None:
+        now = time.monotonic()
         self._mode = str(self.get_parameter("active_mode").value).upper()
         self._refresh_graph()
         self._refresh_lifecycle()
@@ -301,11 +346,12 @@ class SystemHealthNode(Node):
         except OSError:
             self._conditions["disk.free_space_ok"] = False
         with self._stats_lock:
+            self._refresh_sensor_health_locked(now)
             observations = {key: TopicObservation(**value) for key, value in self._stats.items()}
         self._health = self._evaluator.evaluate(
             self._mode,
             observations,
-            now=time.monotonic(),
+            now=now,
             frames=self._frames,
             nodes=self._nodes,
             lifecycle_states=self._lifecycle_states,
@@ -353,6 +399,7 @@ class SystemHealthNode(Node):
     def _evaluate(self):
         now = time.monotonic()
         with self._stats_lock:
+            self._refresh_sensor_health_locked(now)
             localization = self._localization
             localization_fresh = _topic_is_fresh(
                 self._stats,
