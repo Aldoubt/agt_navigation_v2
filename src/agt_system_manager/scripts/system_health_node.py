@@ -455,6 +455,9 @@ class SystemHealthNode(Node):
                     self._lifecycle_states.get(node) == "active"
                     for node in _NAV2_LIFECYCLE_NODES
                 ),
+                map_to_odom_fresh="map->odom" in self._frames,
+                odom_to_base_fresh="odom->base_footprint" in self._frames,
+                base_to_lidar_fresh="base_link->lidar_link" in self._frames,
                 tf_chain_fresh={"map->odom", "odom->base_footprint", "base_link->lidar_link"}.issubset(self._frames),
                 task_valid=self._task_valid,
                 sensor_input_ready=self._sensor_required_ready,

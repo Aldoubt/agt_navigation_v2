@@ -6,6 +6,22 @@ Mission 通过 `/agt/missions/execute` 调用项目 waypoint Action；活动地�
 
 本文记录当前 Bunker Qt5/FAST-LIO 导航基线的两种启动方式：命令行直接启动，以及 Web 控制台通过系统管理器启动。文档只描述当前代码已经实现的链路，不把语义地图、覆盖规划和实车运动验收描述成默认已开启能力。
 
+V25-06 first BT mission uses the following implemented chain behind the same
+public Mission Action; it does not add a second Mission owner:
+
+```text
+/agt/missions/execute
+  -> agt_mission_manager (Mission state/audit/cancel owner)
+  -> /agt/internal/bt/execute
+  -> allowlisted BehaviorTree.CPP tree
+  -> IsTaskReady -> Relocalize (when needed) -> ExecuteWaypointTask
+```
+
+The BT backend is restricted to one `WAYPOINT_TASK`, carries structured
+readiness blockers and task content identity, and has bounded cancellation.
+Fake integration is validated; vehicle validation remains pending. The
+sequential backend remains the default.
+
 ## 1. 启动前环境
 
 所有 ROS 2 命令都应在同一个工作区环境中执行。`AGT_WS` 只是示例变量，不要把用户名、工作区或设备路径写死到脚本中。
