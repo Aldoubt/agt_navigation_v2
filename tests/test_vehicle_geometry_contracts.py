@@ -53,12 +53,12 @@ def test_bunker_profile_is_the_canonical_navigation_geometry():
 
 
 def test_bunker_description_dimensions_match_verified_platform_body():
-    profile = _load_yaml(PROFILE_PATH)["platform"]["geometry"]
+    geometry = _load_yaml(PROFILE_PATH)["platform"]["geometry"]
     description = _load_yaml(BUNKER_DESCRIPTION_CONFIG_PATH)["/**"]["ros__parameters"]
 
-    assert description["base_length"] == pytest.approx(profile["length"])
-    assert description["base_width"] == pytest.approx(profile["width"])
-    assert description["base_height"] == pytest.approx(profile["height"])
+    assert description["base_length"] == pytest.approx(geometry["length"])
+    assert description["base_width"] == pytest.approx(geometry["width"])
+    assert description["base_height"] == pytest.approx(geometry["height"])
 
 
 def test_nav2_costmaps_match_the_platform_navigation_footprint():
@@ -86,15 +86,15 @@ def test_obstacle_filter_crop_matches_the_platform_navigation_footprint():
 
 
 def test_self_filter_policy_uses_urdf_body_and_explicit_profile_supplements():
-    profile = _load_yaml(PROFILE_PATH)["platform"]
-    geometry = profile["geometry"]
+    platform = _load_yaml(PROFILE_PATH)["platform"]
+    geometry = platform["geometry"]
     self_filter = geometry["self_filter"]
     parameters = _load_yaml(SELF_FILTER_CONFIG_PATH)[
         "agt_livox_self_filter"
     ]["ros__parameters"]
 
     assert self_filter["enabled"] is True
-    assert self_filter["frame"] == profile["footprint_frame"]
+    assert self_filter["frame"] == platform["footprint_frame"]
     assert self_filter["padding"] >= 0.0
     assert self_filter["boxes"][0]["verified"] is False
     assert self_filter["boxes"][0]["min"][2] < self_filter["boxes"][0]["max"][2]
@@ -103,21 +103,21 @@ def test_self_filter_policy_uses_urdf_body_and_explicit_profile_supplements():
     # profile boxes remain only as explicit supplemental geometry and as the
     # complete legacy/profile A/B source.
     assert parameters["geometry_source"] == "urdf"
-    assert parameters["urdf_reference_frame"] == profile["base_frame"]
+    assert parameters["urdf_reference_frame"] == platform["base_frame"]
     assert parameters["robot_description_topic"] == "/robot_description"
     assert parameters["filter_geometry_topic"] == "/agt/sensors/lidar/self_filter/geometry"
 
 
 def test_profile_self_filter_fallback_does_not_reuse_navigation_footprint():
-    profile = _load_yaml(PROFILE_PATH)["platform"]["geometry"]
-    self_filter = profile["self_filter"]
+    geometry = _load_yaml(PROFILE_PATH)["platform"]["geometry"]
+    self_filter = geometry["self_filter"]
     body = {
-        "min_x": -profile["length"] / 2.0,
-        "max_x": profile["length"] / 2.0,
-        "min_y": -profile["width"] / 2.0,
-        "max_y": profile["width"] / 2.0,
+        "min_x": -geometry["length"] / 2.0,
+        "max_x": geometry["length"] / 2.0,
+        "min_y": -geometry["width"] / 2.0,
+        "max_y": geometry["width"] / 2.0,
     }
-    navigation = _bounds(profile["navigation_footprint"])
+    navigation = _bounds(geometry["navigation_footprint"])
     assert self_filter["include_chassis_body"] is True
     assert body["max_x"] < navigation["max_x"]
     assert self_filter["padding"] != pytest.approx(0.08)
