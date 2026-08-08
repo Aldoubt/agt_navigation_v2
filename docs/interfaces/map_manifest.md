@@ -48,7 +48,7 @@ Existing schema-v1 manifests that predate the V25-09A lineage fields remain read
 
 ## Stable `map_content_sha256`
 
-Route compatibility must not use the raw SHA256 of `manifest.yaml`, because `agt_map_manager` legitimately edits lifecycle fields such as `state`, `active` and `pinned` during activation, pinning and archival.
+Route compatibility must not use the raw SHA256 of `manifest.yaml`, because `agt_map_manager` legitimately edits lifecycle fields such as `state`, `active` and `pinned` during activation, pinning and archival. The map's capture rig is provenance only; the Route Asset's `vehicle_binding` is the execution vehicle and may be MK-mini even when the map was captured handheld.
 
 V25-09A therefore defines `map_content_sha256` as canonical JSON SHA256 over only stable map content and provenance:
 

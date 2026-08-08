@@ -38,6 +38,7 @@ _MAP_CONTENT_KEYS = (
     "alignment",
     "platform_profile",
     "platform_profile_sha256",
+    "capture_rig",
     "processing_backend",
     "navigation",
     "assets",
@@ -206,6 +207,10 @@ def create_map_workspace(
         },
         "platform_profile": dataset.platform_id,
         "platform_profile_sha256": dataset.platform_profile_sha256,
+        "capture_rig": {
+            "profile_id": dataset.capture_rig_id,
+            "profile_sha256": dataset.capture_rig_profile_sha256,
+        },
         "processing_backend": str(recipe.raw.get("mapping", {}).get("backend", "unknown")),
         "assets": {},
         "active": False,

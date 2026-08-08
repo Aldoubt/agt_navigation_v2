@@ -1,0 +1,13 @@
+schema_version: 1
+site_id: facility_a
+epoch_id: 20260719_handheld
+map_frame: map
+source_frame: mapping_session
+method: SITE_CONTROL_POINTS
+status: PENDING
+identity_requires_manual_confirmation: true
+control_points: []
+transform:
+  translation_xyz_m: [0.0, 0.0, 0.0]
+  yaw_rad: 0.0
+  quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]

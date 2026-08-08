@@ -144,6 +144,10 @@ def _run(options: argparse.Namespace, client: ReplayMappingClient) -> int:
                 "map_id": plan.map_id,
                 "source_bag": str(plan.source_bag),
                 "source_bag_sha256": plan.source_bag_sha256,
+                "topic_remaps": [
+                    {"source": source, "canonical": canonical}
+                    for source, canonical in plan.topic_remaps
+                ],
             },
             ensure_ascii=False,
         ),

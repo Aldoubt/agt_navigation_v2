@@ -1,0 +1,38 @@
+schema_version: 1
+map_id: facility_a
+map_version_id: map_20260808_000000_09a00002
+site_id: facility_a
+epoch_id: 20260719_handheld
+purpose: OPERATIONAL
+state: PROCESSING
+created_at: '2026-08-08T04:49:16+00:00'
+frame_id: map
+source:
+  dataset_binding: source/dataset_binding.yaml
+  dataset_binding_sha256: sha256:f8231fb3c5264f5a186ebd7769a3b6686ed5ef930e2f5f24556344a0f506d89c
+calibration:
+  calibration_id: cal_handheld_mid360_sensor_v01
+  path: source/calibration.yaml
+  sha256: sha256:1b1895545b9bc8328b176185b1619322f5b872298394c629816a2fb55ae10544
+derivation:
+  recipe: derivation/recipe.yaml
+  recipe_sha256: sha256:7f8d99bbc06690eb617e829027eb24a1f17636e5e4cd01ad7ad27324c924777c
+alignment:
+  site_frame: alignment/site_frame.yaml
+  site_frame_sha256: sha256:b711ec6e56b11a853ad0ae4604f37090da2996b4b1e5cdd805dd96f0efe4f662
+  record: alignment/alignment.yaml
+  record_sha256: sha256:82b2b78c3d6c8d22c91909e654d908953da5c61d4afca6e6dca1fc96376e9ff7
+platform_profile: handheld_mid360
+platform_profile_sha256: sha256:550dc992bccc510b51d9a1ca0b124710093c7b38a9c54378961b2bd7ee29ee81
+capture_rig:
+  profile_id: handheld_mid360
+  profile_sha256: sha256:550dc992bccc510b51d9a1ca0b124710093c7b38a9c54378961b2bd7ee29ee81
+processing_backend: fast_livo2
+assets: {}
+active: false
+pinned: false
+tags:
+- reproducible_derivation
+- operational
+notes: Created by agt_offline_assets; products are not READY until quality gates pass.
+map_content_sha256: sha256:0df82b7d72204510c75f6e8aee1f1ac04d33d393dead4ff623223550adee04e5

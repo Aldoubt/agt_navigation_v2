@@ -24,8 +24,10 @@ from .route_asset import (
     write_route_csv,
 )
 from .feasibility import FeasibilityResult, validate_route_asset
+from .alignment import AlignmentResult, identity_alignment, solve_site_control_points, write_alignment_report
 from .preview import write_route_preview
 from .tuning import apply_route_tuning
+from .cleaning import append_cleaning_operation
 
 __all__ = [
     "AssetContractError",
@@ -49,6 +51,11 @@ __all__ = [
     "write_route_csv",
     "FeasibilityResult",
     "validate_route_asset",
+    "AlignmentResult",
+    "identity_alignment",
+    "solve_site_control_points",
+    "write_alignment_report",
     "write_route_preview",
     "apply_route_tuning",
+    "append_cleaning_operation",
 ]

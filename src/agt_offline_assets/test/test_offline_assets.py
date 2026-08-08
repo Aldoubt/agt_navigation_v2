@@ -18,6 +18,7 @@ from agt_offline_assets import (
     validate_route_asset,
 )
 from agt_offline_assets.contracts import sha256_path_bundle
+from agt_offline_assets.contracts import DatasetBinding
 from agt_offline_assets.route_asset import load_route_csv
 
 
@@ -208,6 +209,50 @@ def _prepare_ready_workspace(tmp_path):
     return workspace, semantic_path, coverage_path
 
 
+def test_dataset_binding_separates_capture_rig_from_execution_vehicle():
+    binding = DatasetBinding.from_dict({
+        "dataset_id": "ds_handheld",
+        "site_id": "greenhouse_a",
+        "epoch_id": "2026-07-19",
+        "purpose": "OPERATIONAL",
+        "bag": {"path": "bag", "sha256": "sha256:" + "a" * 64},
+        "capture_rig": {
+            "profile_id": "handheld_mid360_rig",
+            "profile_sha256": "sha256:" + "b" * 64,
+        },
+        "execution_vehicle": {
+            "profile_id": "mk_mini",
+            "profile_sha256": "sha256:" + "c" * 64,
+        },
+        "calibration": {
+            "calibration_id": "cal_handheld_mid360",
+            "calibration_sha256": "sha256:" + "d" * 64,
+        },
+        "replay_topic_remaps": {"/livox/lidar": "/agt/sensors/lidar/custom"},
+    })
+    assert binding.capture_rig == ("handheld_mid360_rig", "sha256:" + "b" * 64)
+    assert binding.execution_vehicle_id == "mk_mini"
+    assert binding.topic_remaps == (("/livox/lidar", "/agt/sensors/lidar/custom"),)
+
+
+def test_capture_rig_rejects_execution_vehicle_geometry():
+    with pytest.raises(AssetContractError, match="execution-vehicle"):
+        DatasetBinding.from_dict({
+            "dataset_id": "ds_capture",
+            "site_id": "site",
+            "epoch_id": "epoch",
+            "purpose": "OPERATIONAL",
+            "bag": {"path": "bag", "sha256": "sha256:" + "a" * 64},
+            "capture_rig": {
+                "profile_id": "handheld_mid360",
+                "profile_sha256": "sha256:" + "b" * 64,
+                "wheelbase": 0.7,
+            },
+            "calibration": {
+                "calibration_id": "cal",
+                "calibration_sha256": "sha256:" + "c" * 64,
+            },
+        })
 def test_workspace_lineage_can_be_promoted_to_ready_and_is_immutable(tmp_path):
     workspace, _, _ = _prepare_ready_workspace(tmp_path)
     manifest = yaml.safe_load(workspace.manifest_path.read_text(encoding="utf-8"))

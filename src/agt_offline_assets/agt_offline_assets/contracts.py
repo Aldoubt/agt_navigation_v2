@@ -105,6 +105,11 @@ class DatasetBinding:
     platform_profile_sha256: str
     calibration_id: str
     calibration_sha256: str
+    capture_rig_id: str = ""
+    capture_rig_profile_sha256: str = ""
+    execution_vehicle_id: str = ""
+    execution_vehicle_profile_sha256: str = ""
+    topic_remaps: tuple[tuple[str, str], ...] = ()
 
     @classmethod
     def from_file(cls, path: str | Path) -> "DatasetBinding":
@@ -114,11 +119,17 @@ class DatasetBinding:
     def from_dict(cls, data: Mapping[str, Any]) -> "DatasetBinding":
         bag = data.get("bag")
         platform = data.get("platform")
+        capture_rig = data.get("capture_rig") or platform
         calibration = data.get("calibration")
         if not isinstance(bag, Mapping):
             raise AssetContractError("dataset_bag_missing", "dataset bag mapping is required")
-        if not isinstance(platform, Mapping):
+        if not isinstance(platform, Mapping) and not isinstance(capture_rig, Mapping):
             raise AssetContractError("dataset_platform_missing", "dataset platform mapping is required")
+        if not isinstance(capture_rig, Mapping):
+            raise AssetContractError("dataset_capture_rig_missing", "dataset capture_rig mapping is required")
+        forbidden = {"footprint", "wheelbase", "track_width", "minimum_turning_radius", "navigation_footprint", "vehicle_controller"}
+        if forbidden.intersection(capture_rig):
+            raise AssetContractError("capture_rig_vehicle_geometry", "capture rig must not contain execution-vehicle geometry or controller fields")
         if not isinstance(calibration, Mapping):
             raise AssetContractError("dataset_calibration_missing", "dataset calibration mapping is required")
         purpose = _require_text(data, "purpose", code="dataset_purpose_missing").upper()
@@ -127,6 +138,18 @@ class DatasetBinding:
                 "dataset_purpose_invalid",
                 f"purpose must be one of {sorted(_ALLOWED_PURPOSES)}",
             )
+        remaps = data.get("replay_topic_remaps") or data.get("topic_remaps") or {}
+        if not isinstance(remaps, Mapping):
+            raise AssetContractError("dataset_topic_remaps_invalid", "replay_topic_remaps must be a mapping")
+        normalized_remaps = []
+        for source, canonical in remaps.items():
+            source_text, canonical_text = str(source).strip(), str(canonical).strip()
+            if not source_text.startswith("/") or not canonical_text.startswith("/"):
+                raise AssetContractError("dataset_topic_remap_invalid", "topic remaps must use absolute topic names")
+            normalized_remaps.append((source_text, canonical_text))
+        execution = data.get("execution_vehicle") or {}
+        if execution and not isinstance(execution, Mapping):
+            raise AssetContractError("dataset_execution_vehicle_invalid", "execution_vehicle must be a mapping")
         return cls(
             dataset_id=_require_text(data, "dataset_id", code="dataset_id_missing"),
             site_id=_require_text(data, "site_id", code="dataset_site_missing"),
@@ -137,12 +160,12 @@ class DatasetBinding:
                 bag.get("sha256"), code="dataset_bag_hash_invalid", field="bag.sha256"
             ),
             platform_id=_require_text(
-                platform, "profile_id", code="dataset_platform_id_missing"
+                capture_rig, "profile_id", code="dataset_platform_id_missing"
             ),
             platform_profile_sha256=_require_hash(
-                platform.get("profile_sha256"),
+                capture_rig.get("profile_sha256"),
                 code="dataset_platform_hash_invalid",
-                field="platform.profile_sha256",
+                field="capture_rig.profile_sha256",
             ),
             calibration_id=_require_text(
                 calibration, "calibration_id", code="dataset_calibration_id_missing"
@@ -152,6 +175,14 @@ class DatasetBinding:
                 code="dataset_calibration_hash_invalid",
                 field="calibration.calibration_sha256",
             ),
+            capture_rig_id=_require_text(capture_rig, "profile_id", code="dataset_capture_rig_id_missing"),
+            capture_rig_profile_sha256=_require_hash(capture_rig.get("profile_sha256"), code="dataset_capture_rig_hash_invalid", field="capture_rig.profile_sha256"),
+            execution_vehicle_id=str(execution.get("profile_id", "")).strip(),
+            execution_vehicle_profile_sha256=(
+                _require_hash(execution.get("profile_sha256"), code="dataset_execution_vehicle_hash_invalid", field="execution_vehicle.profile_sha256")
+                if execution else ""
+            ),
+            topic_remaps=tuple(sorted(normalized_remaps)),
         )
 
     def resolve_bag_path(self, binding_path: str | Path) -> Path:
@@ -177,6 +208,11 @@ class DatasetBinding:
             )
         return bag
 
+    @property
+    def capture_rig(self) -> tuple[str, str]:
+        """Sensor installation identity; kept separate from the route vehicle."""
+        return self.capture_rig_id, self.capture_rig_profile_sha256
+
 
 @dataclass(frozen=True)
 class DerivationRecipe:
@@ -190,6 +226,10 @@ class DerivationRecipe:
     repository_commit: str
     random_seed: int
     raw: Mapping[str, Any]
+
+    @property
+    def capture_rig_profile(self) -> str:
+        return str(self.raw.get("capture_rig", {}).get("profile_id", self.platform_profile))
 
     @classmethod
     def from_file(cls, path: str | Path) -> "DerivationRecipe":

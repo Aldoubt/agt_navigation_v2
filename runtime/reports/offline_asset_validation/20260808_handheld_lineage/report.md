@@ -1,0 +1,116 @@
+# V25-09A offline asset validation
+
+```json
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-08T04:22:55.242849+00:00",
+  "repository": {
+    "path": "/home/yangxuan/agt_navigation_v2",
+    "commit": "021715487476441f360ed22a785dbf8fd997821c",
+    "branch": "feat/v25-09-offline-asset-contracts",
+    "dirty": true
+  },
+  "source_bag": {
+    "path": "/home/yangxuan/agt_navigation_v2/runtime/rosbag/mapping_20260719_172810_trimmed",
+    "sha256": "sha256:9f43c882677b53e5c1398f89bcb11f51cd30bf5e44e1a01f79ded9d3380ea339",
+    "storage_id": "sqlite3",
+    "duration_s": 276.069154428,
+    "message_count": 63492,
+    "topics": [
+      {
+        "name": "/agt/sensors/lidar/custom",
+        "type": "livox_ros_driver2/msg/CustomMsg",
+        "count": 2761
+      },
+      {
+        "name": "/agt/mapping/registered_points",
+        "type": "sensor_msgs/msg/PointCloud2",
+        "count": 2760
+      },
+      {
+        "name": "/agt/mapping/registered_points_lidar",
+        "type": "sensor_msgs/msg/PointCloud2",
+        "count": 2760
+      },
+      {
+        "name": "/agt/sensors/imu/data",
+        "type": "sensor_msgs/msg/Imu",
+        "count": 55211
+      },
+      {
+        "name": "/tf_static",
+        "type": "tf2_msgs/msg/TFMessage",
+        "count": 0
+      }
+    ],
+    "topic_remaps": []
+  },
+  "map_workspace": {
+    "status": "PROCESSING",
+    "path": "/home/yangxuan/agt_navigation_v2/runtime/map_projects/facility_a/versions/map_20260808_000000_09a00001",
+    "reason": "alignment/materialization pending"
+  },
+  "lineage": {
+    "capture_rig": {
+      "status": "PASS",
+      "profile_id": "handheld_mid360"
+    },
+    "calibration": {
+      "status": "PENDING_NUMERIC_VERIFICATION",
+      "identity": "cal_handheld_mid360_sensor_v01"
+    },
+    "dataset": {
+      "status": "PASS",
+      "identity": "ds_handheld_facility_20260719",
+      "sha256": "sha256:0f422e3dd0eee3628d5946b0e5d74328c5da20d0a7a269ea8756aaadd804dd86"
+    },
+    "recipe": {
+      "status": "PASS",
+      "identity": "recipe_handheld_facility_20260719_v01"
+    },
+    "execution_vehicle": {
+      "status": "NOT_IN_SOURCE_BAG",
+      "profile_id": "MK-mini route binding required"
+    }
+  },
+  "checks": {
+    "source_bag_exists": true,
+    "canonical_lidar": true,
+    "canonical_imu": true,
+    "wheel_odom_present": false,
+    "gnss_present": false,
+    "mapping_outputs_present": true
+  },
+  "mapping_quality_indicators": {
+    "trajectory": "BLOCKED: no /agt/mapping/odometry in source metadata",
+    "registered_cloud_messages": 2760,
+    "pcd_metrics": "BLOCKED: no PCD artifact in source bag",
+    "absolute_z_accuracy": "NOT_CLAIMED"
+  },
+  "gates": {
+    "handheld_bag_preflight": "PASS",
+    "topic_compatibility": "PASS",
+    "capture_rig_lineage": "PASS",
+    "calibration_separation": "PASS_BOUNDARY_PENDING_NUMERIC_EVIDENCE",
+    "mapping_replay_smoke": "NOT_RUN",
+    "full_replay": "NOT_RUN",
+    "canonical_alignment": "PENDING: control points or explicit operator identity confirmation",
+    "map_materialization": "BLOCKED_BY_ALIGNMENT",
+    "map_quality": "PENDING",
+    "route_readiness": "PENDING",
+    "original_bag_modified": "NO",
+    "ros_public_api_changed": "NO",
+    "route_runtime_changed": "NO"
+  },
+  "manual_decisions": [
+    "Create a frozen DatasetBinding and Recipe for the handheld capture rig.",
+    "Record sensor/rig calibration without importing provisional BUNKER vehicle extrinsics.",
+    "Select SITE_CONTROL_POINTS or REFERENCE_MAP and record alignment evidence.",
+    "Bind MK-mini separately when deriving and validating a Route Asset."
+  ],
+  "reproduction": [
+    "ros2 bag info /home/yangxuan/agt_navigation_v2/runtime/rosbag/mapping_20260719_172810_trimmed",
+    "python3 tools/offline_asset_validation/generate_report.py --bag /home/yangxuan/agt_navigation_v2/runtime/rosbag/mapping_20260719_172810_trimmed --output /home/yangxuan/agt_navigation_v2/runtime/reports/offline_asset_validation/20260808_handheld_lineage"
+  ]
+}
+```

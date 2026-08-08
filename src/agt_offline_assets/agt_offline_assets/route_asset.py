@@ -200,13 +200,7 @@ def create_route_candidate_asset(
     policy_path = Path(policy_path).expanduser().resolve()
     platform_path = Path(platform_profile_path).expanduser().resolve()
     platform = load_platform_profile(platform_path)
-    expected_platform_hash = str(map_manifest.get("platform_profile_sha256", ""))
     actual_platform_hash = sha256_file(platform_path)
-    if expected_platform_hash and actual_platform_hash != expected_platform_hash:
-        raise AssetContractError(
-            "route_map_platform_mismatch",
-            "platform profile hash differs from the bound map version",
-        )
 
     assets = map_manifest.get("assets") or {}
     _require_frozen_map_asset(

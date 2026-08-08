@@ -34,6 +34,7 @@ class OfflineReplayPlan:
     start_arguments: dict[str, str]
     playback_command: tuple[str, ...]
     replay_log: Path
+    topic_remaps: tuple[tuple[str, str], ...]
 
 
 def _yaml(path: Path) -> dict[str, Any]:
@@ -44,6 +45,17 @@ def _yaml(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise AssetContractError("offline_replay_yaml_invalid", f"YAML must be a mapping: {path}")
     return value
+
+
+def _bag_topic_names(bag: Path) -> set[str]:
+    metadata = _yaml(bag / "metadata.yaml")
+    info = metadata.get("rosbag2_bagfile_information") or {}
+    records = info.get("topics_with_message_count") or []
+    return {
+        str((record.get("topic_metadata") or {}).get("name", ""))
+        for record in records
+        if isinstance(record, dict)
+    }
 
 
 def prepare_offline_replay_plan(
@@ -90,6 +102,16 @@ def prepare_offline_replay_plan(
             "offline_replay_bag_hash_mismatch",
             "source bag bytes differ from the Dataset binding",
         )
+    bag_topics = _bag_topic_names(bag)
+    for canonical in ("/agt/sensors/lidar/custom", "/agt/sensors/imu/data") if bag_topics else ():
+        if canonical not in bag_topics and not any(
+            target == canonical and source in bag_topics
+            for source, target in dataset.topic_remaps
+        ):
+            raise AssetContractError(
+                "offline_replay_topic_missing",
+                f"bag has no canonical or remapped source for required topic {canonical}",
+            )
 
     profile = Path(platform_profile).expanduser().resolve()
     if not profile.is_file():
@@ -130,6 +152,16 @@ def prepare_offline_replay_plan(
             )
         arguments["user_config_path"] = str(config)
 
+    # Dataset bindings may describe legacy source names explicitly.  The remap
+    # is part of the plan, so the exact source->canonical handoff is auditable.
+    remap_arguments = tuple(
+        f"{source}:={canonical}" for source, canonical in dataset.topic_remaps
+    )
+    replay_topics = tuple(
+        next((source for source, target in dataset.topic_remaps if target == topic), topic)
+        for topic in MAPPING_INPUT_TOPICS
+        if topic in bag_topics or topic in {target for _, target in dataset.topic_remaps}
+    ) or MAPPING_INPUT_TOPICS
     command = (
         "ros2",
         "bag",
@@ -139,8 +171,8 @@ def prepare_offline_replay_plan(
         f"{rate:g}",
         str(bag),
         "--topics",
-        *MAPPING_INPUT_TOPICS,
-    )
+        *replay_topics,
+    ) + (("--remap",) + remap_arguments if remap_arguments else ())
     return OfflineReplayPlan(
         workspace_manifest=manifest_path,
         workspace_root=root,
@@ -151,4 +183,5 @@ def prepare_offline_replay_plan(
         start_arguments=arguments,
         playback_command=command,
         replay_log=root / "processing" / "source_replay.log",
+        topic_remaps=dataset.topic_remaps,
     )

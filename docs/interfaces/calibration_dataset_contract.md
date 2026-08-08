@@ -4,6 +4,26 @@
 
 ## 1. 单一真源
 
+### Capture rig 与执行车辆
+
+`capture_rig` 是产生 bag 的传感器安装关系，不等于之后执行路线的车辆。
+为保持 schema-v1 兼容，旧 `platform` 字段在离线 Dataset 中解释为 capture rig；
+新 binding 应显式记录：
+
+```yaml
+capture_rig:
+  profile_id: handheld_mid360_rig
+  profile_sha256: sha256:<64 lowercase hex>
+execution_vehicle:              # 地图生产数据可省略
+  profile_id: mk_mini
+  profile_sha256: sha256:<64 lowercase hex>
+```
+
+LiDAR↔IMU 等传感器 intrinsic/extrinsic、sensor-rig→vehicle-base 外参和 GNSS
+杆臂是三个不同层级。后两者必须按车型独立维护；GNSS 杆臂只属于 GNSS
+evaluation 车辆，不得进入无 GNSS 的手持温室 bag lineage。Route Asset 独立绑定
+最终执行车辆。
+
 - `profiles/platforms/<platform>.yaml` 继续是车辆物理尺寸、navigation footprint、运动学限制和平台策略的唯一真源
 - Calibration Set 只保存传感器内外参、时间同步/杆臂和与测量模型相关的标定结果，不复制 footprint、wheelbase、minimum turning radius 等车辆几何真值
 - Dataset/Bag 是不可变输入证据；派生处理不得修改原 bag

@@ -1,0 +1,25 @@
+schema_version: 1
+calibration_id: cal_handheld_mid360_sensor_v01
+scope: SENSOR_CAPTURE_RIG_ONLY
+status: PENDING_NUMERIC_VERIFICATION
+rig_frame: handheld_rig
+vehicle_frame: NONE
+sensor_extrinsics:
+  lidar_imu:
+    parent_frame: imu_link
+    child_frame: lidar_link
+    translation_m: null
+    rotation_quaternion_xyzw: null
+    source: NOT_YET_SUPPLIED
+  camera_lidar:
+    status: NOT_PRESENT
+timing:
+  lidar_imu_offset_s: null
+  source: NOT_YET_SUPPLIED
+gnss:
+  present: false
+  lever_arm: NONE
+notes: >-
+  This artifact deliberately records the calibration boundary without inventing
+  an extrinsic. It is suitable for lineage binding, but mapping acceptance remains
+  blocked until the numeric LiDAR/IMU calibration evidence is supplied.

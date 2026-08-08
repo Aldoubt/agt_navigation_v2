@@ -53,6 +53,16 @@ ros2 run agt_offline_assets agt_offline_assets_cli.py init-map \
 
 ## 3. 自动 replay
 
+Replay 使用 Dataset binding 中的 `replay_topic_remaps`（若存在）生成固定的
+`source topic -> canonical AGT topic` handoff；不得依赖未记录的临时命令行 remap。
+例如旧 bag 可记录：
+
+```yaml
+replay_topic_remaps:
+  /livox/lidar: /agt/sensors/lidar/custom
+  /livox/imu: /agt/sensors/imu/data
+```
+
 先启动正常的系统管理节点，使下列接口可用：
 
 ```text
@@ -149,3 +159,30 @@ PROCESSING mapping-session evidence
 ```
 
 READY 之后内容不可原地修改；新的对齐、清洗或季节数据必须创建新的 map version。
+# Handheld capture-rig lineage binding (V25-09A)
+
+The handheld MID360 bag is a capture source, not an execution vehicle. Bind it
+before replay so a provisional BUNKER or MK-mini profile cannot enter the map
+lineage:
+
+```bash
+PYTHONPATH=src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning \
+python3 tools/offline_asset_validation/bind_handheld_bag.py \
+  --bag runtime/rosbag/mapping_20260719_172810_trimmed \
+  --output runtime/datasets/ds_handheld_facility_20260719
+```
+
+This records the actual bag bundle hash, capture-rig/calibration hashes and
+repository commit. `runtime/calibrations/handheld_mid360_sensor_v01.yaml` is
+explicitly pending numeric LiDAR/IMU evidence; it must not be treated as a
+vehicle mounting calibration.
+
+The current demo workspace is:
+
+```text
+runtime/map_projects/facility_a/versions/map_20260808_000000_09a00001/
+```
+
+It is intentionally `PROCESSING`. Alignment uses `SITE_CONTROL_POINTS` and
+requires recorded correspondences (or an explicit operator confirmation for
+`IDENTITY`) before canonical products or `READY` promotion can be produced.
