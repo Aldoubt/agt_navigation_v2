@@ -15,6 +15,7 @@ from agt_ui_bridge.semantic_io import load_semantic_map
 from .contracts import AssetContractError, RoutePolicy, load_yaml_mapping, sha256_file
 from .grid_io import load_nav2_grid
 from .route_asset import load_route_csv, write_route_manifest
+from .workspace import compute_map_content_sha256
 
 
 @dataclass(frozen=True)
@@ -204,8 +205,11 @@ def _validate_bindings(
         raise AssetContractError("route_map_id_mismatch", "route map_id differs from map manifest")
     if str(map_binding.get("map_version_id", "")) != str(map_manifest.get("map_version_id", "")):
         raise AssetContractError("route_map_version_mismatch", "route map_version_id differs from map manifest")
-    if str(map_binding.get("manifest_sha256", "")) != sha256_file(map_manifest_path):
-        raise AssetContractError("route_map_hash_mismatch", "route map manifest hash mismatch")
+    expected_content = str(map_manifest.get("map_content_sha256", ""))
+    if not expected_content or expected_content != compute_map_content_sha256(map_manifest):
+        raise AssetContractError("route_map_content_invalid", "map content identity is invalid")
+    if str(map_binding.get("map_content_sha256", "")) != expected_content:
+        raise AssetContractError("route_map_hash_mismatch", "route map content identity mismatch")
 
     semantic_binding = route_manifest.get("semantic_binding") or {}
     semantic_path = (route_dir / str(semantic_binding.get("path", ""))).resolve()
