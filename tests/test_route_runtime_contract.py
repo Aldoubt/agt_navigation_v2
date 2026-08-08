@@ -143,10 +143,57 @@ def test_controller_only_smoke_uses_real_follow_path_without_planner_server():
     # create it as 0644, so symlink-install must materialize an executable copy.
     assert "AGT_NAVIGATION_GENERATED_SCRIPT_DIR" in cmake
     assert "FILE_PERMISSIONS" in cmake
-    assert 'scripts/route_controller_smoke.py"' in cmake
+    assert "route_controller_smoke.py" in cmake
     assert "OWNER_EXECUTE" in cmake
     assert "GROUP_EXECUTE" in cmake
     assert "WORLD_EXECUTE" in cmake
+
+
+def test_full_route_system_smoke_uses_formal_action_assets_and_real_controller_only():
+    launch = _read(NAVIGATION / "launch" / "route_system_smoke.launch.py")
+    fixture = _read(NAVIGATION / "scripts" / "route_system_smoke_fixture.py")
+    client = _read(NAVIGATION / "scripts" / "route_system_smoke.py")
+    profile = _read(NAVIGATION / "config" / "route_smoke_vehicle.yaml")
+    cmake = _read(NAVIGATION / "CMakeLists.txt")
+
+    assert "route_controller_smoke.launch.py" in launch
+    assert 'executable="route_system_smoke_fixture.py"' in launch
+    assert 'executable="navigation_capability_server.py"' in launch
+    assert '"require_map": True' in launch
+    assert '"require_safety_ready": True' in launch
+    assert '"require_localization_valid": False' in launch
+    assert '"require_task_readiness": False' in launch
+    assert "planner_server" not in launch
+    assert "bt_navigator" not in launch
+    assert "map_server" not in launch
+
+    for token in (
+        "TaskGroup(",
+        '"state": "READY"',
+        '"status": "READY"',
+        "route_manifest_sha256",
+        "platform_profile_sha256",
+        "/agt/map/global_occupancy",
+        "/agt/maps/active",
+    ):
+        assert token in fixture
+
+    assert "ExecuteWaypointTask" in client
+    assert "expected_content_sha256" in client
+    assert "global_planner_requests" in client
+    assert "measured_displacement_m" in client
+
+    assert "SOFTWARE_ONLY" in profile
+    assert "route_acceptance:" in profile
+    assert "enabled: true" in profile
+    assert "verified: false" in profile
+
+    for script in (
+        "route_controller_smoke.py",
+        "route_system_smoke.py",
+        "route_system_smoke_fixture.py",
+    ):
+        assert script in cmake
 
 
 def test_route_runtime_package_tests_are_registered():
