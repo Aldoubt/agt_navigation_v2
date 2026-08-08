@@ -7,7 +7,11 @@ from typing import Mapping
 import yaml
 
 from .contracts import AssetContractError, load_yaml_mapping, sha256_file
-from .workspace import _assert_ready_quality, _validate_lineage_files
+from .workspace import (
+    _assert_ready_quality,
+    _validate_lineage_files,
+    compute_map_content_sha256,
+)
 
 
 @dataclass(frozen=True)
@@ -49,6 +53,10 @@ def validate_map_workspace(manifest_path: str | Path) -> MapComplianceResult:
         _validate_lineage_files(root, manifest)
     except AssetContractError as exc:
         errors.append(exc.code)
+
+    expected_content = str(manifest.get("map_content_sha256", ""))
+    if not expected_content or expected_content != compute_map_content_sha256(manifest):
+        errors.append("map_content_identity_mismatch")
 
     assets = manifest.get("assets")
     if not isinstance(assets, Mapping):
