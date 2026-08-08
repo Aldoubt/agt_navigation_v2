@@ -31,6 +31,22 @@ def test_global_correction_manager_is_production_map_odom_authority():
     assert '"publish_tf": False' in launch
 
 
+def test_correction_manager_is_canonical_localization_status_owner():
+    manager = _read(LOCALIZATION / "src" / "global_correction_manager.cpp")
+    launch = _read(LOCALIZATION / "launch" / "relocalization.launch.py")
+    correction = yaml.safe_load(
+        _read(LOCALIZATION / "config" / "global_correction.yaml")
+    )["/**"]["ros__parameters"]
+
+    assert correction["evidence_status_topic"] == "/agt/localization/evidence_status"
+    assert correction["canonical_status_topic"] == "/agt/localization/status"
+    assert '"/agt/localization/status"' in launch
+    assert '"/agt/localization/evidence_status"' in launch
+    assert "canonical_status_pub_->publish" in manager
+    assert "localization_accepted = false" in manager
+    assert "STATE_RECOVERING" in manager
+
+
 def test_mapping_navigation_and_recovery_do_not_claim_map_odom_authority():
     route_runtime = _read(NAVIGATION / "agt_navigation" / "route_runtime.py")
     route_adapter = _read(NAVIGATION / "agt_navigation" / "nav2_follow_path_adapter.py")
