@@ -13,8 +13,10 @@ from agt_offline_assets import (
     create_route_candidate_asset,
     refresh_map_manifest,
     sha256_file,
+    validate_map_workspace,
     validate_route_asset,
 )
+from agt_offline_assets.contracts import sha256_path_bundle
 from agt_offline_assets.route_asset import load_route_csv
 
 
@@ -78,13 +80,13 @@ def _write_semantic(root):
     return semantic / "semantic_map.geojson", semantic / "coverage.yaml"
 
 
-def _write_policy(path):
+def _write_policy(path, *, row_interpretation="direct_swaths"):
     policy = {
         "schema_version": 1,
-        "policy_id": "test_direct_rows",
+        "policy_id": f"test_{row_interpretation}",
         "source": {
             "planning_mode": "annotated_rows",
-            "row_interpretation": "direct_swaths",
+            "row_interpretation": row_interpretation,
             "use_access_lanes": True,
             "use_headland_zones": True,
         },
@@ -105,6 +107,11 @@ def _write_policy(path):
 
 
 def _prepare_ready_workspace(tmp_path):
+    bag = tmp_path / "bag"
+    bag.mkdir()
+    (bag / "metadata.yaml").write_text("rosbag2_bagfile_information: {}\n", encoding="utf-8")
+    (bag / "data_0.db3").write_bytes(b"deterministic-test-bag")
+
     calibration = tmp_path / "calibration.yaml"
     calibration.write_text("calibration_id: cal_test\n", encoding="utf-8")
     dataset = tmp_path / "dataset.yaml"
@@ -114,7 +121,7 @@ def _prepare_ready_workspace(tmp_path):
         "site_id": "greenhouse_test",
         "epoch_id": "2026-08-08-test",
         "purpose": "OPERATIONAL",
-        "bag": {"path": "missing_test_bag", "sha256": "sha256:" + "a" * 64},
+        "bag": {"path": "bag", "sha256": sha256_path_bundle(bag)},
         "platform": {
             "profile_id": "bunker",
             "profile_sha256": sha256_file(PLATFORM),
@@ -207,18 +214,24 @@ def test_workspace_lineage_can_be_promoted_to_ready_and_is_immutable(tmp_path):
     assert manifest["site_id"] == "greenhouse_test"
     assert manifest["epoch_id"] == "2026-08-08-test"
     assert manifest["source"]["dataset_binding_sha256"].startswith("sha256:")
+    assert manifest["calibration"]["path"] == "source/calibration.yaml"
     assert "semantic_coverage" in manifest["assets"]
     assert "map_quality_report" in manifest["assets"]
+    compliance = validate_map_workspace(workspace.manifest_path)
+    assert compliance.valid, compliance.to_dict()
     with pytest.raises(AssetContractError, match="READY map versions are immutable") as error:
         refresh_map_manifest(workspace.manifest_path)
     assert error.value.code == "ready_map_immutable"
 
 
-def test_ready_map_semantic_mutation_is_rejected_for_route_derivation(tmp_path):
+def test_ready_map_semantic_mutation_is_rejected_for_route_derivation_and_audit(tmp_path):
     workspace, semantic_path, coverage_path = _prepare_ready_workspace(tmp_path)
     policy = tmp_path / "policy.yaml"
     _write_policy(policy)
     semantic_path.write_text(semantic_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    compliance = validate_map_workspace(workspace.manifest_path)
+    assert not compliance.valid
+    assert "asset_hash_mismatch:semantic_map" in compliance.errors
     with pytest.raises(AssetContractError) as error:
         create_route_candidate_asset(
             map_manifest_path=workspace.manifest_path,
@@ -290,3 +303,29 @@ def test_semantic_route_candidate_feasibility_preview_and_tuning(tmp_path):
     assert tuned_manifest["status"] == "DRAFT"
     assert tuned_manifest["revision"] == 2
     assert not (tuned_dir / "feasibility_report.json").exists()
+
+
+def test_crop_centerline_derivation_can_fail_closed_on_semantic_exclusion(tmp_path):
+    workspace, semantic_path, coverage_path = _prepare_ready_workspace(tmp_path)
+    policy = tmp_path / "crop_policy.yaml"
+    _write_policy(policy, row_interpretation="crop_centerlines")
+    route_dir = create_route_candidate_asset(
+        map_manifest_path=workspace.manifest_path,
+        semantic_path=semantic_path,
+        coverage_path=coverage_path,
+        policy_path=policy,
+        platform_profile_path=PLATFORM,
+        route_id="crop_aisle_candidate",
+        revision=1,
+    )
+    samples = load_route_csv(route_dir / "route.csv")
+    assert any(sample.semantic_ref.startswith("preview_aisle_") for sample in samples)
+    result = validate_route_asset(
+        route_dir,
+        map_manifest_path=workspace.manifest_path,
+        platform_profile_path=PLATFORM,
+    )
+    assert not result.passed
+    assert "semantic_footprint_violation" in result.report["errors"]
+    manifest = yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))
+    assert manifest["status"] == "INVALID"
