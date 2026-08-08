@@ -11,6 +11,7 @@ from agt_offline_assets import (
     create_map_workspace,
     create_route_candidate_asset,
     refresh_map_manifest,
+    sha256_path_bundle,
     validate_map_workspace,
     validate_route_asset,
 )
@@ -19,6 +20,9 @@ from agt_offline_assets import (
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agt_offline_assets")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    hash_path = sub.add_parser("hash-path", help="hash one file or directory bundle deterministically")
+    hash_path.add_argument("path")
 
     init_map = sub.add_parser("init-map", help="create a reproducible PROCESSING map workspace")
     init_map.add_argument("--maps-root", required=True)
@@ -64,6 +68,9 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "hash-path":
+            print(sha256_path_bundle(args.path))
+            return 0
         if args.command == "init-map":
             workspace = create_map_workspace(
                 args.maps_root,
