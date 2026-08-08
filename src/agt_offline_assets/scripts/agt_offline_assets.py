@@ -28,7 +28,7 @@ def _parser() -> argparse.ArgumentParser:
     init_map.add_argument("--site-frame", required=True)
     init_map.add_argument("--alignment", required=True)
     init_map.add_argument("--platform-profile", required=True)
-    init_map.add_argument("--calibration")
+    init_map.add_argument("--calibration", required=True)
 
     refresh = sub.add_parser("refresh-map", help="hash derived products and optionally change map state")
     refresh.add_argument("--manifest", required=True)
