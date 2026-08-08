@@ -1,0 +1,17 @@
+schema_version: 1
+site_id: greenhouse_a
+epoch_id: 2026-08-10-am
+map_frame: map
+source_frame: mapping_session
+method: SITE_CONTROL_POINTS
+reference_map_binding: null
+transform:
+  translation: [0.0, 0.0, 0.0]
+  quaternion_xyzw: [0.0, 0.0, 0.0, 1.0]
+control_points:
+  - id: post_a
+    source_xyz: [1.0, 2.0, 0.0]
+    reference_xyz: [4.0, 6.0, 0.0]
+  - id: post_b
+    source_xyz: [5.0, 2.0, 0.0]
+    reference_xyz: [8.0, 6.0, 0.0]
