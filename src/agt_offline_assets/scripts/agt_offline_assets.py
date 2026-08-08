@@ -3,7 +3,6 @@
 
 import argparse
 import json
-from pathlib import Path
 import sys
 
 from agt_offline_assets import (
@@ -12,12 +11,8 @@ from agt_offline_assets import (
     create_map_workspace,
     create_route_candidate_asset,
     refresh_map_manifest,
-    sha256_file,
     validate_route_asset,
-    write_route_preview,
 )
-from agt_offline_assets.contracts import load_yaml_mapping
-from agt_offline_assets.route_asset import write_route_manifest
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -49,7 +44,7 @@ def _parser() -> argparse.ArgumentParser:
     derive.add_argument("--revision", required=True, type=int)
     derive.add_argument("--speed", type=float, default=0.3)
 
-    validate = sub.add_parser("validate-route", help="run footprint/kinematic feasibility and preview export")
+    validate = sub.add_parser("validate-route", help="run full feasibility, preview, and final route promotion")
     validate.add_argument("--route-dir", required=True)
     validate.add_argument("--map-manifest", required=True)
     validate.add_argument("--platform-profile", required=True)
@@ -107,17 +102,8 @@ def main(argv=None) -> int:
                 map_manifest_path=args.map_manifest,
                 platform_profile_path=args.platform_profile,
                 write_outputs=True,
+                maximum_preview_footprints=args.max_preview_footprints,
             )
-            preview = write_route_preview(
-                args.route_dir,
-                platform_profile_path=args.platform_profile,
-                feasibility_result=result,
-                maximum_footprints=args.max_preview_footprints,
-            )
-            route_manifest_path = Path(args.route_dir).resolve() / "route.yaml"
-            route_manifest = load_yaml_mapping(route_manifest_path)
-            route_manifest["preview_sha256"] = sha256_file(preview)
-            write_route_manifest(route_manifest_path, route_manifest)
             print(json.dumps(result.report, ensure_ascii=False))
             return 0 if result.passed else 2
         if args.command == "tune-route":
