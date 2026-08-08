@@ -35,8 +35,14 @@ def test_offline_lineage_contract_is_explicit():
 
     assert "EVALUATION" in calibration
     assert "OPERATIONAL" in calibration
-    assert "site_id" in derivation and "epoch_id" in derivation
-    assert "canonical site frame" in derivation
+    for token in (
+        "site_id",
+        "epoch_id",
+        "canonical site map frame",
+        "site_frame.yaml",
+        "map_version_id",
+    ):
+        assert token in derivation
     assert "map_content_sha256" in map_manifest
     assert "active" in map_manifest and "pinned" in map_manifest
     assert "Bag/Experiment" in _read(ROOT / "docs/architecture/offline_asset_pipeline.md")
