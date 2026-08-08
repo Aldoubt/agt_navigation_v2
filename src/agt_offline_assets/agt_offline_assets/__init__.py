@@ -8,7 +8,12 @@ from .contracts import (
     sha256_file,
     sha256_path_bundle,
 )
-from .workspace import MapWorkspace, create_map_workspace, refresh_map_manifest
+from .workspace import (
+    MapWorkspace,
+    compute_map_content_sha256,
+    create_map_workspace,
+    refresh_map_manifest,
+)
 from .map_validation import MapComplianceResult, validate_map_workspace
 from .route_asset import (
     RouteSample,
@@ -29,6 +34,7 @@ __all__ = [
     "sha256_file",
     "sha256_path_bundle",
     "MapWorkspace",
+    "compute_map_content_sha256",
     "create_map_workspace",
     "refresh_map_manifest",
     "MapComplianceResult",
