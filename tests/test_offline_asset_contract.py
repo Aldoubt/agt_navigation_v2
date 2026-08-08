@@ -8,6 +8,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 INTERFACES = ROOT / "docs/interfaces"
 EXAMPLES = INTERFACES / "examples"
+OFFLINE_PACKAGE = ROOT / "src/agt_offline_assets"
 
 
 def _read(path: Path) -> str:
@@ -63,9 +64,12 @@ def test_route_asset_binds_map_semantics_vehicle_policy_and_feasibility():
     assert route["frame_id"] == "map"
     assert route["map_binding"]["manifest_sha256"].startswith("sha256:")
     assert route["semantic_binding"]["sha256"].startswith("sha256:")
+    assert route["semantic_binding"]["coverage_sha256"].startswith("sha256:")
+    assert route["semantic_binding"]["path"].startswith("../../../semantic/")
     assert route["vehicle_binding"]["platform_profile_sha256"].startswith("sha256:")
     assert route["policy_binding"]["sha256"].startswith("sha256:")
     assert route["feasibility_report_sha256"].startswith("sha256:")
+    assert route["preview_sha256"].startswith("sha256:")
     assert policy["constraints"]["direction_change_requires_stop"] is True
     assert report["status"] == "PASS"
     assert report["metrics"]["footprint_collision_count"] == 0
@@ -98,6 +102,7 @@ def test_route_csv_has_direction_clearance_and_business_reference_without_execut
     contract = _read(INTERFACES / "route_asset_contract.md")
     assert "Route Executor 不自行执行采摘、喷药、拍照等业务" in contract
     assert "重新 footprint sweep" in contract
+    assert "READY revision 之后不得原地" in contract
 
 
 def test_vehicle_geometry_stays_in_platform_profile_and_tracker_is_adapter_only():
@@ -110,6 +115,29 @@ def test_vehicle_geometry_stays_in_platform_profile_and_tracker_is_adapter_only(
     assert "Mission/BT task execution" in tracker
     assert "Tracker tuning" in tracker
     assert "不得维护第二份 vehicle geometry truth" in tracker
+
+
+def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning():
+    required = (
+        "agt_offline_assets/contracts.py",
+        "agt_offline_assets/workspace.py",
+        "agt_offline_assets/map_validation.py",
+        "agt_offline_assets/route_asset.py",
+        "agt_offline_assets/grid_io.py",
+        "agt_offline_assets/feasibility.py",
+        "agt_offline_assets/preview.py",
+        "agt_offline_assets/tuning.py",
+        "scripts/agt_offline_assets.py",
+        "test/test_offline_assets.py",
+    )
+    for relative in required:
+        assert (OFFLINE_PACKAGE / relative).is_file(), relative
+
+    cli = _read(OFFLINE_PACKAGE / "scripts/agt_offline_assets.py")
+    for command in ("init-map", "refresh-map", "validate-map", "derive-route", "validate-route", "tune-route"):
+        assert command in cli
+    assert "ExecuteRouteTask" not in cli
+    assert "cmd_vel" not in cli
 
 
 def test_v25_09_asset_contracts_do_not_add_public_route_actions():
