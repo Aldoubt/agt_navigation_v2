@@ -1,0 +1,4 @@
+seq,segment_id,x,y,yaw,direction,v_ref,curvature,clearance,semantic_ref,event_ref
+0,s000,1.000,2.000,0.000,F,0.30,0.000,1.20,row_01,
+1,s000,1.050,2.000,0.000,F,0.30,0.000,1.18,row_01,
+2,s001,1.100,2.000,3.142,R,0.15,-0.300,0.90,headland_01,tomato_stop_003
