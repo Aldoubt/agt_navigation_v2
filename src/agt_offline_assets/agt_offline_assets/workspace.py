@@ -86,6 +86,7 @@ def create_map_workspace(
     recipe = DerivationRecipe.from_file(recipe_source)
     dataset_hash = sha256_file(dataset_path)
     recipe.assert_compatible(dataset, dataset_hash)
+    dataset.verify_bag(dataset_path)
 
     platform_path = Path(platform_profile_path).expanduser().resolve()
     if sha256_file(platform_path) != dataset.platform_profile_sha256:
