@@ -172,9 +172,18 @@ def create_map_workspace(
 
 
 def refresh_map_manifest(manifest_path: str | Path, *, requested_state: str | None = None) -> dict[str, Any]:
-    """Hash canonical products and optionally promote a derived bundle to READY."""
+    """Hash canonical products and optionally promote a derived bundle to READY.
+
+    READY map versions are immutable. Once promoted, validation/activation must use
+    agt_map_manager rather than refreshing hashes or changing state in place.
+    """
     manifest_path = Path(manifest_path).expanduser().resolve()
     manifest = load_yaml_mapping(manifest_path)
+    if str(manifest.get("state", "")).upper() == "READY":
+        raise AssetContractError(
+            "ready_map_immutable",
+            "READY map versions are immutable; create a new map version for any change",
+        )
     root = manifest_path.parent
     _validate_lineage_files(root, manifest)
 
@@ -184,6 +193,7 @@ def refresh_map_manifest(manifest_path: str | Path, *, requested_state: str | No
         "localization_pcd": "pointcloud/localization_map.pcd",
         "processing_record": "pointcloud/localization_map.processing.yaml",
         "semantic_map": "semantic/semantic_map.geojson",
+        "semantic_coverage": "semantic/coverage.yaml",
         "semantic_validation_report": "semantic/validation_report.json",
         "alignment_report": "alignment/alignment_report.json",
         "map_quality_report": "reports/map_quality_report.json",
