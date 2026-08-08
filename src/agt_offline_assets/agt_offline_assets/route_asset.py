@@ -6,7 +6,7 @@ import math
 import os
 from pathlib import Path
 import shutil
-from typing import Iterable
+from typing import Iterable, Mapping
 
 import yaml
 
@@ -170,7 +170,7 @@ def create_route_candidate_asset(
     coverage_path: str | Path | None = None,
     default_speed_mps: float = 0.3,
 ) -> Path:
-    """Create a DRAFT Route Asset under the bound map version."""
+    """Create a DRAFT Route Asset under the bound READY map version."""
     map_manifest_path = Path(map_manifest_path).expanduser().resolve()
     map_manifest = load_yaml_mapping(map_manifest_path)
     if str(map_manifest.get("state", "")).upper() != "READY":
@@ -178,7 +178,13 @@ def create_route_candidate_asset(
     route_id = str(route_id).strip()
     if not route_id or int(revision) <= 0:
         raise AssetContractError("route_identity_invalid", "route_id and positive revision are required")
+
     semantic_path = Path(semantic_path).expanduser().resolve()
+    coverage_source = (
+        Path(coverage_path).expanduser().resolve()
+        if coverage_path is not None
+        else semantic_path.with_name("coverage.yaml").resolve()
+    )
     policy_path = Path(policy_path).expanduser().resolve()
     platform_path = Path(platform_profile_path).expanduser().resolve()
     platform = load_platform_profile(platform_path)
@@ -190,11 +196,27 @@ def create_route_candidate_asset(
             "platform profile hash differs from the bound map version",
         )
 
+    assets = map_manifest.get("assets") or {}
+    _require_frozen_map_asset(
+        map_manifest_path.parent,
+        assets,
+        "semantic_map",
+        semantic_path,
+        "route_semantic",
+    )
+    _require_frozen_map_asset(
+        map_manifest_path.parent,
+        assets,
+        "semantic_coverage",
+        coverage_source,
+        "route_coverage",
+    )
+
     samples = derive_route_candidate(
         semantic_path,
         policy_path,
         platform_path,
-        coverage_path=coverage_path,
+        coverage_path=coverage_source,
         default_speed_mps=default_speed_mps,
     )
     route_dir = map_manifest_path.parent / "routes" / route_id / str(int(revision))
@@ -207,6 +229,7 @@ def create_route_candidate_asset(
     write_route_csv(route_csv, samples)
 
     semantic_relative = os.path.relpath(semantic_path, route_dir)
+    coverage_relative = os.path.relpath(coverage_source, route_dir)
     manifest = {
         "schema_version": 1,
         "route_id": route_id,
@@ -220,6 +243,8 @@ def create_route_candidate_asset(
         "semantic_binding": {
             "path": semantic_relative,
             "sha256": sha256_file(semantic_path),
+            "coverage_path": coverage_relative,
+            "coverage_sha256": sha256_file(coverage_source),
         },
         "vehicle_binding": {
             "platform_id": str(platform["name"]),
@@ -304,6 +329,32 @@ def write_route_manifest(path: str | Path, value: dict) -> Path:
     path = Path(path)
     path.write_text(yaml.safe_dump(value, sort_keys=False, allow_unicode=True), encoding="utf-8")
     return path
+
+
+def _require_frozen_map_asset(
+    map_root: Path,
+    assets: Mapping,
+    asset_id: str,
+    selected_path: Path,
+    code_prefix: str,
+) -> None:
+    record = assets.get(asset_id)
+    if not isinstance(record, Mapping) or not record.get("path") or not record.get("sha256"):
+        raise AssetContractError(
+            f"{code_prefix}_binding_missing",
+            f"READY map manifest does not freeze required asset: {asset_id}",
+        )
+    expected_path = (map_root / str(record["path"])).resolve()
+    if selected_path.resolve() != expected_path:
+        raise AssetContractError(
+            f"{code_prefix}_path_mismatch",
+            f"selected {asset_id} differs from READY map manifest binding",
+        )
+    if not selected_path.is_file() or sha256_file(selected_path) != str(record["sha256"]):
+        raise AssetContractError(
+            f"{code_prefix}_hash_mismatch",
+            f"selected {asset_id} content differs from READY map manifest hash",
+        )
 
 
 def _work_direction(semantic_map) -> tuple[float, float]:
