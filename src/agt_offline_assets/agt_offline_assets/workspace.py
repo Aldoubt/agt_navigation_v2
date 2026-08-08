@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -22,6 +23,25 @@ from .contracts import (
 
 
 _VERSION_RE = re.compile(r"^map_[0-9]{8}_[0-9]{6}_[0-9a-fA-F]{8}$")
+_MAP_CONTENT_KEYS = (
+    "schema_version",
+    "map_id",
+    "map_version_id",
+    "parent_version_id",
+    "site_id",
+    "epoch_id",
+    "purpose",
+    "frame_id",
+    "source",
+    "calibration",
+    "derivation",
+    "alignment",
+    "platform_profile",
+    "platform_profile_sha256",
+    "processing_backend",
+    "navigation",
+    "assets",
+)
 
 
 def _now() -> str:
@@ -30,6 +50,28 @@ def _now() -> str:
 
 def generate_map_version_id() -> str:
     return datetime.now(timezone.utc).strftime("map_%Y%m%d_%H%M%S_") + uuid4().hex[:8]
+
+
+def compute_map_content_sha256(manifest: dict[str, Any]) -> str:
+    """Return stable identity for immutable map content and provenance.
+
+    Registry lifecycle metadata such as state/active/pinned/tags/notes is intentionally
+    excluded because agt_map_manager may change those fields after asset acceptance.
+    Route compatibility must therefore bind this identity rather than raw manifest bytes.
+    """
+    stable = {
+        key: manifest[key]
+        for key in _MAP_CONTENT_KEYS
+        if key in manifest
+    }
+    payload = json.dumps(
+        stable,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
 
 
 def _atomic_yaml(path: Path, value: dict[str, Any]) -> None:
@@ -171,6 +213,7 @@ def create_map_workspace(
         "tags": ["reproducible_derivation", dataset.purpose.lower()],
         "notes": "Created by agt_offline_assets; products are not READY until quality gates pass.",
     }
+    manifest["map_content_sha256"] = compute_map_content_sha256(manifest)
     manifest_path = version_root / "manifest.yaml"
     _atomic_yaml(manifest_path, manifest)
     return MapWorkspace(version_root, manifest_path, map_id, version_id)
@@ -179,15 +222,16 @@ def create_map_workspace(
 def refresh_map_manifest(manifest_path: str | Path, *, requested_state: str | None = None) -> dict[str, Any]:
     """Hash canonical products and optionally promote a derived bundle to READY.
 
-    READY map versions are immutable. Once promoted, validation/activation must use
-    agt_map_manager rather than refreshing hashes or changing state in place.
+    READY map versions are immutable from the asset-preparation perspective. Registry
+    metadata may still change after acceptance; those fields do not affect
+    map_content_sha256.
     """
     manifest_path = Path(manifest_path).expanduser().resolve()
     manifest = load_yaml_mapping(manifest_path)
     if str(manifest.get("state", "")).upper() == "READY":
         raise AssetContractError(
             "ready_map_immutable",
-            "READY map versions are immutable; create a new map version for any change",
+            "READY map content is immutable; create a new map version for any content change",
         )
     root = manifest_path.parent
     _validate_lineage_files(root, manifest)
@@ -224,6 +268,7 @@ def refresh_map_manifest(manifest_path: str | Path, *, requested_state: str | No
             "origin": list(nav["origin"]),
         }
 
+    manifest["map_content_sha256"] = compute_map_content_sha256(manifest)
     if requested_state is not None:
         state = str(requested_state).upper()
         if state not in {"DRAFT", "PROCESSING", "READY", "INVALID", "ARCHIVED"}:
@@ -268,6 +313,13 @@ def _assert_ready_quality(root: Path, manifest: dict[str, Any]) -> None:
     missing = [relative for relative in required if not (root / relative).is_file()]
     if missing:
         raise AssetContractError("ready_assets_missing", "READY map missing: " + ", ".join(missing))
+
+    content_identity = str(manifest.get("map_content_sha256", ""))
+    if not content_identity or content_identity != compute_map_content_sha256(manifest):
+        raise AssetContractError(
+            "map_content_identity_mismatch",
+            "map_content_sha256 does not match immutable manifest content",
+        )
 
     quality = json.loads((root / "reports" / "map_quality_report.json").read_text(encoding="utf-8"))
     if str(quality.get("status", "")).upper() != "PASS":
