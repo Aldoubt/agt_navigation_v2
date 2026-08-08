@@ -14,6 +14,7 @@ from agt_ui_bridge.semantic_io import load_semantic_map
 
 from .contracts import AssetContractError, RoutePolicy, load_yaml_mapping, sha256_file
 from .grid_io import load_nav2_grid
+from .map_validation import validate_map_workspace
 from .route_asset import load_route_csv, write_route_manifest
 from .workspace import compute_map_content_sha256
 
@@ -47,9 +48,13 @@ def validate_route_asset(
             "READY route revisions are immutable; create a new revision for any change",
         )
     map_manifest_path = Path(map_manifest_path).expanduser().resolve()
+    compliance = validate_map_workspace(map_manifest_path)
+    if not compliance.valid or compliance.state != "READY":
+        raise AssetContractError(
+            "route_map_not_compliant",
+            "route feasibility requires a currently compliant READY map: " + ",".join(compliance.errors),
+        )
     map_manifest = load_yaml_mapping(map_manifest_path)
-    if str(map_manifest.get("state", "")).upper() != "READY":
-        raise AssetContractError("route_map_not_ready", "route feasibility requires a READY map")
     platform_path = Path(platform_profile_path).expanduser().resolve()
     platform = load_platform_profile(platform_path)
 
