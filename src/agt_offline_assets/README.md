@@ -18,10 +18,12 @@ Dataset + Calibration + Platform + Recipe
 
 ## CLI
 
+The executable is intentionally named `agt_offline_assets_cli.py` rather than `agt_offline_assets.py` so it cannot shadow the Python package `agt_offline_assets` when launched through `ros2 run`.
+
 Create a versioned workspace:
 
 ```bash
-ros2 run agt_offline_assets agt_offline_assets.py init-map \
+ros2 run agt_offline_assets agt_offline_assets_cli.py init-map \
   --maps-root runtime/maps \
   --map-id greenhouse_a \
   --dataset dataset_binding.yaml \
@@ -35,7 +37,7 @@ ros2 run agt_offline_assets agt_offline_assets.py init-map \
 After the mapping/cleaning pipeline writes canonical products, hash and promote them:
 
 ```bash
-ros2 run agt_offline_assets agt_offline_assets.py refresh-map \
+ros2 run agt_offline_assets agt_offline_assets_cli.py refresh-map \
   --manifest runtime/maps/greenhouse_a/versions/<version>/manifest.yaml \
   --state READY
 ```
@@ -43,7 +45,7 @@ ros2 run agt_offline_assets agt_offline_assets.py refresh-map \
 Derive a semantic route candidate:
 
 ```bash
-ros2 run agt_offline_assets agt_offline_assets.py derive-route \
+ros2 run agt_offline_assets agt_offline_assets_cli.py derive-route \
   --map-manifest runtime/maps/greenhouse_a/versions/<version>/manifest.yaml \
   --semantic runtime/maps/greenhouse_a/versions/<version>/semantic/semantic_map.geojson \
   --coverage runtime/maps/greenhouse_a/versions/<version>/semantic/coverage.yaml \
@@ -55,7 +57,7 @@ ros2 run agt_offline_assets agt_offline_assets.py derive-route \
 Run vehicle feasibility and preview export:
 
 ```bash
-ros2 run agt_offline_assets agt_offline_assets.py validate-route \
+ros2 run agt_offline_assets agt_offline_assets_cli.py validate-route \
   --route-dir runtime/maps/greenhouse_a/versions/<version>/routes/inspection_main/1 \
   --map-manifest runtime/maps/greenhouse_a/versions/<version>/manifest.yaml \
   --platform-profile profiles/platforms/bunker.yaml
