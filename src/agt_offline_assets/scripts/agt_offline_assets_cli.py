@@ -10,6 +10,7 @@ from agt_offline_assets import (
     apply_route_tuning,
     create_map_workspace,
     create_route_candidate_asset,
+    ingest_mapping_session,
     refresh_map_manifest,
     sha256_path_bundle,
     validate_map_workspace,
@@ -34,6 +35,21 @@ def _parser() -> argparse.ArgumentParser:
     init_map.add_argument("--alignment", required=True)
     init_map.add_argument("--platform-profile", required=True)
     init_map.add_argument("--calibration", required=True)
+
+    ingest = sub.add_parser(
+        "ingest-mapping-session",
+        help="freeze finalized MappingSession outputs as pre-alignment PROCESSING evidence",
+    )
+    ingest.add_argument("--manifest", required=True)
+    ingest.add_argument("--session-file", required=True)
+    ingest.add_argument("--session-id", default="")
+    ingest.add_argument("--candidate-map-yaml", required=True)
+    ingest.add_argument("--candidate-map-image", required=True)
+    ingest.add_argument("--localization-pcd", required=True)
+    ingest.add_argument("--processing-record", required=True)
+    ingest.add_argument("--derived-bag", required=True)
+    ingest.add_argument("--source-bag")
+    ingest.add_argument("--candidate-report")
 
     refresh = sub.add_parser("refresh-map", help="hash derived products and optionally change map state")
     refresh.add_argument("--manifest", required=True)
@@ -84,6 +100,21 @@ def main(argv=None) -> int:
                 calibration_path=args.calibration,
             )
             print(workspace.manifest_path)
+            return 0
+        if args.command == "ingest-mapping-session":
+            result = ingest_mapping_session(
+                args.manifest,
+                session_file=args.session_file,
+                session_id=args.session_id,
+                candidate_map_yaml=args.candidate_map_yaml,
+                candidate_map_image=args.candidate_map_image,
+                localization_pcd=args.localization_pcd,
+                processing_record=args.processing_record,
+                derived_bag_directory=args.derived_bag,
+                source_bag_path=args.source_bag,
+                candidate_report=args.candidate_report,
+            )
+            print(json.dumps(result.to_dict(), ensure_ascii=False))
             return 0
         if args.command == "refresh-map":
             manifest = refresh_map_manifest(args.manifest, requested_state=args.state)
