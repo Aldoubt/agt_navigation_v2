@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+import yaml
+
 from .contracts import AssetContractError, load_yaml_mapping, sha256_file
 from .workspace import _assert_ready_quality, _validate_lineage_files
 
@@ -33,7 +35,7 @@ def validate_map_workspace(manifest_path: str | Path) -> MapComplianceResult:
     manifest_path = Path(manifest_path).expanduser().resolve()
     try:
         manifest = load_yaml_mapping(manifest_path)
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, yaml.YAMLError) as exc:
         return MapComplianceResult(False, "", "", "", (f"manifest_unreadable:{exc}",), ())
 
     root = manifest_path.parent
@@ -71,7 +73,7 @@ def validate_map_workspace(manifest_path: str | Path) -> MapComplianceResult:
     if state == "READY":
         try:
             _assert_ready_quality(root, manifest)
-        except (AssetContractError, OSError, ValueError) as exc:
+        except (AssetContractError, OSError, ValueError, yaml.YAMLError) as exc:
             errors.append(getattr(exc, "code", "ready_quality_invalid"))
     elif state not in {"DRAFT", "PROCESSING", "INVALID", "ARCHIVED"}:
         errors.append("map_state_invalid")
