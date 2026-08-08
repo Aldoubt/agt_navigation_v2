@@ -1,6 +1,13 @@
 """Pure offline asset preparation primitives for AGT Navigation V2.5."""
 
-from .contracts import AssetContractError, DatasetBinding, DerivationRecipe, RoutePolicy, sha256_file
+from .contracts import (
+    AssetContractError,
+    DatasetBinding,
+    DerivationRecipe,
+    RoutePolicy,
+    sha256_file,
+    sha256_path_bundle,
+)
 from .workspace import MapWorkspace, create_map_workspace, refresh_map_manifest
 from .map_validation import MapComplianceResult, validate_map_workspace
 from .route_asset import (
@@ -20,6 +27,7 @@ __all__ = [
     "DerivationRecipe",
     "RoutePolicy",
     "sha256_file",
+    "sha256_path_bundle",
     "MapWorkspace",
     "create_map_workspace",
     "refresh_map_manifest",
