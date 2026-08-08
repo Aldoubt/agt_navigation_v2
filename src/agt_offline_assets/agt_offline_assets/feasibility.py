@@ -5,6 +5,9 @@ import json
 import math
 from pathlib import Path
 
+from shapely.geometry import Polygon
+from shapely.ops import unary_union
+
 from agt_coverage_planning.path_validator import Pose2D, ValidatorConfig, validate_path
 from agt_ui_bridge.platform_profile import load_platform_profile
 from agt_ui_bridge.semantic_io import load_semantic_map
@@ -27,12 +30,25 @@ def validate_route_asset(
     map_manifest_path: str | Path,
     platform_profile_path: str | Path,
     write_outputs: bool = True,
+    maximum_preview_footprints: int = 250,
 ) -> FeasibilityResult:
+    """Validate and, when requested, atomically finalize one Route revision.
+
+    A READY route is immutable. All feasibility evidence and preview output are
+    generated before the final route.yaml promotion write.
+    """
     route_dir = Path(route_dir).expanduser().resolve()
     route_manifest_path = route_dir / "route.yaml"
     route_manifest = load_yaml_mapping(route_manifest_path)
+    if write_outputs and str(route_manifest.get("status", "")).upper() == "READY":
+        raise AssetContractError(
+            "ready_route_immutable",
+            "READY route revisions are immutable; create a new revision for any change",
+        )
     map_manifest_path = Path(map_manifest_path).expanduser().resolve()
     map_manifest = load_yaml_mapping(map_manifest_path)
+    if str(map_manifest.get("state", "")).upper() != "READY":
+        raise AssetContractError("route_map_not_ready", "route feasibility requires a READY map")
     platform_path = Path(platform_profile_path).expanduser().resolve()
     platform = load_platform_profile(platform_path)
 
@@ -51,11 +67,12 @@ def validate_route_asset(
         unknown_space_policy="free" if policy.unknown_space_allowed else "collision",
         outside_costmap_is_collision=True,
     )
+    footprint = tuple(tuple(point) for point in platform["footprint"])
     geometry = validate_path(
         poses,
         "map",
         grid,
-        tuple(tuple(point) for point in platform["footprint"]),
+        footprint,
         float(platform["min_turning_radius"]),
         validator,
     )
@@ -77,6 +94,12 @@ def validate_route_asset(
     })
     if unknown_semantic_refs:
         errors.append("semantic_reference_missing")
+
+    semantic_invalid_samples = _semantic_footprint_violations(
+        semantic_map, geometry.samples, footprint
+    )
+    if semantic_invalid_samples:
+        errors.append("semantic_footprint_violation")
     if any(sample.semantic_ref == "<connector>" for sample in samples):
         warnings.append("straight_connector_candidate_requires_planner_review")
 
@@ -93,6 +116,9 @@ def validate_route_asset(
 
     errors = sorted(set(errors))
     passed = not errors
+    invalid_segments = sorted(set(geometry.report.invalid_segment_indices) | {
+        int(item.segment_index) for item in semantic_invalid_samples
+    })
     report = {
         "status": "PASS" if passed else "FAIL",
         "route_id": str(route_manifest.get("route_id", "")),
@@ -100,6 +126,7 @@ def validate_route_asset(
         "checks": {
             "map_binding": "PASS",
             "semantic_binding": "PASS" if not unknown_semantic_refs else "FAIL",
+            "semantic_free_space": "PASS" if not semantic_invalid_samples else "FAIL",
             "vehicle_binding": "PASS",
             "policy_binding": "PASS",
             "full_footprint_sweep": "PASS" if geometry.report.collision_pose_count == 0 else "FAIL",
@@ -116,6 +143,7 @@ def validate_route_asset(
             "maximum_curvature": float(geometry.report.maximum_curvature),
             "direction_changes": direction_changes,
             "footprint_collision_count": int(geometry.report.collision_pose_count),
+            "semantic_footprint_violation_count": len(semantic_invalid_samples),
             "curvature_violation_count": int(
                 "minimum_turning_radius_violation" in geometry.report.error_codes
             ),
@@ -123,20 +151,34 @@ def validate_route_asset(
             "out_of_bounds_pose_count": int(geometry.report.out_of_bounds_pose_count),
             "sample_count": int(geometry.report.sample_count),
         },
-        "invalid_segment_indices": list(geometry.report.invalid_segment_indices),
+        "invalid_segment_indices": invalid_segments,
         "errors": errors,
         "warnings": warnings,
     }
 
+    result = FeasibilityResult(passed, report, geometry)
     if write_outputs:
         report_path = route_dir / "feasibility_report.json"
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+        # Generate every derived evidence artifact before the one final manifest
+        # promotion write, so READY route.yaml is never edited in place afterward.
+        from .preview import write_route_preview
+
+        preview_path = write_route_preview(
+            route_dir,
+            platform_profile_path=platform_path,
+            feasibility_result=result,
+            maximum_footprints=maximum_preview_footprints,
+            extra_invalid_samples=semantic_invalid_samples,
+        )
         updated = dict(route_manifest)
         updated["route_csv_sha256"] = sha256_file(route_csv)
         updated["feasibility_report_sha256"] = sha256_file(report_path)
+        updated["preview_sha256"] = sha256_file(preview_path)
         updated["status"] = "READY" if passed else "INVALID"
         write_route_manifest(route_manifest_path, updated)
-    return FeasibilityResult(passed, report, geometry)
+    return result
 
 
 def _validate_bindings(
@@ -161,6 +203,9 @@ def _validate_bindings(
     semantic_path = (route_dir / str(semantic_binding.get("path", ""))).resolve()
     if not semantic_path.is_file() or sha256_file(semantic_path) != str(semantic_binding.get("sha256", "")):
         raise AssetContractError("route_semantic_hash_mismatch", "route semantic binding is invalid")
+    coverage_path = (route_dir / str(semantic_binding.get("coverage_path", ""))).resolve()
+    if not coverage_path.is_file() or sha256_file(coverage_path) != str(semantic_binding.get("coverage_sha256", "")):
+        raise AssetContractError("route_coverage_hash_mismatch", "route coverage binding is invalid")
 
     policy_binding = route_manifest.get("policy_binding") or {}
     policy_path = (route_dir / str(policy_binding.get("path", ""))).resolve()
@@ -176,3 +221,42 @@ def _validate_bindings(
     route_csv = route_dir / "route.csv"
     if not route_csv.is_file() or str(route_manifest.get("route_csv_sha256", "")) != sha256_file(route_csv):
         raise AssetContractError("route_csv_hash_mismatch", "route CSV hash mismatch")
+
+
+def _semantic_footprint_violations(semantic_map, samples, footprint):
+    fields = []
+    forbidden = []
+    for feature in semantic_map.features:
+        if not feature.enabled or feature.geometry_type != "Polygon":
+            continue
+        polygon = Polygon(feature.coordinates[0])
+        if feature.feature_type == "field_boundary":
+            fields.append(polygon)
+        elif feature.feature_type in {"exclusion_zone", "keepout_zone"}:
+            forbidden.append(polygon)
+    if not fields:
+        raise AssetContractError(
+            "semantic_field_missing", "semantic feasibility requires an enabled field_boundary"
+        )
+    allowed = unary_union(fields)
+    if forbidden:
+        allowed = allowed.difference(unary_union(forbidden))
+
+    invalid = []
+    for sample in samples:
+        polygon = Polygon(_transform_footprint(footprint, sample.pose))
+        if not allowed.covers(polygon):
+            invalid.append(sample)
+    return invalid
+
+
+def _transform_footprint(footprint, pose):
+    cosine = math.cos(pose.yaw)
+    sine = math.sin(pose.yaw)
+    return [
+        (
+            pose.x + cosine * x - sine * y,
+            pose.y + sine * x + cosine * y,
+        )
+        for x, y in footprint
+    ]
