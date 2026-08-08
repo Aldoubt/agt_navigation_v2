@@ -7,7 +7,7 @@ This is the current component-oriented status view. Historical implementation or
 | FAST-LIVO2 mapping adapter | SYSTEM-INTEGRATED | Implemented; bag and offline evidence exist; field acceptance remains separate. |
 | Registered cloud and PCD persistence | IMPLEMENTED | Hash-checked persistence and sparse voxel accumulation are implemented. |
 | ICP/NDT relocalization | IMPLEMENTED | Backend and quality contracts exist; batch and field acceptance remain. |
-| Nav2 waypoint Action | SYSTEM-INTEGRATED | Project Action and safety boundaries are implemented; vehicle metrics remain. |
+| Nav2 waypoint Action | SYSTEM-INTEGRATED | Public `ExecuteWaypointTask` remains the single navigation Action; MAP behavior is preserved while V25-09B adds an internal ROUTE backend selector. Vehicle metrics remain pending. |
 | Safety and BUNKER chassis | VEHICLE-PENDING | Watchdog and fail-closed boundaries exist; hardware acceptance remains. |
 | Semantic map and keepout | IMPLEMENTED | Data and offline products exist; execution remains gated. |
 | System health / TaskReadiness | SYSTEM-INTEGRATED | Structured read models and readiness contracts exist. |
@@ -27,7 +27,7 @@ This is the current component-oriented status view. Historical implementation or
 | Reverse-aware / kinematic connector planner | RESERVED | Hybrid-A*, State Lattice or Reeds-Shepp connector backend remains a later offline-planner increment; current Route schema already supports F/R. |
 | Route tuning revision pipeline | IMPLEMENTED | `lateral_offset` and `speed_scale` create a new DRAFT revision and require revalidation; READY revisions remain immutable. |
 | Canonical alignment / materialization tooling | IMPLEMENTED | Deterministic IDENTITY confirmation and SITE_CONTROL_POINTS planar solver emit residual evidence; current handheld demo remains `PENDING` because no site control points or explicit identity confirmation were supplied. Canonical materialization/READY promotion remains blocked by that dataset gate. |
-| ROUTE navigation core | IMPLEMENTED | V25-09B pure core loads immutable READY Route Assets, freezes the active map-frame segment into an odom RuntimePath, keeps sparse corrections for the next segment, exposes a VehicleTrackerAdapter boundary and asserts zero Global Planner requests in fake integration. ROS/Nav2 tracker integration and vehicle acceptance remain pending. |
+| ROUTE navigation core | SYSTEM-INTEGRATED | V25-09B loads immutable READY Route Assets, resolves exact TaskGroup->Route execution bindings, freezes active map-frame segments into odom RuntimePaths and tracks them through Nav2 `FollowPath` without Global Planner requests. Public `ExecuteWaypointTask` selects MAP or ROUTE internally; Action-level fake-server tests cover ROUTE and MAP fallback. Parent cancel/runtime-gate and real controller-server acceptance are the next software/vehicle gates. |
 | Sparse correction / anchor recovery | RESERVED | V25-10 target; correction producers do not own `map -> odom`; one localization TF publisher is selected at runtime. |
 | Local environment mapping | RESERVED | V25-11 target; `/agt/map/local_occupancy` is reserved as an `odom`-frame transient rolling product. |
 | Ground factor | RESERVED | P1 state-estimation constraint; separate from the local occupancy representation. |
