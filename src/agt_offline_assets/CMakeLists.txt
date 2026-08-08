@@ -27,6 +27,9 @@ install(PROGRAMS
 if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_offline_assets test/test_offline_assets.py)
+  ament_add_pytest_test(
+    test_mapping_session_ingest test/test_mapping_session_ingest.py
+  )
 endif()
 
 ament_package()
