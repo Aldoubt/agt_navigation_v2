@@ -22,6 +22,7 @@ def _yaml(path: Path):
 def test_offline_lineage_contract_is_explicit():
     calibration = _read(INTERFACES / "calibration_dataset_contract.md")
     derivation = _read(INTERFACES / "map_derivation_contract.md")
+    map_manifest = _read(INTERFACES / "map_manifest.md")
     workflow = _read(ROOT / "docs/workflows/bag_to_route_asset.md")
 
     for token in (
@@ -36,6 +37,8 @@ def test_offline_lineage_contract_is_explicit():
     assert "OPERATIONAL" in calibration
     assert "site_id" in derivation and "epoch_id" in derivation
     assert "canonical site frame" in derivation
+    assert "map_content_sha256" in map_manifest
+    assert "active" in map_manifest and "pinned" in map_manifest
     assert "Bag/Experiment" in _read(ROOT / "docs/architecture/offline_asset_pipeline.md")
     assert "Generate\n  -> Visualize" in workflow
 
@@ -62,7 +65,8 @@ def test_route_asset_binds_map_semantics_vehicle_policy_and_feasibility():
     report = json.loads((example / "feasibility_report.json").read_text(encoding="utf-8"))
 
     assert route["frame_id"] == "map"
-    assert route["map_binding"]["manifest_sha256"].startswith("sha256:")
+    assert route["map_binding"]["map_content_sha256"].startswith("sha256:")
+    assert "manifest_sha256" not in route["map_binding"]
     assert route["semantic_binding"]["sha256"].startswith("sha256:")
     assert route["semantic_binding"]["coverage_sha256"].startswith("sha256:")
     assert route["semantic_binding"]["path"].startswith("../../../semantic/")
@@ -101,8 +105,8 @@ def test_route_csv_has_direction_clearance_and_business_reference_without_execut
 
     contract = _read(INTERFACES / "route_asset_contract.md")
     assert "Route Executor 不自行执行采摘、喷药、拍照等业务" in contract
-    assert "重新 footprint sweep" in contract
-    assert "READY revision 之后不得原地" in contract
+    assert "footprint sweep" in contract
+    assert "READY revision 之后禁止原地" in contract
 
 
 def test_vehicle_geometry_stays_in_platform_profile_and_tracker_is_adapter_only():
@@ -134,7 +138,15 @@ def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning
         assert (OFFLINE_PACKAGE / relative).is_file(), relative
 
     cli = _read(OFFLINE_PACKAGE / "scripts/agt_offline_assets.py")
-    for command in ("init-map", "refresh-map", "validate-map", "derive-route", "validate-route", "tune-route"):
+    for command in (
+        "hash-path",
+        "init-map",
+        "refresh-map",
+        "validate-map",
+        "derive-route",
+        "validate-route",
+        "tune-route",
+    ):
         assert command in cli
     assert "ExecuteRouteTask" not in cli
     assert "cmd_vel" not in cli
@@ -146,4 +158,4 @@ def test_v25_09_asset_contracts_do_not_add_public_route_actions():
     assert not (action_dir / "ExecuteNavigationTask.action").exists()
 
     route_contract = _read(INTERFACES / "route_asset_contract.md")
-    assert "Route Asset 本身不发布速度、不拥有 TF" in route_contract
+    assert "Route Asset 不发布速度、不拥有 TF" in route_contract
