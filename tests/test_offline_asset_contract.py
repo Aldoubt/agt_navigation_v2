@@ -10,6 +10,7 @@ INTERFACES = ROOT / "docs/interfaces"
 EXAMPLES = INTERFACES / "examples"
 OFFLINE_PACKAGE = ROOT / "src/agt_offline_assets"
 SYSTEM_MANAGER = ROOT / "src/agt_system_manager"
+PLATFORMS = ROOT / "profiles/platforms"
 
 
 def _read(path: Path) -> str:
@@ -128,6 +129,21 @@ def test_vehicle_geometry_stays_in_platform_profile_and_tracker_is_adapter_only(
     assert "不得维护第二份 vehicle geometry truth" in tracker
 
 
+def test_mk_mini_profile_is_ackermann_but_vehicle_acceptance_remains_gated():
+    platform = _yaml(PLATFORMS / "mk_mini.yaml")["platform"]
+    geometry = platform["geometry"]
+
+    assert platform["kinematics"] == "ackermann"
+    assert geometry["wheel_base"] == 0.60
+    assert geometry["track_width"] == 0.517
+    assert geometry["wheel_diameter"] == 0.24
+    assert geometry["ground_clearance"] == 0.111
+    assert geometry["min_turning_radius_verified"] is False
+    assert platform["route_acceptance"]["enabled"] is False
+    assert platform["coverage_repair"]["enabled"] is False
+    assert platform["coverage_repair"]["allow_in_place_rotation"] is False
+
+
 def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning():
     required = (
         "agt_offline_assets/contracts.py",
@@ -142,9 +158,15 @@ def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning
         "scripts/agt_offline_assets_cli.py",
         "test/test_offline_assets.py",
         "test/test_mapping_session_ingest.py",
+        "test/test_alignment.py",
+        "test/test_cleaning.py",
     )
     for relative in required:
         assert (OFFLINE_PACKAGE / relative).is_file(), relative
+
+    cmake = _read(OFFLINE_PACKAGE / "CMakeLists.txt")
+    assert "test_alignment" in cmake
+    assert "test_cleaning" in cmake
 
     cli = _read(OFFLINE_PACKAGE / "scripts/agt_offline_assets_cli.py")
     for command in (

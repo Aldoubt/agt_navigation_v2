@@ -30,6 +30,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_mapping_session_ingest test/test_mapping_session_ingest.py
   )
+  ament_add_pytest_test(test_alignment test/test_alignment.py)
+  ament_add_pytest_test(test_cleaning test/test_cleaning.py)
 endif()
 
 ament_package()
