@@ -30,7 +30,7 @@ colcon build \
 source install/setup.bash
 ```
 
-## 2. Pure C++ gates
+## 2. Package gates
 
 ```bash
 colcon test \
@@ -42,7 +42,7 @@ colcon test-result \
   --verbose
 ```
 
-The new tests are:
+The new V25-10 targets include:
 
 ```text
 test_global_correction_core
@@ -70,11 +70,11 @@ python3 -m pytest -q \
 Important invariants:
 
 ```text
-Mapping / odometry     owns odom -> base_footprint
-Relocalization         produces accepted global pose evidence
-GlobalCorrectionManager owns map -> odom
-Navigation             owns no TF
-RecoveryTriggerManager owns no TF
+Mapping / odometry        owns odom -> base_footprint
+Relocalization            publishes registration evidence only
+GlobalCorrectionManager   owns canonical LocalizationStatus + map -> odom
+Navigation                owns no TF
+RecoveryTriggerManager    owns no TF
 ```
 
 ## 4. Launch wiring smoke
@@ -101,15 +101,33 @@ Check nodes:
 ros2 node list | grep -E 'agt_relocalization|agt_global_correction_manager|agt_recovery_trigger_manager'
 ```
 
-Check correction status topic exists:
+## 5. Status ownership check
+
+Production topic ownership is deliberately split into evidence and canonical state:
 
 ```bash
-ros2 topic info /agt/localization/global_correction_status
+ros2 topic info /agt/localization/evidence_status --verbose
+ros2 topic info /agt/localization/status --verbose
+ros2 topic info /agt/localization/global_correction_status --verbose
 ```
 
-Before accepted localization evidence exists, `map -> odom` is intentionally not published.
+Expected ownership:
 
-## 5. TF authority check
+```text
+/agt/localization/evidence_status
+  publisher: agt_relocalization
+
+/agt/localization/status
+  publisher: agt_global_correction_manager
+  subscriber: agt_recovery_trigger_manager
+
+/agt/localization/global_correction_status
+  publisher: agt_global_correction_manager
+```
+
+The canonical status is the only localization state that Navigation/Safety should consume. An accepted registration whose global correction is rejected must not remain canonical TRACKING.
+
+## 6. TF authority check
 
 ```bash
 ros2 node info /agt_global_correction_manager
@@ -118,7 +136,38 @@ ros2 node info /agt_relocalization
 
 The production launch passes `publish_tf=false` to relocalization. `global_correction_manager` is the component allowed to broadcast the accepted `map -> odom` transform.
 
-## 6. Next system gate
+Before accepted correction evidence exists:
+
+```bash
+ros2 run tf2_ros tf2_echo map odom
+```
+
+is expected to wait/fail because no canonical `map -> odom` has been accepted yet. Do not create an identity TF merely to make this command succeed.
+
+## 7. Recovery escalation expectation
+
+The default manager configuration contains:
+
+```yaml
+correction_rejections_to_lost: 3
+```
+
+Therefore the future synthetic rejection integration gate must demonstrate:
+
+```text
+accepted registration evidence
+  + rejected map->odom correction
+      -> canonical RECOVERING
+      -> RecoveryTrigger MODE_LOCAL_CANDIDATES
+
+three consecutive correction rejections
+      -> canonical LOST
+      -> RecoveryTrigger MODE_AUTO_SEARCH
+```
+
+A subsequently accepted lost-state registration may produce `REANCHOR_ACCEPTED` and a new correction generation.
+
+## 8. Next system gate
 
 After the build and tests are green, add a deterministic synthetic integration fixture:
 
@@ -127,11 +176,12 @@ known global pose
 +
 known drifted odom -> base_footprint
         ↓
-LocalizationStatus evidence
+/agt/localization/evidence_status
         ↓
 GlobalCorrectionManager
         ↓
-expected map -> odom
+canonical /agt/localization/status
++ expected map -> odom
         ↓
 corrected map -> base_footprint
 ```
