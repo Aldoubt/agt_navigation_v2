@@ -7,8 +7,10 @@ map_binding:
   map_version_id: map_20260810_120000_1234abcd
   manifest_sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 semantic_binding:
-  path: ../../semantic/semantic_map.geojson
+  path: ../../../semantic/semantic_map.geojson
   sha256: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+  coverage_path: ../../../semantic/coverage.yaml
+  coverage_sha256: sha256:1111111111111111111111111111111111111111111111111111111111111111
 vehicle_binding:
   platform_id: bunker
   platform_profile_sha256: sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
@@ -17,4 +19,5 @@ policy_binding:
   sha256: sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
 route_csv_sha256: sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
 feasibility_report_sha256: sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
+preview_sha256: sha256:2222222222222222222222222222222222222222222222222222222222222222
 status: READY
