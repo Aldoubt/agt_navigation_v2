@@ -170,9 +170,9 @@ def test_replay_orchestrator_reuses_mapping_session_and_keeps_raw_outputs_pre_al
     assert "ManageMappingSession" in script
     assert "OP_START" in script and "OP_FINALIZE_CAPTURE" in script
     assert "ingest_mapping_session" in script
-    assert "start_sensor\": \"false" in helper
-    assert "use_sim_time\": \"true" in helper
-    assert "processing/mapping_session" in ingest
+    assert '"start_sensor": "false"' in helper
+    assert '"use_sim_time": "true"' in helper
+    assert 'root / "processing" / "mapping_session"' in ingest
     assert '"materialized": False' in ingest
     assert 'root / "navigation"' not in ingest
     assert 'root / "pointcloud" / "localization_map.pcd"' not in ingest
