@@ -26,7 +26,7 @@ runtime/maps/<map_id>/versions/<map_version_id>/
 
 ## Identity and purpose
 
-A map version must have stable `map_id` / `map_version_id`. New reproducible derivations should additionally record:
+A reproducible map version records:
 
 ```yaml
 schema_version: 1
@@ -36,6 +36,7 @@ site_id: greenhouse_a
 epoch_id: 2026-08-10-am
 purpose: OPERATIONAL
 frame_id: map
+map_content_sha256: sha256:<64 lowercase hex>
 ```
 
 `purpose` distinguishes at least:
@@ -43,7 +44,44 @@ frame_id: map
 - `EVALUATION`: open-field/RTK truth and algorithm A/B assets
 - `OPERATIONAL`: facility/agricultural navigation, semantics and route assets
 
-Existing schema-v1 manifests that predate these optional lineage fields remain readable; new offline derivation workflows should populate them and their companion binding files.
+Existing schema-v1 manifests that predate the V25-09A lineage fields remain readable by legacy registry code; new offline derivations must populate the complete lineage contract.
+
+## Stable `map_content_sha256`
+
+Route compatibility must not use the raw SHA256 of `manifest.yaml`, because `agt_map_manager` legitimately edits lifecycle fields such as `state`, `active` and `pinned` during activation, pinning and archival.
+
+V25-09A therefore defines `map_content_sha256` as canonical JSON SHA256 over only stable map content and provenance:
+
+```text
+schema_version
+map_id / map_version_id / parent_version_id
+site_id / epoch_id / purpose / frame_id
+source Dataset binding
+Calibration binding
+Derivation Recipe binding
+Alignment binding
+Platform binding
+processing_backend
+navigation metadata
+frozen assets table
+```
+
+The following registry metadata is intentionally excluded:
+
+```text
+state
+active
+pinned
+tags
+notes
+created_at
+```
+
+Therefore:
+
+- activating/deactivating or pinning a map does not invalidate a Route Asset
+- changing navigation geometry, localization prior, semantic/coverage content, calibration, recipe or alignment changes the stable content identity or a separately bound asset hash and must fail compatibility checks
+- `validate-map` recomputes and checks `map_content_sha256` read-only
 
 ## Source provenance
 
@@ -64,13 +102,13 @@ platform_profile: bunker
 platform_profile_sha256: sha256:<64 lowercase hex>
 ```
 
-The Dataset binding itself continues to use the field name `calibration_sha256`; the Map Manifest uses the generic `path` + `sha256` artifact form shown above. Both hashes must identify the same Calibration Set bytes.
+The Dataset binding uses the field name `calibration_sha256`; the Map Manifest uses the generic `path` + `sha256` artifact form. Both hashes identify the same Calibration Set bytes.
 
-The detailed contracts are defined in `calibration_dataset_contract.md` and `map_derivation_contract.md`.
+Detailed contracts are in `calibration_dataset_contract.md` and `map_derivation_contract.md`.
 
 ## Alignment identity
 
-All assets in one map version must share the same canonical `map` frame and alignment lineage. The manifest should bind:
+All assets in one map version share the same canonical `map` frame and alignment lineage:
 
 ```yaml
 alignment:
@@ -80,15 +118,13 @@ alignment:
   record_sha256: sha256:<64 lowercase hex>
 ```
 
-`alignment/alignment_report.json` is a canonical hashed asset in `assets` once generated. It must report `PASS` before a derived map is promoted to `READY`.
+`alignment/alignment_report.json` becomes a canonical hashed asset once generated and must report `PASS` before promotion to `READY`.
 
-For the same physical site at different epochs, keep the same `site_id`/site-frame definition and create a new `map_version_id`; do not overwrite the previous READY version. A later epoch may reference an accepted version for alignment, but stable/control-point evidence should dominate seasonal vegetation.
+For the same physical site at different epochs, preserve `site_id` and site-frame definition while creating a new `map_version_id`. A later epoch may reference an accepted version for alignment, but stable structures/control points should dominate seasonal vegetation.
 
 ## Asset groups
 
-A manifest contains schema/version identity, parent/reference, state (`DRAFT`, `PROCESSING`, `READY`, `INVALID`, `ARCHIVED`), timestamps, platform/frame, asset relative paths and SHA-256 values, navigation metadata, processing backend, active/pinned flags, tags and notes.
-
-Typical asset groups:
+Typical products:
 
 ```text
 pointcloud/
@@ -117,22 +153,48 @@ routes/<route_id>/<revision>/
 
 `refresh-map` freezes generated canonical products into the manifest `assets` table. When present, `semantic_map.geojson` and `coverage.yaml` are frozen separately as `semantic_map` and `semantic_coverage`; Route derivation must match both hashes exactly.
 
-Global Navigation Map, Localization Prior, Semantic Map and Route Asset are distinct products even when derived from the same source bag.
+Global Navigation Map, Localization Prior, Semantic Map and Route Asset remain distinct products even when they originate from one bag.
 
 ## READY quality gate
 
-A formal derived map remains `PROCESSING` while mapping, cleaning, alignment and semantic editing are still changing assets. It is promoted only after all products intended for that version are complete.
+A formal derived map remains `PROCESSING` while mapping, cleaning, alignment and semantic editing are still changing assets.
 
-The V25-09A offline gate requires the immutable Dataset/Calibration/Recipe/Alignment lineage, navigation map, ready localization PCD processing record, `alignment_report.json` and `map_quality_report.json`. All declared assets are hashed before the one-way promotion to `READY`.
+The V25-09A gate requires:
 
-A `READY` map version is immutable. `agt_offline_assets refresh-map` refuses to refresh hashes or change state after promotion. Read-only auditing uses `validate-map`; activation/registry checks remain separate from asset generation.
+- immutable Dataset/Bag bundle, persisted Calibration artifact, Platform Profile, Recipe and Alignment lineage
+- navigation `map.yaml/map.pgm`
+- ready Localization Prior PCD processing record with exact content hash
+- `alignment_report.json` with `PASS`
+- `map_quality_report.json` with `PASS`
+- frozen canonical asset hashes
+- valid `map_content_sha256`
 
-Only a valid `READY` version can be active. The selected identity is written to `runtime/maps/active_map.yaml` atomically and is consumed by the system health adapter.
+`agt_offline_assets refresh-map --state READY` performs the one-way asset-content promotion. After promotion it refuses to refresh content hashes or rewrite map products. `validate-map` is the read-only compliance audit.
 
-Route readiness is separate from map readiness: each Route Asset binds the exact map/semantic/coverage/vehicle/policy hashes and has its own feasibility report plus preview evidence. A READY map does not make every route READY.
+`agt_map_manager` may still update Registry lifecycle metadata such as active/pinned/state. Those administrative changes are not map-content mutations and do not change `map_content_sha256`.
+
+Only a valid READY version can be active. Active identity remains published through `runtime/maps/active_map.yaml` and existing system-health boundaries.
+
+## Route binding
+
+Route readiness is separate from map readiness. A Route Asset binds:
+
+```text
+map_id
+map_version_id
+map_content_sha256
+semantic_map sha256
+coverage sha256
+vehicle profile sha256
+route policy sha256
+```
+
+It then has its own feasibility and preview evidence. A READY map does not make every route READY.
 
 ## Immutability and retention
 
-`pin`, active state, processing state, parent dependencies and experiment references protect versions from retention. Soft delete moves a version to `.trash` with a restore record; permanent purge is separate.
+`pin`, active state, processing state, parent dependencies and experiment references protect versions from retention. Soft delete moves a version to `.trash`; permanent purge is separate.
 
-Existing legacy `runtime/maps/<name>/` data is not silently rewritten or selected. It must be explicitly packaged into a version manifest and registered. READY map content is immutable; re-alignment, cleaning or semantic edits create a new map version. Route revisions are separately versioned children under the bound READY map and may be added without changing the frozen map manifest; route tuning creates a new route revision rather than mutating an accepted Route Asset.
+Legacy `runtime/maps/<name>/` data is not silently rewritten. It must be explicitly packaged and registered.
+
+READY map **content** is immutable: re-alignment, cleaning, calibration change, navigation-map regeneration or semantic edit creates a new map version. Registry lifecycle metadata may change without changing the stable content identity. Route revisions remain separately versioned children and route tuning creates a new revision rather than mutating an accepted Route Asset.
