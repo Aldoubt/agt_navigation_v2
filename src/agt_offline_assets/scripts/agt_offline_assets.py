@@ -11,6 +11,7 @@ from agt_offline_assets import (
     create_map_workspace,
     create_route_candidate_asset,
     refresh_map_manifest,
+    validate_map_workspace,
     validate_route_asset,
 )
 
@@ -33,6 +34,9 @@ def _parser() -> argparse.ArgumentParser:
     refresh = sub.add_parser("refresh-map", help="hash derived products and optionally change map state")
     refresh.add_argument("--manifest", required=True)
     refresh.add_argument("--state", choices=["DRAFT", "PROCESSING", "READY", "INVALID", "ARCHIVED"])
+
+    validate_map = sub.add_parser("validate-map", help="read-only audit of lineage and frozen map assets")
+    validate_map.add_argument("--manifest", required=True)
 
     derive = sub.add_parser("derive-route", help="derive a DRAFT Route Asset from semantic annotations")
     derive.add_argument("--map-manifest", required=True)
@@ -83,6 +87,10 @@ def main(argv=None) -> int:
                 "assets": sorted((manifest.get("assets") or {}).keys()),
             }, ensure_ascii=False))
             return 0
+        if args.command == "validate-map":
+            result = validate_map_workspace(args.manifest)
+            print(json.dumps(result.to_dict(), ensure_ascii=False))
+            return 0 if result.valid else 2
         if args.command == "derive-route":
             route_dir = create_route_candidate_asset(
                 map_manifest_path=args.map_manifest,
