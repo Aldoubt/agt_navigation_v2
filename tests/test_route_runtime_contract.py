@@ -102,6 +102,44 @@ def test_public_navigation_capability_selects_map_or_route_without_schema_change
     assert "navigation_mode" not in action
 
 
+def test_runtime_gate_action_tests_are_registered():
+    cmake = _read(NAVIGATION / "CMakeLists.txt")
+    runtime_gate_test = NAVIGATION / "test" / "test_navigation_capability_runtime_gates.py"
+
+    assert "test_navigation_capability_runtime_gates" in cmake
+    assert runtime_gate_test.is_file()
+    content = _read(runtime_gate_test)
+    for token in (
+        "test_parent_cancel_reaches_active_route_follow_path_child",
+        "SAFETY_NOT_READY",
+        "LOCALIZATION_NOT_READY",
+        "TASK_READINESS_NOT_READY",
+        "child_canceled",
+    ):
+        assert token in content
+
+
+def test_controller_only_smoke_uses_real_follow_path_without_planner_server():
+    launch = _read(NAVIGATION / "launch" / "route_controller_smoke.launch.py")
+    client = _read(NAVIGATION / "scripts" / "route_controller_smoke.py")
+    cmake = _read(NAVIGATION / "CMakeLists.txt")
+
+    assert 'package="nav2_controller"' in launch
+    assert 'executable="controller_server"' in launch
+    assert 'package="nav2_collision_monitor"' in launch
+    assert 'executable="collision_monitor"' in launch
+    assert 'executable="differential_drive_simulator.py"' in launch
+    assert 'executable="tracked_safety_controller.py"' in launch
+    assert "planner_server" not in launch
+    assert "bt_navigator" not in launch
+    assert "map_server" not in launch
+
+    assert "FollowPath" in client
+    assert 'path.header.frame_id = "odom"' in client
+    assert '"global_planner_requests": 0' in client
+    assert "route_controller_smoke.py" in cmake
+
+
 def test_route_runtime_package_tests_are_registered():
     cmake = _read(NAVIGATION / "CMakeLists.txt")
     for target in (
@@ -109,6 +147,7 @@ def test_route_runtime_package_tests_are_registered():
         "test_nav2_follow_path_adapter",
         "test_route_task_binding",
         "test_navigation_capability_server",
+        "test_navigation_capability_runtime_gates",
     ):
         assert target in cmake
 
@@ -117,5 +156,6 @@ def test_route_runtime_package_tests_are_registered():
         "test/test_nav2_follow_path_adapter.py",
         "test/test_route_task_binding.py",
         "test/test_navigation_capability_server.py",
+        "test/test_navigation_capability_runtime_gates.py",
     ):
         assert (NAVIGATION / relative).is_file()
