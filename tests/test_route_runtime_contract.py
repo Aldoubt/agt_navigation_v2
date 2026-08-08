@@ -139,6 +139,15 @@ def test_controller_only_smoke_uses_real_follow_path_without_planner_server():
     assert '"global_planner_requests": 0' in client
     assert "route_controller_smoke.py" in cmake
 
+    # The smoke client is a newly generated script. GitHub contents writes may
+    # create it as 0644, so symlink-install must materialize an executable copy.
+    assert "AGT_NAVIGATION_GENERATED_SCRIPT_DIR" in cmake
+    assert "FILE_PERMISSIONS" in cmake
+    assert 'scripts/route_controller_smoke.py"' in cmake
+    assert "OWNER_EXECUTE" in cmake
+    assert "GROUP_EXECUTE" in cmake
+    assert "WORLD_EXECUTE" in cmake
+
 
 def test_route_runtime_package_tests_are_registered():
     cmake = _read(NAVIGATION / "CMakeLists.txt")
