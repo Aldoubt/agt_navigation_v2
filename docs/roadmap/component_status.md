@@ -1,9 +1,6 @@
 # V2.5 Component Status
 
-This is the current component-oriented status view. Historical implementation
-order and migration evidence are kept under [`docs/archive/`](../archive/).
-Statuses use `IMPLEMENTED`, `SYSTEM-INTEGRATED`, `VEHICLE-PENDING`, `RESERVED`,
-and `OPTIONAL`; they do not imply vehicle acceptance unless explicitly stated.
+This is the current component-oriented status view. Historical implementation order and migration evidence are kept under [`docs/archive/`](../archive/). Statuses use `IMPLEMENTED`, `SYSTEM-INTEGRATED`, `VEHICLE-PENDING`, `RESERVED`, and `OPTIONAL`; they do not imply vehicle acceptance unless explicitly stated.
 
 | Component | Status | Evidence boundary / next gate |
 | --- | --- | --- |
@@ -20,11 +17,17 @@ and `OPTIONAL`; they do not imply vehicle acceptance unless explicitly stated.
 | Semantic waypoint mode | IMPLEMENTED | Schema 1.1 validation split, typed waypoint messages/topic and waypoint server mode; Qt/runtime verification remains. |
 | BT capability layer / first BT mission | VEHICLE-PENDING | V25-07 full-chain software integration is complete; vehicle validation remains pending. |
 | V25-08 architecture & semantics baseline | IMPLEMENTED | MAP/ROUTE/LOCAL, map products, task/route/path semantics, TF authority and optional-ESDF boundaries are frozen without changing runtime ROS interfaces. |
-| ROUTE navigation core | RESERVED | V25-09 target; no runtime implementation in V25-08. |
+| Calibration / dataset provenance contract | IMPLEMENTED | V25-09A freezes immutable bag, calibration, platform and recipe lineage; runtime validator/tooling still to be implemented. |
+| Reproducible map derivation / alignment contract | IMPLEMENTED | V25-09A defines site/epoch identity, canonical alignment, cleaning artifacts and quality evidence; production pipeline tooling remains next. |
+| Semantic route asset / feasibility contract | IMPLEMENTED | V25-09A defines map/semantic/vehicle/policy bindings, CSV geometry, tuning revisions and footprint feasibility evidence; planner/export tooling remains next. |
+| Vehicle tracker adapter contract | IMPLEMENTED | V25-09A freezes route-to-controller responsibilities without adding a public Route Action. |
+| Offline asset derivation tooling | RESERVED | Next V25-09A implementation gate: one managed bag must deterministically produce validated map assets using the frozen contracts. |
+| Route planner / preview tooling | RESERVED | Next V25-09A implementation gate: semantic rules + vehicle profile -> route asset + footprint/kinematic preview and revisioned tuning. |
+| ROUTE navigation core | RESERVED | V25-09B target after READY Route Asset tooling; no runtime implementation yet. |
 | Sparse correction / anchor recovery | RESERVED | V25-10 target; correction producers do not own `map -> odom`; one localization TF publisher is selected at runtime. |
 | Local environment mapping | RESERVED | V25-11 target; `/agt/map/local_occupancy` is reserved as an `odom`-frame transient rolling product. |
 | Ground factor | RESERVED | P1 state-estimation constraint; separate from the local occupancy representation. |
 | GNSS, wheel factor, GTSAM/iSAM2 | RESERVED | P1 state-estimation robustness track. |
 | Optional ESDF / advanced local planning | OPTIONAL | V25-12 derived representation after local occupancy; not a default prerequisite. |
 | STD / Scan Context and long-term map | RESERVED | P2 long-term agricultural navigation research. |
-| Qt/Web operator tooling | OPTIONAL | Clients remain outside business state ownership and motion boundaries. |
+| Qt/Web operator tooling | OPTIONAL | Clients remain outside business state ownership and motion boundaries; route preview UI is offline evidence, not a motion owner. |
