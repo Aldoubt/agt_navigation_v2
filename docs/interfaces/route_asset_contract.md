@@ -1,17 +1,17 @@
 # Route Asset, Rule Derivation and Vehicle Feasibility Contract
 
-本合同定义如何从已绑定的 Semantic Map、Global Navigation Map 与 Vehicle Profile 派生可审计的离线路线资产。Route Asset 是可版本化导航输入，不是 Mission，不是 SemanticWaypoint Library，也不是 controller Runtime Path。
+本文定义从 READY Map Version、Semantic Map 与 Vehicle Profile 派生可审计离线路线资产的正式合同
 
-必须保持：
+必须保持
 
 ```text
 Semantic Map -> Route Policy -> Route Asset -> Runtime Path
 SemanticWaypoint != WaypointTask != Route != Runtime Path
 ```
 
-## 1. Route Asset 布局
+Route Asset 不是 Mission、SemanticWaypoint Library 或 controller Runtime Path
 
-建议：
+## 1. 目录
 
 ```text
 runtime/maps/<map_id>/versions/<map_version_id>/routes/<route_id>/<revision>/
@@ -20,14 +20,41 @@ runtime/maps/<map_id>/versions/<map_version_id>/routes/<route_id>/<revision>/
   policy.yaml
   feasibility_report.json
   preview.geojson
-  tuning.yaml              # 可选，若经过人工/规则微调
+  tuning.yaml              # 可选
 ```
 
-Route Asset 不允许脱离 map version 单独成为匿名 CSV。Route revision 是绑定到 READY map 的独立子资产；新增 route revision 不修改已冻结的 map manifest。
+Route revision 是绑定到 READY Map Version 的独立子资产，新增 revision 不修改已冻结地图内容
 
-## 2. route.yaml
+## 2. Map compatibility identity
 
-READY revision 最低字段：
+Route 不绑定 `manifest.yaml` 原始文件 SHA，因为 `agt_map_manager` 在 activate、pin、archive 等 Registry 生命周期操作中可能合法修改 `active`、`pinned`、`state` 等管理字段
+
+正式关系是
+
+```text
+map_version_id
++
+map_content_sha256
+```
+
+其中 `map_content_sha256` 只覆盖稳定地图内容与 provenance，包括地图身份、Dataset/Calibration/Recipe/Alignment lineage、Platform binding、navigation metadata 和 frozen asset hashes
+
+以下 Registry 元数据不参与该 identity
+
+```text
+state
+active
+pinned
+tags
+notes
+created_at
+```
+
+因此地图激活或 pin 不会让已有 Route 失效，但导航图、Localization Prior、Semantic Map、Coverage、Calibration、Recipe、Alignment 等真实内容变化必须导致 content identity 或独立 asset hash 不匹配
+
+## 3. `route.yaml`
+
+READY revision 最低字段
 
 ```yaml
 schema_version: 1
@@ -37,7 +64,7 @@ frame_id: map
 map_binding:
   map_id: greenhouse_a
   map_version_id: map_20260810_120000_1234abcd
-  manifest_sha256: sha256:<64 lowercase hex>
+  map_content_sha256: sha256:<64 lowercase hex>
 semantic_binding:
   path: ../../../semantic/semantic_map.geojson
   sha256: sha256:<64 lowercase hex>
@@ -55,15 +82,19 @@ preview_sha256: sha256:<64 lowercase hex>
 status: READY
 ```
 
-`semantic_map.geojson` 与 `coverage.yaml` 必须都是 READY map manifest 已冻结的 canonical assets。派生器不得接受位于同一路径但内容 hash 已变化的语义文件。
+`semantic_map.geojson` 与 `coverage.yaml` 必须都是 READY Map Manifest 已冻结的 canonical assets
 
-任何 map/semantic/coverage/vehicle/policy hash 变化都必须使旧 Route Asset 失效或重新派生，禁止只靠文件名判断兼容。
+派生器不得接受路径相同但 hash 已变化的语义文件
 
-Route 建立时先写 `DRAFT`；feasibility report 与 preview 必须先生成完成，最后一次写 `route.yaml` 才能晋升为 `READY`。READY revision 之后不得原地重新生成 preview、修改 CSV 或覆盖验收报告。
+Map content、Semantic、Coverage、Vehicle Profile 或 Route Policy 任一绑定变化都要求新派生或重新验证，不能仅按文件名判断兼容
 
-## 3. Route Policy
+Route 建立时先写 `DRAFT`，feasibility 与 preview 全部生成后最后一次写 `route.yaml` 才能晋升 `READY`
 
-`policy.yaml` 描述“如何从语义地图派生路线”，不复制 Vehicle Profile 的几何真值。建议字段：
+READY revision 之后禁止原地修改 CSV、policy、preview、feasibility 或 manifest
+
+## 4. Route Policy
+
+`policy.yaml` 描述如何从语义地图派生路线，不复制 Vehicle Profile 的几何真值
 
 ```yaml
 schema_version: 1
@@ -93,37 +124,41 @@ postprocess:
   preserve_stop_anchors: true
 ```
 
-其中 footprint、vehicle width、wheelbase、minimum turning radius 等必须从 `profiles/platforms/<platform>.yaml` 读取/校验，而不是在 policy 中维护第二份。
+footprint、vehicle width、wheelbase、track、minimum turning radius 等必须来自 `profiles/platforms/<platform>.yaml`
 
-`footprint_check_resolution_m` 是正式 policy 字段；V25-09A 首版 feasibility backend 复用现有 `agt_coverage_planning.path_validator` 的内部自适应采样策略，因此该字段先作为未来 validator/backend 可配置采样的冻结合同，不得伪称当前已经覆盖 backend 的每个内部采样步长。
+`footprint_check_resolution_m` 是正式 policy 字段，V25-09A 首版 feasibility backend 仍复用 `agt_coverage_planning.path_validator` 的自适应采样，因此不能把该字段误写成当前 validator 内部每一步采样的直接控制量
 
-## 4. Semantic Map 派生规则
+## 5. Semantic Map 派生规则
 
-第一版允许使用已有语义：
+第一版允许使用已有语义
 
 - `row_centerline`：按 `row_interpretation` 解释为道路或作物行中心线
 - `access_lane`：显式通行中心线
-- `headland_zone`：允许调头/连接的区域约束
+- `headland_zone`：连接和调头区域约束
 - `keepout_zone` / `exclusion_zone`：不可通行
-- `entry_pose`：候选起终点/入口
-- `waypoint`：命名锚点，可作为任务停顿、定位锚点或路线控制点，但其存在不自动产生执行顺序
+- `entry_pose`：候选入口、起终点
+- `waypoint`：命名锚点，可作为任务停顿、定位锚点或路线控制点，但不自动产生执行顺序
 
-派生器必须只读 Semantic Map；生成 Route Asset 不得反向改写 GeoJSON。
+派生器只读 Semantic Map，不能反向改写 GeoJSON
 
-### V25-09A 首版派生 backend
+### V25-09A `semantic_boustrophedon_mvp`
 
-首版 `semantic_boustrophedon_mvp` 支持 `planning_mode=annotated_rows`：
+当前实现支持 `planning_mode=annotated_rows`
 
 - `direct_swaths`：enabled `row_centerline` 直接作为道路，可按 policy 加入 `access_lane`
-- `crop_centerlines`：复用既有确定性规则，将相邻作物行中心线派生为行间道路；派生对象使用 `preview_aisle_xxx` 引用，并由冻结 Semantic Map + Route Policy 决定性复现
+- `crop_centerlines`：复用现有规则，将相邻作物行中心线确定性派生为行间道路，使用 `preview_aisle_xxx` 作为 derived semantic reference
 - 道路按 `work_direction` 法向排序并交替方向形成 boustrophedon 顺序
-- 首版道路间 connector 仅生成 straight candidate，不声称已经实现 Hybrid-A*/Reeds-Shepp 连接
+- 行间 connector 当前仅生成 straight candidate
 
-straight candidate 是否真的可走必须由后续完整 footprint / kinematic gate 判定。对于不能原地转向的车型，若连接段产生不满足最小转弯半径的姿态变化，应得到 `INVALID`，后续再由 Hybrid-A*、State Lattice 或 Reeds-Shepp connector backend 替换，而不改变 Route Asset schema。
+straight candidate 只是候选，不代表运动学可行
 
-## 5. route.csv
+Tracked/skid-steer 车型可能直接通过，Ackermann/nonholonomic 车型若存在原地姿态变化或超过曲率限制，应被 existing minimum-turning-radius gate 拒绝
 
-Route CSV 是高密度几何与运行提示，不是唯一真源。至少：
+Hybrid-A*、State Lattice 或 Reeds-Shepp connector backend 后续替换内部生成器，不改变 Route Asset schema
+
+## 6. `route.csv`
+
+CSV 保存高密度几何和运行提示
 
 ```csv
 seq,segment_id,x,y,yaw,direction,v_ref,curvature,clearance,semantic_ref,event_ref
@@ -132,22 +167,22 @@ seq,segment_id,x,y,yaw,direction,v_ref,curvature,clearance,semantic_ref,event_re
 2,s001,1.100,2.000,3.142,R,0.15,-0.30,0.90,headland_01,tomato_stop_003
 ```
 
-约束：
+约束
 
-- `frame_id` 固定由 `route.yaml` 声明，当前正式 Route Asset 使用 `map`
-- `direction` 只允许 `F`/`R`
-- 方向变化前后必须有 segment boundary，并由 policy 决定是否要求停车
-- `v_ref` 是路线建议值，不绕过 controller/safety 的速度上限
-- `semantic_ref` 可以引用源 Feature，也可以引用由冻结语义规则确定性产生的 `preview_aisle_xxx`；匿名未知 ID 必须拒绝
-- `event_ref` 只引用任务/语义锚点；Route Executor 不自行执行采摘、喷药、拍照等业务
+- Route Asset 当前正式 frame 为 `map`
+- `direction` 只允许 `F` / `R`
+- 方向切换发生在 segment boundary，policy 可要求先停车
+- `v_ref` 是建议值，不绕过 controller/safety 上限
+- `semantic_ref` 可引用源 Feature 或由冻结规则确定性产生的 `preview_aisle_xxx`，匿名未知 ID 必须拒绝
+- `event_ref` 只引用任务/语义锚点，Route Executor 不自行执行采摘、喷药、拍照等业务
 
-首版派生器只生成 `F` segment；`R` 已作为正式 Route Asset 合同冻结，真正的 reverse-aware connector/planner backend 后续实现。
+当前 MVP 只自动生成 `F` segment，`R` 已作为合同冻结，reverse-aware connector/planner 留给后续实现
 
-## 6. Vehicle Feasibility
+## 7. Vehicle Feasibility
 
-Route 进入 READY 前必须做完整 footprint sweep，不允许只检查中心线。
+Route 进入 READY 前必须做完整 footprint sweep，不能只检查中心线
 
-输入：
+输入
 
 ```text
 Global Navigation Map
@@ -157,22 +192,24 @@ Global Navigation Map
 + kinematic limits
 ```
 
-至少检查：
+至少检查
 
-- footprint collision count
+- footprint collision
 - minimum clearance
-- unknown-cell intersections
-- curvature / minimum-turning-radius violations
+- unknown-space intersection
+- curvature / minimum-turning-radius violation
 - reverse permission
 - direction-change feasibility
-- full footprint 是否保持在 enabled `field_boundary` 且不进入 `keepout_zone` / `exclusion_zone`
+- full footprint 保持在 enabled `field_boundary`
+- full footprint 不进入 `keepout_zone` / `exclusion_zone`
 - semantic reference validity
-- entry/exit feasibility
-- task stop pose footprint feasibility（当 route 含相应 event/stop 时）
+- task stop pose feasibility，在对应 event/stop 存在时
 
-首版代码直接复用 `agt_coverage_planning.path_validator` 的 full-footprint、OccupancyGrid、unknown-space、clearance 与 minimum-turning-radius 几何核心；额外叠加 Semantic Map 的 field/exclusion/keepout footprint gate，避免 coverage route 和普通 Route Asset 使用两套不一致的车辆几何判断。
+V25-09A 复用 `agt_coverage_planning.path_validator` 的 OccupancyGrid、full-footprint、unknown-space、clearance 和 minimum-turning-radius 核心，再叠加 Semantic Map 的 field/exclusion/keepout full-footprint gate
 
-输出 `feasibility_report.json`，例如：
+任何 ERROR 级碰撞、语义可通行域或运动学违规都不能 READY
+
+`feasibility_report.json` 至少包含
 
 ```json
 {
@@ -199,30 +236,32 @@ Global Navigation Map
 }
 ```
 
-任何 ERROR 级碰撞、语义可通行域或运动学违规都不能 READY。
+## 8. 可视化
 
-## 7. 可视化合同
+`preview.geojson` 是离线 UI/RViz/Qt/Web 预览产品，也是 READY Route 的冻结验收证据之一
 
-`preview.geojson` 只用于离线 UI/RViz/Qt/Web 预览，不是执行真值，但它是 READY Route 的冻结验收证据之一。建议图层：
+建议图层
 
 ```text
 base occupancy reference
 semantic rows / lanes / headlands / keepout
 route centerline
-forward/reverse segment style
+forward/reverse segments
 sampled vehicle footprint polygons
 clearance hot spots
 stop/event anchors
 invalid footprint samples
 ```
 
-可视化必须使用与规划相同的 canonical `navigation_footprint`，不能为了显示方便用简化小车尺寸后声称可通行。首版 `preview.geojson` 至少输出 route segment、采样 footprint、event anchor，以及 Occupancy/kinematic 或 semantic-free-space 的 invalid footprint。
+预览必须使用与规划相同的 canonical `navigation_footprint`
 
-READY revision 的 preview 不允许原地重新生成。显示端应读取现有 preview；若正式预览证据的采样策略或几何需要变化，则产生新的 route revision 并重新验收。
+首版至少输出 route segment、采样 footprint、event anchor，以及 Occupancy/kinematic 或 semantic-free-space invalid footprint
 
-## 8. 微调合同
+READY revision 的正式 preview 不允许原地重新生成，显示端读取现有 preview；需要改变正式预览证据时创建新 revision 并重新验收
 
-允许离线人工/规则微调，但必须 non-destructive。`tuning.yaml` 保存相对 base route 的 patch/参数：
+## 9. 微调
+
+允许离线人工/规则微调，但必须 non-destructive
 
 ```yaml
 schema_version: 1
@@ -236,30 +275,40 @@ operations:
     value: 0.7
 ```
 
-V25-09A 首版实现 `lateral_offset` 与 `speed_scale`。任何几何微调后必须：
+V25-09A 首版支持 `lateral_offset` 和 `speed_scale`
+
+任何几何微调后必须
 
 ```text
-new revision -> 重新采样/读取 -> 重新 footprint sweep
-             -> 重新 semantic gate -> 重新 feasibility/preview -> 新 hash
+new revision
+ -> 重新读取/采样
+ -> footprint sweep
+ -> semantic gate
+ -> feasibility + preview
+ -> new hashes
 ```
 
-禁止在 GUI 中拖动 CSV 点后直接覆盖 READY route。
+禁止在 GUI 中拖动 READY CSV 点后直接覆盖
 
-## 9. Planner baseline 与创新边界
+## 10. Planner baseline 与创新边界
 
-Route policy 可以调用 Hybrid-A*、State Lattice、Fields2Cover/Reeds-Shepp 或自研 planner。统一 Route Asset/feasibility lineage 与 planner backend 解耦。
+Route policy 可以调用 Hybrid-A*、State Lattice、Fields2Cover/Reeds-Shepp 或自研 planner
 
-研究创新可以放在：
+统一 Route Asset/feasibility lineage 与 planner backend 解耦
 
-- semantic corridor / row/headland 约束
+研究创新可集中在
+
+- semantic corridor / row / headland constraints
 - clearance-aware objective
-- task-stop aware routing
-- forward/reverse penalty 与方向切换
-- 不同车型可行性比较
-- 多时期地图下路线复用/重验证
+- task-stop-aware routing
+- forward/reverse penalty 与 direction change
+- 多车型 feasibility comparison
+- 多时期地图下 route reuse / revalidation
 
-而不是把“支持倒车/考虑 footprint”本身当作唯一创新。
+不把单纯“支持倒车”或“考虑 footprint”作为唯一创新
 
-## 10. Runtime boundary
+## 11. Runtime boundary
 
-后续 ROUTE backend 只消费 READY Route Asset，并把当前 active segment 转成 `odom` frame Runtime Path。Route Asset 本身不发布速度、不拥有 TF、不绕过 project Navigation Capability。
+后续 ROUTE backend 只消费 READY Route Asset，将 active segment 转为 `odom` frame Runtime Path
+
+Route Asset 不发布速度、不拥有 TF、不绕过 project Navigation Capability
