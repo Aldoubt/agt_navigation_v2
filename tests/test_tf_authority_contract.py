@@ -40,11 +40,14 @@ def test_correction_manager_is_canonical_localization_status_owner():
 
     assert correction["evidence_status_topic"] == "/agt/localization/evidence_status"
     assert correction["canonical_status_topic"] == "/agt/localization/status"
+    assert correction["correction_rejections_to_lost"] > 0
     assert '"/agt/localization/status"' in launch
     assert '"/agt/localization/evidence_status"' in launch
     assert "canonical_status_pub_->publish" in manager
     assert "localization_accepted = false" in manager
     assert "STATE_RECOVERING" in manager
+    assert "STATE_LOST" in manager
+    assert "consecutive_correction_rejections_" in manager
 
 
 def test_mapping_navigation_and_recovery_do_not_claim_map_odom_authority():
