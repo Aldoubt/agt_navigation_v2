@@ -68,7 +68,7 @@ def create_map_workspace(
     site_frame_path: str | Path,
     alignment_path: str | Path,
     platform_profile_path: str | Path,
-    calibration_path: str | Path | None = None,
+    calibration_path: str | Path,
     map_version_id: str | None = None,
 ) -> MapWorkspace:
     """Create a PROCESSING map bundle after validating immutable input bindings."""
@@ -81,6 +81,7 @@ def create_map_workspace(
 
     dataset_path = Path(dataset_binding_path).expanduser().resolve()
     recipe_source = Path(recipe_path).expanduser().resolve()
+    calibration_source = Path(calibration_path).expanduser().resolve()
     dataset = DatasetBinding.from_file(dataset_path)
     recipe = DerivationRecipe.from_file(recipe_source)
     dataset_hash = sha256_file(dataset_path)
@@ -92,10 +93,10 @@ def create_map_workspace(
             "platform_profile_hash_mismatch",
             "selected platform profile differs from dataset binding",
         )
-    if calibration_path is not None and sha256_file(calibration_path) != dataset.calibration_sha256:
+    if not calibration_source.is_file() or sha256_file(calibration_source) != dataset.calibration_sha256:
         raise AssetContractError(
             "calibration_hash_mismatch",
-            "selected calibration file differs from dataset binding",
+            "selected calibration artifact differs from dataset binding",
         )
 
     site_frame = load_yaml_mapping(site_frame_path)
@@ -121,10 +122,12 @@ def create_map_workspace(
         (version_root / relative).mkdir(parents=True, exist_ok=True)
 
     dataset_copy = version_root / "source" / "dataset_binding.yaml"
+    calibration_copy = version_root / "source" / "calibration.yaml"
     recipe_copy = version_root / "derivation" / "recipe.yaml"
     site_frame_copy = version_root / "alignment" / "site_frame.yaml"
     alignment_copy = version_root / "alignment" / "alignment.yaml"
     _copy(dataset_path, dataset_copy)
+    calibration_hash = _copy(calibration_source, calibration_copy)
     recipe_hash = _copy(recipe_source, recipe_copy)
     site_frame_hash = _copy(site_frame_path, site_frame_copy)
     alignment_hash = _copy(alignment_path, alignment_copy)
@@ -145,7 +148,8 @@ def create_map_workspace(
         },
         "calibration": {
             "calibration_id": dataset.calibration_id,
-            "calibration_sha256": dataset.calibration_sha256,
+            "path": "source/calibration.yaml",
+            "sha256": calibration_hash,
         },
         "derivation": {
             "recipe": "derivation/recipe.yaml",
@@ -233,6 +237,7 @@ def refresh_map_manifest(manifest_path: str | Path, *, requested_state: str | No
 def _validate_lineage_files(root: Path, manifest: dict[str, Any]) -> None:
     for group, path_key, hash_key in (
         ("source", "dataset_binding", "dataset_binding_sha256"),
+        ("calibration", "path", "sha256"),
         ("derivation", "recipe", "recipe_sha256"),
         ("alignment", "site_frame", "site_frame_sha256"),
         ("alignment", "record", "record_sha256"),
