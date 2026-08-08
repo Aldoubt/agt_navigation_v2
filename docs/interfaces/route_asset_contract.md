@@ -23,11 +23,11 @@ runtime/maps/<map_id>/versions/<map_version_id>/routes/<route_id>/<revision>/
   tuning.yaml              # 可选，若经过人工/规则微调
 ```
 
-Route Asset 不允许脱离 map version 单独成为匿名 CSV。
+Route Asset 不允许脱离 map version 单独成为匿名 CSV。Route revision 是绑定到 READY map 的独立子资产；新增 route revision 不修改已冻结的 map manifest。
 
 ## 2. route.yaml
 
-最低字段：
+READY revision 最低字段：
 
 ```yaml
 schema_version: 1
@@ -39,8 +39,10 @@ map_binding:
   map_version_id: map_20260810_120000_1234abcd
   manifest_sha256: sha256:<64 lowercase hex>
 semantic_binding:
-  path: ../../semantic/semantic_map.geojson
+  path: ../../../semantic/semantic_map.geojson
   sha256: sha256:<64 lowercase hex>
+  coverage_path: ../../../semantic/coverage.yaml
+  coverage_sha256: sha256:<64 lowercase hex>
 vehicle_binding:
   platform_id: bunker
   platform_profile_sha256: sha256:<64 lowercase hex>
@@ -49,10 +51,15 @@ policy_binding:
   sha256: sha256:<64 lowercase hex>
 route_csv_sha256: sha256:<64 lowercase hex>
 feasibility_report_sha256: sha256:<64 lowercase hex>
+preview_sha256: sha256:<64 lowercase hex>
 status: READY
 ```
 
-任何 map/semantic/vehicle/policy hash 变化都必须使旧 Route Asset 失效或重新验证，禁止只靠文件名判断兼容。
+`semantic_map.geojson` 与 `coverage.yaml` 必须都是 READY map manifest 已冻结的 canonical assets。派生器不得接受位于同一路径但内容 hash 已变化的语义文件。
+
+任何 map/semantic/coverage/vehicle/policy hash 变化都必须使旧 Route Asset 失效或重新派生，禁止只靠文件名判断兼容。
+
+Route 建立时先写 `DRAFT`；feasibility report 与 preview 必须先生成完成，最后一次写 `route.yaml` 才能晋升为 `READY`。READY revision 之后不得原地重新生成 preview、修改 CSV 或覆盖验收报告。
 
 ## 3. Route Policy
 
@@ -88,6 +95,8 @@ postprocess:
 
 其中 footprint、vehicle width、wheelbase、minimum turning radius 等必须从 `profiles/platforms/<platform>.yaml` 读取/校验，而不是在 policy 中维护第二份。
 
+`footprint_check_resolution_m` 是正式 policy 字段；V25-09A 首版 feasibility backend 复用现有 `agt_coverage_planning.path_validator` 的内部自适应采样策略，因此该字段先作为未来 validator/backend 可配置采样的冻结合同，不得伪称当前已经覆盖 backend 的每个内部采样步长。
+
 ## 4. Semantic Map 派生规则
 
 第一版允许使用已有语义：
@@ -100,6 +109,17 @@ postprocess:
 - `waypoint`：命名锚点，可作为任务停顿、定位锚点或路线控制点，但其存在不自动产生执行顺序
 
 派生器必须只读 Semantic Map；生成 Route Asset 不得反向改写 GeoJSON。
+
+### V25-09A 首版派生 backend
+
+首版 `semantic_boustrophedon_mvp` 支持 `planning_mode=annotated_rows`：
+
+- `direct_swaths`：enabled `row_centerline` 直接作为道路，可按 policy 加入 `access_lane`
+- `crop_centerlines`：复用既有确定性规则，将相邻作物行中心线派生为行间道路；派生对象使用 `preview_aisle_xxx` 引用，并由冻结 Semantic Map + Route Policy 决定性复现
+- 道路按 `work_direction` 法向排序并交替方向形成 boustrophedon 顺序
+- 首版道路间 connector 仅生成 straight candidate，不声称已经实现 Hybrid-A*/Reeds-Shepp 连接
+
+straight candidate 是否真的可走必须由后续完整 footprint / kinematic gate 判定。对于不能原地转向的车型，若连接段产生不满足最小转弯半径的姿态变化，应得到 `INVALID`，后续再由 Hybrid-A*、State Lattice 或 Reeds-Shepp connector backend 替换，而不改变 Route Asset schema。
 
 ## 5. route.csv
 
@@ -118,7 +138,10 @@ seq,segment_id,x,y,yaw,direction,v_ref,curvature,clearance,semantic_ref,event_re
 - `direction` 只允许 `F`/`R`
 - 方向变化前后必须有 segment boundary，并由 policy 决定是否要求停车
 - `v_ref` 是路线建议值，不绕过 controller/safety 的速度上限
+- `semantic_ref` 可以引用源 Feature，也可以引用由冻结语义规则确定性产生的 `preview_aisle_xxx`；匿名未知 ID 必须拒绝
 - `event_ref` 只引用任务/语义锚点；Route Executor 不自行执行采摘、喷药、拍照等业务
+
+首版派生器只生成 `F` segment；`R` 已作为正式 Route Asset 合同冻结，真正的 reverse-aware connector/planner backend 后续实现。
 
 ## 6. Vehicle Feasibility
 
@@ -128,7 +151,7 @@ Route 进入 READY 前必须做完整 footprint sweep，不允许只检查中心
 
 ```text
 Global Navigation Map
-+ semantic keepout/exclusion
++ semantic field / keepout / exclusion
 + Route samples
 + canonical Vehicle Profile navigation_footprint
 + kinematic limits
@@ -142,9 +165,12 @@ Global Navigation Map
 - curvature / minimum-turning-radius violations
 - reverse permission
 - direction-change feasibility
-- semantic corridor containment
+- full footprint 是否保持在 enabled `field_boundary` 且不进入 `keepout_zone` / `exclusion_zone`
+- semantic reference validity
 - entry/exit feasibility
-- task stop pose footprint feasibility
+- task stop pose footprint feasibility（当 route 含相应 event/stop 时）
+
+首版代码直接复用 `agt_coverage_planning.path_validator` 的 full-footprint、OccupancyGrid、unknown-space、clearance 与 minimum-turning-radius 几何核心；额外叠加 Semantic Map 的 field/exclusion/keepout footprint gate，避免 coverage route 和普通 Route Asset 使用两套不一致的车辆几何判断。
 
 输出 `feasibility_report.json`，例如：
 
@@ -153,12 +179,18 @@ Global Navigation Map
   "status": "PASS",
   "route_id": "greenhouse_main_route",
   "revision": 1,
+  "checks": {
+    "full_footprint_sweep": "PASS",
+    "semantic_free_space": "PASS",
+    "kinematics": "PASS"
+  },
   "metrics": {
     "length_m": 42.1,
     "reverse_length_m": 3.2,
     "min_clearance_m": 0.41,
     "direction_changes": 2,
     "footprint_collision_count": 0,
+    "semantic_footprint_violation_count": 0,
     "curvature_violation_count": 0,
     "unknown_intersection_count": 0
   },
@@ -167,11 +199,11 @@ Global Navigation Map
 }
 ```
 
-任何 ERROR 级碰撞/运动学违规都不能 READY。
+任何 ERROR 级碰撞、语义可通行域或运动学违规都不能 READY。
 
 ## 7. 可视化合同
 
-`preview.geojson` 只用于离线 UI/RViz/Qt/Web 预览，不是执行真值。建议图层：
+`preview.geojson` 只用于离线 UI/RViz/Qt/Web 预览，不是执行真值，但它是 READY Route 的冻结验收证据之一。建议图层：
 
 ```text
 base occupancy reference
@@ -181,10 +213,12 @@ forward/reverse segment style
 sampled vehicle footprint polygons
 clearance hot spots
 stop/event anchors
-invalid samples
+invalid footprint samples
 ```
 
-可视化必须使用与规划相同的 canonical `navigation_footprint`，不能为了显示方便用简化小车尺寸后声称可通行。
+可视化必须使用与规划相同的 canonical `navigation_footprint`，不能为了显示方便用简化小车尺寸后声称可通行。首版 `preview.geojson` 至少输出 route segment、采样 footprint、event anchor，以及 Occupancy/kinematic 或 semantic-free-space 的 invalid footprint。
+
+READY revision 的 preview 不允许原地重新生成。显示端应读取现有 preview；若正式预览证据的采样策略或几何需要变化，则产生新的 route revision 并重新验收。
 
 ## 8. 微调合同
 
@@ -202,17 +236,18 @@ operations:
     value: 0.7
 ```
 
-任何几何微调后必须：
+V25-09A 首版实现 `lateral_offset` 与 `speed_scale`。任何几何微调后必须：
 
 ```text
-重新采样 -> 重新 footprint sweep -> 重新 feasibility report -> 新 revision/hash
+new revision -> 重新采样/读取 -> 重新 footprint sweep
+             -> 重新 semantic gate -> 重新 feasibility/preview -> 新 hash
 ```
 
 禁止在 GUI 中拖动 CSV 点后直接覆盖 READY route。
 
 ## 9. Planner baseline 与创新边界
 
-Route policy 可以调用 Hybrid-A*、State Lattice、Fields2Cover/Reeds-Shepp 或自研 planner。算法实现不是本合同的一部分；合同只要求输出满足统一 Route Asset/feasibility lineage。
+Route policy 可以调用 Hybrid-A*、State Lattice、Fields2Cover/Reeds-Shepp 或自研 planner。统一 Route Asset/feasibility lineage 与 planner backend 解耦。
 
 研究创新可以放在：
 
