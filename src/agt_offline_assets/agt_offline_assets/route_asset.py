@@ -19,6 +19,7 @@ from agt_ui_bridge.platform_profile import load_platform_profile
 from agt_ui_bridge.semantic_io import load_semantic_task
 
 from .contracts import AssetContractError, RoutePolicy, load_yaml_mapping, sha256_file
+from .map_validation import validate_map_workspace
 from .workspace import compute_map_content_sha256
 
 
@@ -171,11 +172,15 @@ def create_route_candidate_asset(
     coverage_path: str | Path | None = None,
     default_speed_mps: float = 0.3,
 ) -> Path:
-    """Create a DRAFT Route Asset under the bound READY map version."""
+    """Create a DRAFT Route Asset under the bound compliant READY map version."""
     map_manifest_path = Path(map_manifest_path).expanduser().resolve()
+    compliance = validate_map_workspace(map_manifest_path)
+    if not compliance.valid or compliance.state != "READY":
+        raise AssetContractError(
+            "route_map_not_compliant",
+            "Route Asset requires a currently compliant READY map: " + ",".join(compliance.errors),
+        )
     map_manifest = load_yaml_mapping(map_manifest_path)
-    if str(map_manifest.get("state", "")).upper() != "READY":
-        raise AssetContractError("route_map_not_ready", "Route Asset requires a READY map version")
     map_content_sha256 = str(map_manifest.get("map_content_sha256", ""))
     if not map_content_sha256 or map_content_sha256 != compute_map_content_sha256(map_manifest):
         raise AssetContractError(
