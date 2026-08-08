@@ -19,6 +19,7 @@ from agt_ui_bridge.platform_profile import load_platform_profile
 from agt_ui_bridge.semantic_io import load_semantic_task
 
 from .contracts import AssetContractError, RoutePolicy, load_yaml_mapping, sha256_file
+from .workspace import compute_map_content_sha256
 
 
 _ROUTE_FIELDS = (
@@ -175,6 +176,12 @@ def create_route_candidate_asset(
     map_manifest = load_yaml_mapping(map_manifest_path)
     if str(map_manifest.get("state", "")).upper() != "READY":
         raise AssetContractError("route_map_not_ready", "Route Asset requires a READY map version")
+    map_content_sha256 = str(map_manifest.get("map_content_sha256", ""))
+    if not map_content_sha256 or map_content_sha256 != compute_map_content_sha256(map_manifest):
+        raise AssetContractError(
+            "route_map_content_identity_invalid",
+            "READY map content identity is missing or inconsistent",
+        )
     route_id = str(route_id).strip()
     if not route_id or int(revision) <= 0:
         raise AssetContractError("route_identity_invalid", "route_id and positive revision are required")
@@ -238,7 +245,7 @@ def create_route_candidate_asset(
         "map_binding": {
             "map_id": str(map_manifest.get("map_id", "")),
             "map_version_id": str(map_manifest.get("map_version_id", "")),
-            "manifest_sha256": sha256_file(map_manifest_path),
+            "map_content_sha256": map_content_sha256,
         },
         "semantic_binding": {
             "path": semantic_relative,
