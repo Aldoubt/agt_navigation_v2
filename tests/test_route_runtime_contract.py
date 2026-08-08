@@ -51,6 +51,15 @@ def test_route_runtime_does_not_add_public_action_or_native_global_planner_depen
     assert "controller_id_reverse" in adapter
 
 
+def test_route_backend_uses_rclpy_future_not_asyncio_loop():
+    backend = _read(NAVIGATION / "agt_navigation" / "route_backend.py")
+
+    assert "from rclpy.task import Future" in backend
+    assert "await completion_future" in backend
+    assert "import asyncio" not in backend
+    assert "asyncio.sleep" not in backend
+
+
 def test_task_route_binding_is_optional_exact_and_fail_closed():
     resolver = _read(NAVIGATION / "agt_navigation" / "route_task_binding.py")
     contract = _read(ROOT / "docs/interfaces/task_route_execution_binding.md")
