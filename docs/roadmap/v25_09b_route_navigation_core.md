@@ -21,6 +21,7 @@ Mission / ExecuteWaypointTask
                       -> RuntimePath (odom)
                       -> Vehicle Tracker Adapter
                       -> Nav2 FollowPath
+  -> collision monitor
   -> existing safety / chassis path
 ```
 
@@ -37,6 +38,7 @@ Mission / ExecuteWaypointTask
 9. MAP tasks with no Route binding preserve the existing FollowWaypoints behavior
 10. A stale/invalid Route binding fails closed and never silently falls back to MAP
 11. Formal ROUTE execution requires an exact execution-vehicle profile SHA and `route_acceptance.enabled=true`
+12. Parent cancel and runtime-gate loss must cancel the active FollowPath child rather than only terminating the parent Action
 
 ## Implemented software layers
 
@@ -78,13 +80,13 @@ See `docs/interfaces/task_route_execution_binding.md`.
 
 `navigation_capability_server.py` subclasses the existing waypoint server so MAP logic remains unchanged while formal tasks with a valid execution binding use ROUTE.
 
-The system launch now passes the selected `platform_profile` as `execution_vehicle_profile` to the capability server.
+The system launch passes the selected `platform_profile` as `execution_vehicle_profile` to the capability server.
 
 Parent cancel, safety loss, localization loss and TaskReadiness loss cancel/fail the active ROUTE tracker as well as update the parent NavigationSession.
 
-## System integration tests
+`RouteBackendExecutor` waits on an `rclpy.task.Future`; it does not depend on a Python asyncio event loop. FollowPath terminal feedback, parent cancel and runtime-gate failure all resolve the same completion Future.
 
-The package contains two complementary Action-level tests:
+## System integration tests
 
 ### ROUTE selector
 
@@ -106,21 +108,53 @@ Success proves ROUTE does not depend on the old MAP / FollowWaypoints path.
 
 Success proves existing MAP behavior remains backward-compatible.
 
+### Runtime cancellation gates
+
+`test_navigation_capability_runtime_gates.py` starts a FollowPath child that deliberately does not finish by itself. The test only passes if the child actually receives cancellation.
+
+Covered gates:
+
+- parent `ExecuteWaypointTask` cancel -> FollowPath cancel -> parent CANCELED
+- safety ready -> not ready -> FollowPath cancel -> parent FAILED
+- localization accepted -> invalid -> FollowPath cancel -> parent FAILED
+- TaskReadiness ready -> blocked -> FollowPath cancel -> parent FAILED
+
+The structured final `NavigationSessionStatus` preserves the runtime blocker identity used to stop motion.
+
+## Real controller software smoke
+
+`route_controller_smoke.launch.py` and `route_controller_smoke.py` provide the first real Nav2 Controller Server gate:
+
+```text
+synthetic odom Path
+  -> real controller_server / FollowPath
+  -> collision_monitor
+  -> agt_safety
+  -> differential-drive simulator
+  -> odom / TF
+```
+
+The smoke deliberately starts no map server, planner server or BT navigator. It validates controller plumbing only and keeps `global_planner_requests == 0` by construction.
+
+See `docs/workflows/route_controller_software_smoke.md`.
+
 ## Current acceptance boundary
 
-Software system integration can be accepted from unit/Action tests without a field vehicle.
+Software system integration can be accepted from package/Action tests plus the controller-only smoke without a field vehicle.
 
 Vehicle acceptance remains separate. In particular, a profile with unverified steering/minimum-turning-radius geometry may keep `route_acceptance.enabled=false`; such a vehicle must be rejected by ROUTE even when the software tests are green.
 
+The controller-only smoke uses the existing differential simulator and BUNKER-style software controller parameters. It must not be cited as MK-mini Ackermann or BUNKER field acceptance.
+
 ## Next gates
 
-After this system-integration gate is green:
+After the runtime-gate tests and controller-only smoke are green:
 
-1. add explicit parent-cancel -> FollowPath cancel Action test
-2. add safety/localization/TaskReadiness loss -> FollowPath cancel tests
-3. validate against a real Nav2 controller_server with a synthetic/frozen READY Route
-4. freeze vehicle-specific controller IDs and kinematic profile after measurement
-5. run real bag -> READY Map -> READY Route -> simulated/vehicle Route tracking when dataset and field hardware are available
+1. connect the formal `ExecuteWaypointTask -> ROUTE backend` to the real controller_server in one synthetic full-chain launch/test
+2. freeze vehicle-specific forward/reverse controller IDs after controller experiments
+3. measure and freeze MK-mini Ackermann minimum turning radius / steering limits before enabling `route_acceptance`
+4. run real bag -> READY Map -> READY Route -> simulated Route tracking when the dataset is available
+5. run the same READY Route chain on the execution vehicle with safety, localization and tracking metrics
 
 ## Intentionally deferred
 
