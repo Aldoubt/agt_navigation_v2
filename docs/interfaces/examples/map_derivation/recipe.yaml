@@ -1,0 +1,27 @@
+schema_version: 1
+recipe_id: map_recipe_fastlivo2_ground_v1
+source_dataset_id: ds_greenhouse_a_20260810_am
+source_dataset_sha256: sha256:4444444444444444444444444444444444444444444444444444444444444444
+calibration_id: cal_bunker_mid360_20260810
+calibration_sha256: sha256:3333333333333333333333333333333333333333333333333333333333333333
+platform_profile: bunker
+platform_profile_sha256: sha256:2222222222222222222222222222222222222222222222222222222222222222
+repository_commit: 0123456789abcdef0123456789abcdef01234567
+random_seed: 0
+mapping:
+  backend: fast_livo2
+  config_sha256: sha256:5555555555555555555555555555555555555555555555555555555555555555
+trajectory_optimization:
+  backend: none
+alignment:
+  mode: SITE_CONTROL_POINTS
+cleaning:
+  pipeline:
+    - voxel_downsample
+    - crop_workspace
+    - statistical_outlier_removal
+    - ground_classification
+products:
+  localization_prior: true
+  navigation_occupancy: true
+  semantic_base: true
