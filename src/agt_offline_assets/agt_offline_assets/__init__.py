@@ -2,6 +2,7 @@
 
 from .contracts import AssetContractError, DatasetBinding, DerivationRecipe, RoutePolicy, sha256_file
 from .workspace import MapWorkspace, create_map_workspace, refresh_map_manifest
+from .map_validation import MapComplianceResult, validate_map_workspace
 from .route_asset import (
     RouteSample,
     create_route_candidate_asset,
@@ -22,6 +23,8 @@ __all__ = [
     "MapWorkspace",
     "create_map_workspace",
     "refresh_map_manifest",
+    "MapComplianceResult",
+    "validate_map_workspace",
     "RouteSample",
     "create_route_candidate_asset",
     "derive_route_candidate",
