@@ -9,6 +9,7 @@ import yaml
 from agt_offline_assets import (
     AssetContractError,
     apply_route_tuning,
+    compute_map_content_sha256,
     create_map_workspace,
     create_route_candidate_asset,
     refresh_map_manifest,
@@ -215,11 +216,12 @@ def test_workspace_lineage_can_be_promoted_to_ready_and_is_immutable(tmp_path):
     assert manifest["epoch_id"] == "2026-08-08-test"
     assert manifest["source"]["dataset_binding_sha256"].startswith("sha256:")
     assert manifest["calibration"]["path"] == "source/calibration.yaml"
+    assert manifest["map_content_sha256"] == compute_map_content_sha256(manifest)
     assert "semantic_coverage" in manifest["assets"]
     assert "map_quality_report" in manifest["assets"]
     compliance = validate_map_workspace(workspace.manifest_path)
     assert compliance.valid, compliance.to_dict()
-    with pytest.raises(AssetContractError, match="READY map versions are immutable") as error:
+    with pytest.raises(AssetContractError) as error:
         refresh_map_manifest(workspace.manifest_path)
     assert error.value.code == "ready_map_immutable"
 
@@ -242,10 +244,10 @@ def test_ready_map_semantic_mutation_is_rejected_for_route_derivation_and_audit(
             route_id="inspection_main",
             revision=1,
         )
-    assert error.value.code == "route_semantic_hash_mismatch"
+    assert error.value.code == "route_map_not_compliant"
 
 
-def test_semantic_route_candidate_feasibility_preview_and_tuning(tmp_path):
+def test_route_survives_registry_metadata_changes_but_keeps_content_binding(tmp_path):
     workspace, semantic_path, coverage_path = _prepare_ready_workspace(tmp_path)
     policy = tmp_path / "policy.yaml"
     _write_policy(policy)
@@ -259,10 +261,23 @@ def test_semantic_route_candidate_feasibility_preview_and_tuning(tmp_path):
         revision=1,
         default_speed_mps=0.25,
     )
+    route_manifest = yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))
+    bound_content = route_manifest["map_binding"]["map_content_sha256"]
+
+    map_manifest = yaml.safe_load(workspace.manifest_path.read_text(encoding="utf-8"))
+    map_manifest["active"] = True
+    map_manifest["pinned"] = True
+    map_manifest["notes"] = "registry metadata changed after route derivation"
+    workspace.manifest_path.write_text(
+        yaml.safe_dump(map_manifest, sort_keys=False), encoding="utf-8"
+    )
+    reloaded = yaml.safe_load(workspace.manifest_path.read_text(encoding="utf-8"))
+    assert compute_map_content_sha256(reloaded) == bound_content
+    assert validate_map_workspace(workspace.manifest_path).valid
+
     samples = load_route_csv(route_dir / "route.csv")
     assert len(samples) > 10
     assert {sample.semantic_ref for sample in samples} >= {"row_01", "row_02"}
-
     result = validate_route_asset(
         route_dir,
         map_manifest_path=workspace.manifest_path,
