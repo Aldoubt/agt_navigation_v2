@@ -6,14 +6,51 @@ find_package(ament_cmake_python REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})
 
+# Files written through repository APIs may arrive with mode 0644. Under
+# colcon --symlink-install, installing source scripts directly can therefore
+# leave libexec symlinks whose targets are not executable, and ros2 run/launch
+# will report "executable ... not found". Materialize every ROS entry point in
+# the build tree with explicit executable permissions, then install only those
+# generated copies.
+set(AGT_NAVIGATION_GENERATED_SCRIPT_DIR
+  "${CMAKE_CURRENT_BINARY_DIR}/generated_scripts"
+)
+file(MAKE_DIRECTORY "${AGT_NAVIGATION_GENERATED_SCRIPT_DIR}")
+
+set(AGT_NAVIGATION_ENTRYPOINTS
+  differential_drive_simulator.py
+  execute_waypoint_task.py
+  goal_pose_bridge.py
+  navigation_capability_server.py
+  route_controller_smoke.py
+  route_system_smoke.py
+  route_system_smoke_fixture.py
+  start_waypoint_preview_rviz.sh
+  task_registry_node.py
+  waypoint_task_server.py
+  waypoint_preview_planner.py
+)
+
+foreach(_script IN LISTS AGT_NAVIGATION_ENTRYPOINTS)
+  file(COPY
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/${_script}"
+    DESTINATION "${AGT_NAVIGATION_GENERATED_SCRIPT_DIR}"
+    FILE_PERMISSIONS
+      OWNER_READ OWNER_WRITE OWNER_EXECUTE
+      GROUP_READ GROUP_EXECUTE
+      WORLD_READ WORLD_EXECUTE
+  )
+endforeach()
+
+set(AGT_NAVIGATION_GENERATED_ENTRYPOINTS "")
+foreach(_script IN LISTS AGT_NAVIGATION_ENTRYPOINTS)
+  list(APPEND AGT_NAVIGATION_GENERATED_ENTRYPOINTS
+    "${AGT_NAVIGATION_GENERATED_SCRIPT_DIR}/${_script}"
+  )
+endforeach()
+
 install(PROGRAMS
-  scripts/differential_drive_simulator.py
-  scripts/execute_waypoint_task.py
-  scripts/goal_pose_bridge.py
-  scripts/start_waypoint_preview_rviz.sh
-  scripts/task_registry_node.py
-  scripts/waypoint_task_server.py
-  scripts/waypoint_preview_planner.py
+  ${AGT_NAVIGATION_GENERATED_ENTRYPOINTS}
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -37,6 +74,20 @@ if(BUILD_TESTING)
   )
   ament_add_pytest_test(
     test_waypoint_preview_launch test/test_waypoint_preview_launch.py
+  )
+  ament_add_pytest_test(test_route_runtime test/test_route_runtime.py)
+  ament_add_pytest_test(
+    test_nav2_follow_path_adapter test/test_nav2_follow_path_adapter.py
+  )
+  ament_add_pytest_test(
+    test_route_task_binding test/test_route_task_binding.py
+  )
+  ament_add_pytest_test(
+    test_navigation_capability_server test/test_navigation_capability_server.py
+  )
+  ament_add_pytest_test(
+    test_navigation_capability_runtime_gates
+    test/test_navigation_capability_runtime_gates.py
   )
 endif()
 
