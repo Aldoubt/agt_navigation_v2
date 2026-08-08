@@ -47,6 +47,8 @@ content_sha256: sha256:<64 lowercase hex>
 
 所有刚体外参必须显式写 `parent_frame`、`child_frame`、平移单位 m、旋转表示法以及来源。禁止只保存一个无方向说明的 4x4 数组。重新标定后必须生成新的 `calibration_id`，不能覆盖已被 Experiment/Map 引用的 calibration。
 
+正式 Map derivation 会把所绑定的 Calibration Set artifact 复制到 map version 的 `source/calibration.yaml` 并再次校验 hash，从而使派生 bundle 不依赖某个开发机上的隐式外参文件。
+
 ## 3. Dataset / Bag binding
 
 一个用于正式地图派生或精度实验的 bag 必须有不可变 binding：
@@ -81,6 +83,28 @@ topics:
 
 同一 site 不同时期使用相同 `site_id`、不同 `epoch_id` 和不同 dataset/map version。不同 site 复用同一 recipe 时，不能复用对方的 site frame 或 control-point 数值。
 
+### 3.1 `bag.sha256` 的正式算法
+
+`bag.sha256` 不是只对 `metadata.yaml` 做 hash。V25-09A 使用 deterministic bundle hash：
+
+- 若 `bag.path` 是单个文件，则直接对该文件 bytes 做 SHA256
+- 若 `bag.path` 是 rosbag2 目录，则必须包含 `metadata.yaml`
+- 递归枚举目录内所有 regular files
+- 使用相对 bag root 的 POSIX 路径排序
+- 每个文件记录依次加入 `relative_path + NUL + file_size + NUL + file_content_sha256 + newline`
+- 对整个记录流再做 SHA256，输出 `sha256:<64 lowercase hex>`
+- 正式 Dataset bundle 禁止 symlink，避免 hash 依赖目录外不可控文件
+
+因此任一 `.db3`、`.mcap`、`metadata.yaml` 或同 bundle 中正式文件变化都会改变 `bag.sha256`。
+
+工具命令：
+
+```bash
+ros2 run agt_offline_assets agt_offline_assets.py hash-path /path/to/rosbag2_directory
+```
+
+`init-map` 会重新计算 bundle hash；bag 不存在、metadata 缺失或 hash 不匹配时 fail-closed，不建立正式 PROCESSING map workspace。
+
 ## 4. RTK 评价隔离
 
 当 GNSS/RTK 被声明为 evaluation truth 时，该数据不得同时进入被评价 estimator 的状态更新。典型 A/B：
@@ -105,7 +129,7 @@ Truth: RTK/GNSS -> evaluator only
 一次正式派生必须能仅凭以下信息重新运行：
 
 ```text
-Dataset binding
+Dataset binding + verified Bag bundle
 + Calibration Set
 + Platform profile
 + Derivation recipe
