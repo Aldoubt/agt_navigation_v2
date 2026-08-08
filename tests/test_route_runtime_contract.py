@@ -139,14 +139,39 @@ def test_controller_only_smoke_uses_real_follow_path_without_planner_server():
     assert '"global_planner_requests": 0' in client
     assert "route_controller_smoke.py" in cmake
 
-    # The smoke client is a newly generated script. GitHub contents writes may
-    # create it as 0644, so symlink-install must materialize an executable copy.
     assert "AGT_NAVIGATION_GENERATED_SCRIPT_DIR" in cmake
     assert "FILE_PERMISSIONS" in cmake
-    assert "route_controller_smoke.py" in cmake
     assert "OWNER_EXECUTE" in cmake
     assert "GROUP_EXECUTE" in cmake
     assert "WORLD_EXECUTE" in cmake
+
+
+def test_all_navigation_ros_entrypoints_are_materialized_executable():
+    cmake = _read(NAVIGATION / "CMakeLists.txt")
+    assert "AGT_NAVIGATION_ENTRYPOINTS" in cmake
+    assert "AGT_NAVIGATION_GENERATED_ENTRYPOINTS" in cmake
+    assert "install(PROGRAMS" in cmake
+
+    for script in (
+        "differential_drive_simulator.py",
+        "execute_waypoint_task.py",
+        "goal_pose_bridge.py",
+        "navigation_capability_server.py",
+        "route_controller_smoke.py",
+        "route_system_smoke.py",
+        "route_system_smoke_fixture.py",
+        "start_waypoint_preview_rviz.sh",
+        "task_registry_node.py",
+        "waypoint_task_server.py",
+        "waypoint_preview_planner.py",
+    ):
+        assert script in cmake
+
+    # Direct source-script install entries would reintroduce the 0644/symlink
+    # libexec failure after a clean --symlink-install build.
+    assert "scripts/navigation_capability_server.py\n" not in cmake
+    assert "scripts/route_system_smoke.py\n" not in cmake
+    assert "scripts/route_system_smoke_fixture.py\n" not in cmake
 
 
 def test_full_route_system_smoke_uses_formal_action_assets_and_real_controller_only():
