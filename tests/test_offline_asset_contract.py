@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 INTERFACES = ROOT / "docs/interfaces"
 EXAMPLES = INTERFACES / "examples"
 OFFLINE_PACKAGE = ROOT / "src/agt_offline_assets"
+SYSTEM_MANAGER = ROOT / "src/agt_system_manager"
 
 
 def _read(path: Path) -> str:
@@ -132,6 +133,7 @@ def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning
         "agt_offline_assets/contracts.py",
         "agt_offline_assets/workspace.py",
         "agt_offline_assets/map_validation.py",
+        "agt_offline_assets/session_ingest.py",
         "agt_offline_assets/route_asset.py",
         "agt_offline_assets/grid_io.py",
         "agt_offline_assets/feasibility.py",
@@ -139,6 +141,7 @@ def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning
         "agt_offline_assets/tuning.py",
         "scripts/agt_offline_assets_cli.py",
         "test/test_offline_assets.py",
+        "test/test_mapping_session_ingest.py",
     )
     for relative in required:
         assert (OFFLINE_PACKAGE / relative).is_file(), relative
@@ -147,6 +150,7 @@ def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning
     for command in (
         "hash-path",
         "init-map",
+        "ingest-mapping-session",
         "refresh-map",
         "validate-map",
         "derive-route",
@@ -156,6 +160,22 @@ def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning
         assert command in cli
     assert "ExecuteRouteTask" not in cli
     assert "cmd_vel" not in cli
+
+
+def test_replay_orchestrator_reuses_mapping_session_and_keeps_raw_outputs_pre_alignment():
+    helper = _read(SYSTEM_MANAGER / "agt_system_manager" / "offline_replay.py")
+    script = _read(SYSTEM_MANAGER / "scripts" / "replay_mapping_to_workspace.py")
+    ingest = _read(OFFLINE_PACKAGE / "agt_offline_assets" / "session_ingest.py")
+
+    assert "ManageMappingSession" in script
+    assert "OP_START" in script and "OP_FINALIZE_CAPTURE" in script
+    assert "ingest_mapping_session" in script
+    assert "start_sensor\": \"false" in helper
+    assert "use_sim_time\": \"true" in helper
+    assert "processing/mapping_session" in ingest
+    assert '"materialized": False' in ingest
+    assert 'root / "navigation"' not in ingest
+    assert 'root / "pointcloud" / "localization_map.pcd"' not in ingest
 
 
 def test_v25_09_asset_contracts_do_not_add_public_route_actions():
