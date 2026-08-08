@@ -5,7 +5,7 @@ frame_id: map
 map_binding:
   map_id: greenhouse_a
   map_version_id: map_20260810_120000_1234abcd
-  manifest_sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  map_content_sha256: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 semantic_binding:
   path: ../../../semantic/semantic_map.geojson
   sha256: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
