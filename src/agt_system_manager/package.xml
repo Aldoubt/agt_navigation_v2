@@ -12,6 +12,7 @@
   <exec_depend>agt_map_processing</exec_depend>
   <exec_depend>agt_map_manager</exec_depend>
   <exec_depend>agt_experiment_manager</exec_depend>
+  <exec_depend>agt_offline_assets</exec_depend>
   <exec_depend>agt_coverage_planning</exec_depend>
   <exec_depend>agt_teach_repeat</exec_depend>
   <exec_depend>agt_ui_bridge</exec_depend>
@@ -24,7 +25,6 @@
   <exec_depend>nav_msgs</exec_depend>
   <exec_depend>nav2_msgs</exec_depend>
   <exec_depend>rclpy</exec_depend>
-  <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
