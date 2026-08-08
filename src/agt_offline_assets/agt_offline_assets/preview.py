@@ -6,7 +6,7 @@ from pathlib import Path
 
 from agt_ui_bridge.platform_profile import load_platform_profile
 
-from .contracts import load_yaml_mapping
+from .contracts import AssetContractError, load_yaml_mapping
 from .route_asset import load_route_csv
 
 
@@ -21,6 +21,11 @@ def write_route_preview(
     route_dir = Path(route_dir).expanduser().resolve()
     samples = load_route_csv(route_dir / "route.csv")
     route_manifest = load_yaml_mapping(route_dir / "route.yaml")
+    if str(route_manifest.get("status", "")).upper() == "READY":
+        raise AssetContractError(
+            "ready_route_immutable",
+            "READY route preview is immutable; read the existing preview or create a new revision",
+        )
     platform = load_platform_profile(platform_profile_path)
     footprint = tuple(tuple(point) for point in platform["footprint"])
 
