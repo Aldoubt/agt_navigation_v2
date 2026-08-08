@@ -15,6 +15,7 @@ from .workspace import (
     refresh_map_manifest,
 )
 from .map_validation import MapComplianceResult, validate_map_workspace
+from .session_ingest import MappingSessionIngestResult, ingest_mapping_session
 from .route_asset import (
     RouteSample,
     create_route_candidate_asset,
@@ -39,6 +40,8 @@ __all__ = [
     "refresh_map_manifest",
     "MapComplianceResult",
     "validate_map_workspace",
+    "MappingSessionIngestResult",
+    "ingest_mapping_session",
     "RouteSample",
     "create_route_candidate_asset",
     "derive_route_candidate",
