@@ -8,9 +8,11 @@ V25-10 adds a sparse global correction layer above the continuous FAST-LIVO2 odo
 FAST-LIVO2
   -> odom -> base_footprint       high-rate continuous motion
 
-Relocalization evidence
+Relocalization registration
+  -> /agt/localization/evidence_status
   -> GlobalCorrectionManager
-  -> map -> odom                  sparse low-rate global correction
+      -> canonical /agt/localization/status
+      -> map -> odom              sparse low-rate global correction
 
 Route Asset (map)
   -> active segment projection
@@ -37,20 +39,29 @@ Owns:
 - ICP/NDT registration
 - candidate generation
 - tracking validation
-- accepted `map -> base_footprint` evidence
-- `LocalizationStatus`
+- candidate `map -> base_footprint` evidence
+- evidence `LocalizationStatus`
 
-It does not own the production `map -> odom` TF stream. `publish_tf` is forced `false` by production config and launch.
+In the production launch its status output is remapped to:
+
+```text
+/agt/localization/evidence_status
+```
+
+It does not own the production `map -> odom` TF stream and does not directly declare navigation-ready localization. `publish_tf` is forced `false` by production config and launch.
 
 ### GlobalCorrectionManager
 
-Owns the single production:
+Owns both production outputs that must stay mutually consistent:
 
 ```text
-map -> odom
+/agt/localization/status     canonical downstream localization state
+map -> odom                  accepted global correction TF
 ```
 
-It evaluates accepted localization evidence using the `odom -> base_footprint` transform at the same evidence timestamp.
+It evaluates accepted registration evidence using the `odom -> base_footprint` transform at the same evidence timestamp.
+
+This prevents a dangerous split state where the registration backend says `TRACKING` while the global correction was rejected and `map -> odom` remained unchanged.
 
 ## Correction equation
 
@@ -83,6 +94,48 @@ State limits are deliberately different:
 
 Every accepted correction increments a monotonic `generation`.
 
+## Canonical rejection escalation
+
+If the registration backend accepts a pose but the correction policy rejects the resulting `map -> odom`, the manager does not forward that evidence as navigation-ready localization.
+
+Instead it publishes canonical:
+
+```text
+localization_accepted = false
+pose_valid = false
+state = RECOVERING
+```
+
+Repeated correction rejection is bounded by:
+
+```yaml
+correction_rejections_to_lost: 3
+```
+
+After that threshold the canonical state becomes:
+
+```text
+LOST
+```
+
+This creates a complete recovery escalation:
+
+```text
+TRACKING
+  -> correction rejected
+  -> RECOVERING
+  -> MODE_LOCAL_CANDIDATES
+
+repeated correction rejection
+  -> LOST
+  -> MODE_AUTO_SEARCH
+
+accepted lost-state relocalization
+  -> REANCHOR_ACCEPTED
+  -> new map -> odom generation
+  -> TRACKING
+```
+
 ## Recovery trigger
 
 V25-10 reuses the existing `Relocalize` Action and configured candidate contract rather than introducing an Anchor Action or another candidate schema.
@@ -111,7 +164,7 @@ LOST
   -> broader candidate search
 ```
 
-A cooldown and in-flight gate prevent request storms.
+A cooldown and in-flight gate prevent request storms. A RECOVERING -> LOST state change bypasses the repeated-state cooldown so escalation can happen immediately.
 
 ## Implemented files
 
@@ -144,16 +197,20 @@ The first V25-10 gate covers:
 - in-flight suppression
 - cooldown
 - RECOVERING -> LOST immediate escalation
+- production TF authority separation
+- evidence status vs canonical status ownership
+- bounded correction rejection escalation
 
 ## Next integration gates
 
 After the package compiles and these tests are green:
 
 1. synthetic `odom` drift -> accepted correction -> corrected global pose
-2. verify exactly one active `map -> odom` publisher in a launch test
-3. two-segment Route test: inject correction during s000; s000 stays unchanged; s001 consumes the new generation
-4. recorded-bag localization validation when a suitable bag / canonical localization prior is available
-5. vehicle field acceptance remains separate
+2. launch-level proof that only `global_correction_manager` publishes production `map -> odom`
+3. correction-rejection smoke: evidence accepted, correction rejected, canonical state RECOVERING/LOST and recovery Action requested
+4. two-segment Route test: inject correction during s000; s000 stays unchanged; s001 consumes the new generation
+5. recorded-bag localization validation when a suitable bag / canonical localization prior is available
+6. vehicle field acceptance remains separate
 
 ## Intentionally deferred
 
