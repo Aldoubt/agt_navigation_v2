@@ -87,20 +87,28 @@ def validate_route_asset(
         if previous.direction != current.direction and previous.segment_id == current.segment_id:
             errors.append("direction_change_inside_segment")
             break
+
+    semantic_refs = {sample.semantic_ref for sample in samples if sample.semantic_ref}
+    derived_semantic_refs = sorted(
+        ref for ref in semantic_refs if ref.startswith("preview_aisle_")
+    )
     unknown_semantic_refs = sorted({
-        sample.semantic_ref for sample in samples
-        if sample.semantic_ref and sample.semantic_ref != "<connector>"
-        and sample.semantic_ref not in enabled_semantic_ids
+        ref for ref in semantic_refs
+        if ref != "<connector>"
+        and not ref.startswith("preview_aisle_")
+        and ref not in enabled_semantic_ids
     })
     if unknown_semantic_refs:
         errors.append("semantic_reference_missing")
+    if derived_semantic_refs:
+        warnings.append("derived_aisle_reference_from_frozen_semantic_map")
 
     semantic_invalid_samples = _semantic_footprint_violations(
         semantic_map, geometry.samples, footprint
     )
     if semantic_invalid_samples:
         errors.append("semantic_footprint_violation")
-    if any(sample.semantic_ref == "<connector>" for sample in samples):
+    if "<connector>" in semantic_refs:
         warnings.append("straight_connector_candidate_requires_planner_review")
 
     length_m = 0.0
@@ -144,6 +152,7 @@ def validate_route_asset(
             "direction_changes": direction_changes,
             "footprint_collision_count": int(geometry.report.collision_pose_count),
             "semantic_footprint_violation_count": len(semantic_invalid_samples),
+            "derived_semantic_reference_count": len(derived_semantic_refs),
             "curvature_violation_count": int(
                 "minimum_turning_radius_violation" in geometry.report.error_codes
             ),
@@ -151,6 +160,7 @@ def validate_route_asset(
             "out_of_bounds_pose_count": int(geometry.report.out_of_bounds_pose_count),
             "sample_count": int(geometry.report.sample_count),
         },
+        "derived_semantic_refs": derived_semantic_refs,
         "invalid_segment_indices": invalid_segments,
         "errors": errors,
         "warnings": warnings,
@@ -161,8 +171,6 @@ def validate_route_asset(
         report_path = route_dir / "feasibility_report.json"
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-        # Generate every derived evidence artifact before the one final manifest
-        # promotion write, so READY route.yaml is never edited in place afterward.
         from .preview import write_route_preview
 
         preview_path = write_route_preview(
