@@ -152,6 +152,7 @@ def _run(options: argparse.Namespace, client: ReplayMappingClient) -> int:
 
     started = None
     finalized = None
+    finalize_attempted = False
     playback: subprocess.Popen | None = None
     replay_log = None
     try:
@@ -197,6 +198,7 @@ def _run(options: argparse.Namespace, client: ReplayMappingClient) -> int:
             while time.monotonic() < settle_deadline:
                 rclpy.spin_once(client, timeout_sec=min(0.2, settle_deadline - time.monotonic()))
 
+        finalize_attempted = True
         finalized = client.mapping_request(
             ManageMappingSession.Goal.OP_FINALIZE_CAPTURE,
             session_id=started.session_id,
@@ -231,7 +233,11 @@ def _run(options: argparse.Namespace, client: ReplayMappingClient) -> int:
         return 0
     except BaseException:
         _terminate_process(playback)
-        if started is not None and finalized is None:
+        # Failures before FINALIZE own no useful static-candidate state and are
+        # cleaned automatically. Once FINALIZE begins, preserve the managed
+        # session because CANDIDATE_BUILD_FAILED / BUILDING_STATIC_MAP are
+        # explicitly retryable states and contain useful evidence.
+        if started is not None and not finalize_attempted:
             try:
                 client.mapping_request(
                     ManageMappingSession.Goal.OP_DISCARD,
@@ -243,6 +249,12 @@ def _run(options: argparse.Namespace, client: ReplayMappingClient) -> int:
                     f"warning: mapping-session cleanup failed: {cleanup_error}",
                     file=sys.stderr,
                 )
+        elif started is not None and finalize_attempted:
+            print(
+                "mapping-session was preserved after FINALIZE began; use "
+                f"mapping_session_workflow.py status/finalize --session-id {started.session_id}",
+                file=sys.stderr,
+            )
         raise
     finally:
         _terminate_process(playback)
