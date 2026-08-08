@@ -3,16 +3,17 @@ import hashlib
 import json
 import shutil
 
+import pytest
 import yaml
 
 from agt_offline_assets import (
+    AssetContractError,
     apply_route_tuning,
     create_map_workspace,
     create_route_candidate_asset,
     refresh_map_manifest,
     sha256_file,
     validate_route_asset,
-    write_route_preview,
 )
 from agt_offline_assets.route_asset import load_route_csv
 
@@ -199,14 +200,36 @@ def _prepare_ready_workspace(tmp_path):
     return workspace, semantic_path, coverage_path
 
 
-def test_workspace_lineage_can_be_promoted_to_ready(tmp_path):
+def test_workspace_lineage_can_be_promoted_to_ready_and_is_immutable(tmp_path):
     workspace, _, _ = _prepare_ready_workspace(tmp_path)
     manifest = yaml.safe_load(workspace.manifest_path.read_text(encoding="utf-8"))
     assert manifest["state"] == "READY"
     assert manifest["site_id"] == "greenhouse_test"
     assert manifest["epoch_id"] == "2026-08-08-test"
     assert manifest["source"]["dataset_binding_sha256"].startswith("sha256:")
+    assert "semantic_coverage" in manifest["assets"]
     assert "map_quality_report" in manifest["assets"]
+    with pytest.raises(AssetContractError, match="READY map versions are immutable") as error:
+        refresh_map_manifest(workspace.manifest_path)
+    assert error.value.code == "ready_map_immutable"
+
+
+def test_ready_map_semantic_mutation_is_rejected_for_route_derivation(tmp_path):
+    workspace, semantic_path, coverage_path = _prepare_ready_workspace(tmp_path)
+    policy = tmp_path / "policy.yaml"
+    _write_policy(policy)
+    semantic_path.write_text(semantic_path.read_text(encoding="utf-8") + "\n", encoding="utf-8")
+    with pytest.raises(AssetContractError) as error:
+        create_route_candidate_asset(
+            map_manifest_path=workspace.manifest_path,
+            semantic_path=semantic_path,
+            coverage_path=coverage_path,
+            policy_path=policy,
+            platform_profile_path=PLATFORM,
+            route_id="inspection_main",
+            revision=1,
+        )
+    assert error.value.code == "route_semantic_hash_mismatch"
 
 
 def test_semantic_route_candidate_feasibility_preview_and_tuning(tmp_path):
@@ -231,18 +254,25 @@ def test_semantic_route_candidate_feasibility_preview_and_tuning(tmp_path):
         route_dir,
         map_manifest_path=workspace.manifest_path,
         platform_profile_path=PLATFORM,
+        maximum_preview_footprints=20,
     )
     assert result.passed, result.report
-    preview = write_route_preview(
-        route_dir,
-        platform_profile_path=PLATFORM,
-        feasibility_result=result,
-        maximum_footprints=20,
-    )
-    document = json.loads(preview.read_text(encoding="utf-8"))
+    route_manifest = yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))
+    assert route_manifest["status"] == "READY"
+    assert route_manifest["preview_sha256"] == sha256_file(route_dir / "preview.geojson")
+    document = json.loads((route_dir / "preview.geojson").read_text(encoding="utf-8"))
     layers = {feature["properties"]["layer"] for feature in document["features"]}
     assert "route_segment" in layers
     assert "vehicle_footprint" in layers
+    assert result.report["checks"]["semantic_free_space"] == "PASS"
+
+    with pytest.raises(AssetContractError) as error:
+        validate_route_asset(
+            route_dir,
+            map_manifest_path=workspace.manifest_path,
+            platform_profile_path=PLATFORM,
+        )
+    assert error.value.code == "ready_route_immutable"
 
     tuning = tmp_path / "tuning.yaml"
     tuning.write_text(
