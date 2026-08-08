@@ -1,0 +1,5 @@
+schema_version: 1
+site_id: facility_a
+frame_id: map
+definition_status: PENDING_REFERENCE_CONFIRMATION
+reference: stable_site_structure_or_control_points_required

@@ -1,0 +1,22 @@
+schema_version: 1
+dataset_id: ds_handheld_facility_20260719
+site_id: facility_a
+epoch_id: 20260719_handheld
+purpose: OPERATIONAL
+source_role: MAP_CAPTURE
+bag:
+  path: ../../rosbag/mapping_20260719_172810_trimmed
+  sha256: sha256:9f43c882677b53e5c1398f89bcb11f51cd30bf5e44e1a01f79ded9d3380ea339
+capture_rig:
+  profile_id: handheld_mid360
+  profile_sha256: sha256:550dc992bccc510b51d9a1ca0b124710093c7b38a9c54378961b2bd7ee29ee81
+platform:
+  profile_id: handheld_mid360
+  profile_sha256: sha256:550dc992bccc510b51d9a1ca0b124710093c7b38a9c54378961b2bd7ee29ee81
+calibration:
+  calibration_id: cal_handheld_mid360_sensor_v01
+  calibration_sha256: sha256:1b1895545b9bc8328b176185b1619322f5b872298394c629816a2fb55ae10544
+  scope: SENSOR_CAPTURE_RIG_ONLY
+execution_vehicle: {}
+replay_topic_remaps: {}
+created_at: '2026-08-08T04:49:14+00:00'

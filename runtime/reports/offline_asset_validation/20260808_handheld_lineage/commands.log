@@ -1,0 +1,4 @@
+ros2 bag info /home/yangxuan/agt_navigation_v2/runtime/rosbag/mapping_20260719_172810_trimmed
+python3 -m pytest -q tests/test_offline_asset_contract.py tests/test_navigation_architecture_contract.py tests/test_topic_contract.py
+colcon test --packages-select agt_offline_assets agt_system_manager agt_experiment_manager --event-handlers console_cohesion+
+python3 tools/offline_asset_validation/generate_report.py --bag /home/yangxuan/agt_navigation_v2/runtime/rosbag/mapping_20260719_172810_trimmed --dataset-dir /home/yangxuan/agt_navigation_v2/runtime/datasets/ds_handheld_facility_20260719 --output /home/yangxuan/agt_navigation_v2/runtime/reports/offline_asset_validation/20260808_handheld_lineage

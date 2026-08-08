@@ -1,0 +1,16 @@
+{
+  "status": "PASS",
+  "route_id": "greenhouse_main_route",
+  "revision": 1,
+  "metrics": {
+    "length_m": 42.1,
+    "reverse_length_m": 3.2,
+    "min_clearance_m": 0.41,
+    "direction_changes": 2,
+    "footprint_collision_count": 0,
+    "curvature_violation_count": 0,
+    "unknown_intersection_count": 0
+  },
+  "errors": [],
+  "warnings": []
+}

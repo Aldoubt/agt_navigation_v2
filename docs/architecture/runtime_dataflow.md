@@ -26,10 +26,9 @@ public Mission Action; it does not add a second Mission owner:
   -> IsTaskReady -> Relocalize (when needed) -> ExecuteWaypointTask
 ```
 
-The BT backend is restricted to one `WAYPOINT_TASK`, carries structured
-readiness blockers and task content identity, and has bounded cancellation.
-Unit/contract validation is complete; fake integration is pending V25-07 and
-vehicle validation remains pending. The sequential backend remains the default.
+Unit/contract validation and the V25-07 fake full-chain
+integration are complete; vehicle validation remains pending.
+The sequential backend remains the default.
 
 ## 1. 启动前环境
 

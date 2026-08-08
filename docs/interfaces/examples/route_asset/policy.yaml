@@ -1,0 +1,25 @@
+schema_version: 1
+policy_id: greenhouse_inspection_v1
+source:
+  planning_mode: annotated_rows
+  row_interpretation: crop_centerlines
+  use_access_lanes: true
+  use_headland_zones: true
+constraints:
+  minimum_clearance_m: 0.15
+  allow_reverse: true
+  unknown_space_allowed: false
+  direction_change_requires_stop: true
+costs:
+  path_length: 1.0
+  clearance: 3.0
+  curvature: 2.0
+  reverse_distance: 1.5
+  direction_change: 4.0
+  semantic_corridor_deviation: 5.0
+sampling:
+  path_resolution_m: 0.05
+  footprint_check_resolution_m: 0.05
+postprocess:
+  smoothing: true
+  preserve_stop_anchors: true

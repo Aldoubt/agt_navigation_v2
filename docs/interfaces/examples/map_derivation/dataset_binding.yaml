@@ -1,0 +1,20 @@
+schema_version: 1
+dataset_id: ds_greenhouse_a_20260810_am
+site_id: greenhouse_a
+epoch_id: 2026-08-10-am
+purpose: OPERATIONAL
+bag:
+  path: experiments/exp_greenhouse_a_20260810/bags/mapping
+  sha256: sha256:1111111111111111111111111111111111111111111111111111111111111111
+  storage_id: sqlite3
+platform:
+  profile_id: bunker
+  profile_sha256: sha256:2222222222222222222222222222222222222222222222222222222222222222
+calibration:
+  calibration_id: cal_bunker_mid360_20260810
+  calibration_sha256: sha256:3333333333333333333333333333333333333333333333333333333333333333
+topics:
+  lidar: /agt/sensors/lidar/custom
+  imu: /agt/sensors/imu/data
+  wheel: /agt/chassis/odometry
+  gnss: /agt/sensors/gnss/fix
