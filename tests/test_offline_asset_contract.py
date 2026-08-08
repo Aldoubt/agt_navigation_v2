@@ -137,13 +137,13 @@ def test_offline_asset_package_implements_workspace_route_feasibility_and_tuning
         "agt_offline_assets/feasibility.py",
         "agt_offline_assets/preview.py",
         "agt_offline_assets/tuning.py",
-        "scripts/agt_offline_assets.py",
+        "scripts/agt_offline_assets_cli.py",
         "test/test_offline_assets.py",
     )
     for relative in required:
         assert (OFFLINE_PACKAGE / relative).is_file(), relative
 
-    cli = _read(OFFLINE_PACKAGE / "scripts/agt_offline_assets.py")
+    cli = _read(OFFLINE_PACKAGE / "scripts/agt_offline_assets_cli.py")
     for command in (
         "hash-path",
         "init-map",
