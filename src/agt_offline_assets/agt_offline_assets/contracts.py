@@ -31,6 +31,46 @@ def sha256_file(path: str | Path) -> str:
     return "sha256:" + digest.hexdigest()
 
 
+def sha256_path_bundle(path: str | Path) -> str:
+    """Hash one file or a directory tree deterministically.
+
+    A directory digest includes every regular file under the directory, sorted by
+    POSIX relative path. Each record contributes the relative path, file size and
+    file-content SHA256. Symlinks are rejected so a Dataset binding cannot silently
+    depend on data outside the managed bag directory.
+    """
+    root = Path(path).expanduser().resolve()
+    if root.is_file():
+        return sha256_file(root)
+    if not root.is_dir():
+        raise AssetContractError("bundle_path_missing", f"bundle path does not exist: {root}")
+
+    files = []
+    for candidate in root.rglob("*"):
+        if candidate.is_symlink():
+            raise AssetContractError(
+                "bundle_symlink_forbidden",
+                f"bundle contains a symlink: {candidate.relative_to(root)}",
+            )
+        if candidate.is_file():
+            files.append(candidate)
+    if not files:
+        raise AssetContractError("bundle_empty", f"bundle has no files: {root}")
+
+    digest = hashlib.sha256()
+    for candidate in sorted(files, key=lambda item: item.relative_to(root).as_posix()):
+        relative = candidate.relative_to(root).as_posix().encode("utf-8")
+        file_hash = sha256_file(candidate).removeprefix("sha256:").encode("ascii")
+        size = str(candidate.stat().st_size).encode("ascii")
+        digest.update(relative)
+        digest.update(b"\0")
+        digest.update(size)
+        digest.update(b"\0")
+        digest.update(file_hash)
+        digest.update(b"\n")
+    return "sha256:" + digest.hexdigest()
+
+
 def load_yaml_mapping(path: str | Path) -> dict[str, Any]:
     path = Path(path)
     value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -114,24 +154,28 @@ class DatasetBinding:
             ),
         )
 
-    def verify_bag_if_local(self, binding_path: str | Path) -> None:
+    def resolve_bag_path(self, binding_path: str | Path) -> Path:
         bag = Path(self.bag_path).expanduser()
         if not bag.is_absolute():
             bag = (Path(binding_path).resolve().parent / bag).resolve()
+        return bag
+
+    def verify_bag(self, binding_path: str | Path) -> Path:
+        bag = self.resolve_bag_path(binding_path)
         if not bag.exists():
-            return
-        if bag.is_file():
-            actual = sha256_file(bag)
-        else:
-            metadata = bag / "metadata.yaml"
-            if not metadata.is_file():
-                raise AssetContractError(
-                    "dataset_bag_unverifiable",
-                    "bag directory exists but metadata.yaml is missing",
-                )
-            actual = sha256_file(metadata)
+            raise AssetContractError("dataset_bag_missing", f"bound bag does not exist: {bag}")
+        if bag.is_dir() and not (bag / "metadata.yaml").is_file():
+            raise AssetContractError(
+                "dataset_bag_metadata_missing",
+                "rosbag2 directory must contain metadata.yaml",
+            )
+        actual = sha256_path_bundle(bag)
         if actual != self.bag_sha256:
-            raise AssetContractError("dataset_bag_hash_mismatch", "local bag hash mismatch")
+            raise AssetContractError(
+                "dataset_bag_hash_mismatch",
+                f"bag bundle hash mismatch: expected {self.bag_sha256}, got {actual}",
+            )
+        return bag
 
 
 @dataclass(frozen=True)
