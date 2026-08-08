@@ -16,6 +16,7 @@ def write_route_preview(
     platform_profile_path: str | Path,
     feasibility_result=None,
     maximum_footprints: int = 250,
+    extra_invalid_samples=None,
 ) -> Path:
     route_dir = Path(route_dir).expanduser().resolve()
     samples = load_route_csv(route_dir / "route.csv")
@@ -77,20 +78,18 @@ def write_route_preview(
                 "geometry": {"type": "Point", "coordinates": [sample.x, sample.y]},
             })
 
+    seen = set()
     if feasibility_result is not None:
-        invalid = feasibility_result.geometry_result.invalid_samples
-        for item in invalid[:maximum_footprints]:
-            polygon = _transform_footprint(
-                footprint, item.pose.x, item.pose.y, item.pose.yaw
-            )
-            features.append({
-                "type": "Feature",
-                "properties": {
-                    "layer": "invalid_footprint",
-                    "segment_index": int(item.segment_index),
-                },
-                "geometry": {"type": "Polygon", "coordinates": [polygon + [polygon[0]]]},
-            })
+        for item in feasibility_result.geometry_result.invalid_samples[:maximum_footprints]:
+            key = _sample_key(item)
+            seen.add(key)
+            features.append(_invalid_feature(footprint, item, "occupancy_or_kinematics"))
+    for item in list(extra_invalid_samples or [])[:maximum_footprints]:
+        key = _sample_key(item)
+        if key in seen:
+            continue
+        seen.add(key)
+        features.append(_invalid_feature(footprint, item, "semantic_free_space"))
 
     document = {
         "type": "FeatureCollection",
@@ -108,6 +107,28 @@ def write_route_preview(
     output = route_dir / "preview.geojson"
     output.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output
+
+
+def _invalid_feature(footprint, item, reason):
+    polygon = _transform_footprint(footprint, item.pose.x, item.pose.y, item.pose.yaw)
+    return {
+        "type": "Feature",
+        "properties": {
+            "layer": "invalid_footprint",
+            "segment_index": int(item.segment_index),
+            "reason": reason,
+        },
+        "geometry": {"type": "Polygon", "coordinates": [polygon + [polygon[0]]]},
+    }
+
+
+def _sample_key(item):
+    return (
+        int(item.segment_index),
+        round(float(item.pose.x), 6),
+        round(float(item.pose.y), 6),
+        round(float(item.pose.yaw), 6),
+    )
 
 
 def _transform_footprint(footprint, x: float, y: float, yaw: float):
