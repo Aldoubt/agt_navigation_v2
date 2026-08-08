@@ -325,6 +325,7 @@ def generate_launch_description():
                     "map_id": LaunchConfiguration("map_id"),
                     "map_version_id": LaunchConfiguration("map_version_id"),
                     "runtime_dir": runtime_dir,
+                    "execution_vehicle_profile": LaunchConfiguration("platform_profile"),
                     "use_sim_time": use_sim_time,
                     "use_keepout_filter": semantic_enabled,
                     "autostart": "false",
