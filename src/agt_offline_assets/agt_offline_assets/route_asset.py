@@ -107,25 +107,29 @@ def derive_route_candidate(
             )
             if not connector_result.success:
                 raise AssetContractError("connector_planning_failed", connector_result.failure_reason)
-            samples.extend(_samples_from_connector(
-                connector_result.samples,
-                connector_id,
-                "<connector>",
-                speed,
-                start_seq=len(samples),
-            ))
+            samples = _append_route_samples(
+                samples,
+                _samples_from_connector(
+                    connector_result.samples,
+                    connector_id,
+                    "<connector>",
+                    speed,
+                    start_seq=0,
+                ),
+            )
             segment_number += 1
         segment_id = f"lane_{segment_number:03d}"
         route_points = _resample_polyline(points, policy.path_resolution_m)
-        samples.extend(
+        samples = _append_route_samples(
+            samples,
             _samples_from_points(
                 route_points,
                 segment_id,
                 "F",
                 speed,
                 feature_id,
-                start_seq=len(samples),
-            )
+                start_seq=0,
+            ),
         )
         segment_number += 1
         previous_end = points[-1]
@@ -240,6 +244,11 @@ def create_route_candidate_asset(
         "planner": {
             "backend": "semantic_boustrophedon",
             "connector_backend": policy.connector_backend,
+            "connector_parameters": {
+                "minimum_turning_radius_m": float(platform.get("min_turning_radius", 0.0)),
+                "path_resolution_m": policy.path_resolution_m,
+                "allow_reverse": policy.allow_reverse,
+            },
         },
         "status": "DRAFT",
     }
@@ -458,19 +467,58 @@ def _samples_from_connector(
     start_seq: int,
 ) -> list[RouteSample]:
     """Convert connector output without recomputing its heading or direction."""
-    return [
-        RouteSample(
-            seq=start_seq + index,
-            segment_id=segment_id,
+    output = []
+    previous_direction = None
+    subsegment = -1
+    for sample in samples:
+        direction = str(sample.direction)
+        if direction != previous_direction:
+            subsegment += 1
+            previous_direction = direction
+        output.append(RouteSample(
+            seq=start_seq + len(output),
+            segment_id=f"{segment_id}_{direction.lower()}{subsegment:02d}",
             x=float(sample.x),
             y=float(sample.y),
             yaw=float(sample.yaw),
-            direction=str(sample.direction),
+            direction=direction,
             v_ref=speed,
             semantic_ref=semantic_ref,
+        ))
+    return output
+
+
+def _append_route_samples(existing, incoming):
+    """Join geometry while preserving a direction-change cusp boundary."""
+    if not incoming:
+        return existing
+    if existing and _same_pose(existing[-1], incoming[0]) and existing[-1].direction == incoming[0].direction:
+        incoming = incoming[1:]
+    start_seq = len(existing)
+    return existing + [
+        RouteSample(
+            seq=start_seq + index,
+            segment_id=sample.segment_id,
+            x=sample.x,
+            y=sample.y,
+            yaw=sample.yaw,
+            direction=sample.direction,
+            v_ref=sample.v_ref,
+            curvature=sample.curvature,
+            clearance=sample.clearance,
+            semantic_ref=sample.semantic_ref,
+            event_ref=sample.event_ref,
         )
-        for index, sample in enumerate(samples)
+        for index, sample in enumerate(incoming)
     ]
+
+
+def _same_pose(first: RouteSample, second: RouteSample) -> bool:
+    return (
+        abs(first.x - second.x) <= 1.0e-9
+        and abs(first.y - second.y) <= 1.0e-9
+        and abs(_angle_difference(first.yaw, second.yaw)) <= 1.0e-9
+    )
 
 
 def _polyline_tangent_yaw(points, *, at_end: bool) -> float:

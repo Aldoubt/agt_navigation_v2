@@ -22,6 +22,7 @@ firmware, datasets and model weights being delivered.
 | ndt_omp ROS 2 | `third_party/ndt_omp_ros2` | BSD-2-Clause plus preserved PCL contributor notices | [koide3/ndt_omp](https://github.com/koide3/ndt_omp) |
 | ROS Qt5 GUI App maintained fork | `third_party/ros_qt5_gui_app` | GPL-2.0; bundled/fetched libraries retain their own licenses | [chengyangkj](https://github.com/chengyangkj/Ros_Qt5_Gui_App) |
 | relocalization_core imported module | `third_party/relocalization_core` | Apache-2.0 | Local license file |
+| Reeds-Shepp family equations (adapted) | `src/agt_offline_assets/agt_offline_assets/reeds_shepp.py` | MIT; attribution and modification are recorded in the source header | [PythonRobotics ReedsSheppPath](https://github.com/AtsushiSakai/PythonRobotics/blob/master/PathPlanning/ReedsSheppPath/reeds_shepp_path_planning.py) |
 
 Do not remove the license files, copyright headers or modification history within
 these directories. A modified GPL binary delivered to another party must be matched

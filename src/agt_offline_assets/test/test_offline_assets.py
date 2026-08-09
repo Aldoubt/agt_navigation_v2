@@ -84,13 +84,13 @@ def _write_semantic(root):
     return semantic / "semantic_map.geojson", semantic / "coverage.yaml"
 
 
-def _write_policy(path, *, row_interpretation="direct_swaths"):
+def _write_policy(path, *, row_interpretation="direct_swaths", connector_backend="straight"):
     policy = {
         "schema_version": 1,
         "policy_id": f"test_{row_interpretation}",
         "source": {
             "planning_mode": "annotated_rows",
-            "connector_backend": "straight",
+            "connector_backend": connector_backend,
             "row_interpretation": row_interpretation,
             "use_access_lanes": True,
             "use_headland_zones": True,
@@ -186,6 +186,32 @@ def test_draft_clone_generates_and_validates_route_without_promoting_ready(tmp_p
     route_manifest = yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))
     assert route_manifest["status"] == "DRAFT_VALIDATED"
     assert route_manifest["planner"]["connector_backend"] == "straight"
+
+
+def test_reeds_shepp_route_manifest_and_cusp_segments(tmp_path):
+    workspace, semantic_path, coverage_path = _prepare_ready_workspace(tmp_path)
+    policy = tmp_path / "reeds_policy.yaml"
+    _write_policy(policy, connector_backend="reeds_shepp")
+    reeds_profile = tmp_path / "bunker_reeds_profile.yaml"
+    profile = yaml.safe_load(PLATFORM.read_text(encoding="utf-8"))
+    profile["platform"]["geometry"]["min_turning_radius"] = 1.0
+    reeds_profile.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+    route_dir = create_route_candidate_asset(
+        map_manifest_path=workspace.manifest_path,
+        semantic_path=semantic_path,
+        coverage_path=coverage_path,
+        policy_path=policy,
+        platform_profile_path=reeds_profile,
+        route_id="reeds_route",
+        revision=1,
+    )
+    manifest = yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))
+    assert manifest["planner"]["connector_backend"] == "reeds_shepp"
+    assert manifest["planner"]["connector_parameters"]["minimum_turning_radius_m"] == 1.0
+    samples = load_route_csv(route_dir / "route.csv")
+    for first, second in zip(samples, samples[1:]):
+        if first.segment_id == second.segment_id:
+            assert first.direction == second.direction
 
 
 def _prepare_ready_workspace(tmp_path):

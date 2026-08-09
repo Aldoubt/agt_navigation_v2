@@ -103,6 +103,11 @@ def write_route_preview(
         "properties": {
             "route_id": str(route_manifest.get("route_id", "")),
             "revision": int(route_manifest.get("revision", 0)),
+            "connector_backend": str((route_manifest.get("planner") or {}).get("connector_backend", "straight")),
+            "connector_count": len({sample.segment_id.rsplit("_", 1)[0] for sample in samples if sample.semantic_ref == "<connector>"}),
+            "connector_total_length_m": round(_connector_length(samples), 6),
+            "connector_reverse_length_m": round(_connector_reverse_length(samples), 6),
+            "connector_direction_change_count": _direction_change_count(samples),
             "feasibility_status": (
                 feasibility_result.report["status"] if feasibility_result is not None else "NOT_EVALUATED"
             ),
@@ -112,6 +117,26 @@ def write_route_preview(
     output = route_dir / "preview.geojson"
     output.write_text(json.dumps(document, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return output
+
+
+def _connector_length(samples):
+    return sum(
+        math.hypot(current.x - previous.x, current.y - previous.y)
+        for previous, current in zip(samples, samples[1:])
+        if current.semantic_ref == "<connector>"
+    )
+
+
+def _connector_reverse_length(samples):
+    return sum(
+        math.hypot(current.x - previous.x, current.y - previous.y)
+        for previous, current in zip(samples, samples[1:])
+        if current.semantic_ref == "<connector>" and current.direction == "R"
+    )
+
+
+def _direction_change_count(samples):
+    return sum(previous.direction != current.direction for previous, current in zip(samples, samples[1:]))
 
 
 def _invalid_feature(footprint, item, reason):

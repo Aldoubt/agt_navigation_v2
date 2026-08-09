@@ -31,6 +31,7 @@ from .tuning import apply_route_tuning
 from .cleaning import append_cleaning_operation
 from .map_edit import append_map_edit_operation
 from .connector import ConnectorRequest, ConnectorSample, ConnectorResult, ConnectorPlannerBackend, create_connector_backend
+from .reeds_shepp import ReedsSheppPath, ReedsSheppPrimitive
 
 __all__ = [
     "AssetContractError",
@@ -68,4 +69,6 @@ __all__ = [
     "ConnectorResult",
     "ConnectorPlannerBackend",
     "create_connector_backend",
+    "ReedsSheppPath",
+    "ReedsSheppPrimitive",
 ]

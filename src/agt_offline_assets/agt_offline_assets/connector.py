@@ -71,6 +71,10 @@ class StraightConnectorBackend(ConnectorPlannerBackend):
 def create_connector_backend(name: str) -> ConnectorPlannerBackend:
     if str(name).strip().lower() == "straight":
         return StraightConnectorBackend()
+    if str(name).strip().lower() == "reeds_shepp":
+        from .reeds_shepp import ReedsSheppConnectorBackend
+
+        return ReedsSheppConnectorBackend()
     raise AssetContractError(
         "connector_backend_unknown", f"unsupported connector backend: {name}"
     )

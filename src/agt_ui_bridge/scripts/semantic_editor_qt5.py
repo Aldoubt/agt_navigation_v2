@@ -545,6 +545,7 @@ class SemanticEditorWindow(QMainWindow):
         self._preview_tempdir = None
         self._preview_tempdirs = []
         self._preview_world_points = []
+        self._preview_route_segments = []
         self._preview_approach_points = []
         self._preview_collision_points = []
         self._preview_path_summary = {}
@@ -1914,6 +1915,26 @@ class SemanticEditorWindow(QMainWindow):
             "route_preview"
         ):
             return
+        if self._preview_route_segments:
+            for segment in self._preview_route_segments:
+                coordinates = segment["coordinates"]
+                if len(coordinates) < 2:
+                    continue
+                is_connector = str(segment["segment_id"]).startswith("connector_")
+                if is_connector and not self._layer_visible("connectors"):
+                    continue
+                path = QPainterPath(self._world_point(coordinates[0]))
+                for point in coordinates[1:]:
+                    path.lineTo(self._world_point(point))
+                color = QColor("#ff3b81") if segment["direction"] == "R" else QColor("#f0a43b")
+                pen = QPen(color, 3.0, Qt.DashLine if is_connector else Qt.SolidLine)
+                pen.setCosmetic(True)
+                item = ContrastPathItem(path)
+                item.setPen(pen)
+                item.setZValue(45)
+                item.setToolTip(f"{segment['segment_id']} · {segment['direction']}")
+                self.graphics_scene.addItem(item)
+            return
         path = QPainterPath(self._world_point(self._preview_world_points[0]))
         for point in self._preview_world_points[1:]:
             path.lineTo(self._world_point(point))
@@ -2472,12 +2493,19 @@ class SemanticEditorWindow(QMainWindow):
     def _load_studio_route_preview(self, preview_path):
         document = json.loads(Path(preview_path).read_text(encoding="utf-8"))
         route_points = []
+        route_segments = []
         invalid_points = []
         for feature in document.get("features", []):
             properties = feature.get("properties") or {}
             geometry = feature.get("geometry") or {}
             if properties.get("layer") == "route_segment" and geometry.get("type") == "LineString":
-                route_points.extend(geometry.get("coordinates") or [])
+                coordinates = geometry.get("coordinates") or []
+                route_points.extend(coordinates)
+                route_segments.append({
+                    "segment_id": str(properties.get("segment_id", feature.get("id", ""))),
+                    "direction": str(properties.get("direction", "F")),
+                    "coordinates": coordinates,
+                })
             elif properties.get("layer") == "invalid_footprint":
                 polygon = (geometry.get("coordinates") or [[]])[0]
                 if polygon:
@@ -2486,6 +2514,7 @@ class SemanticEditorWindow(QMainWindow):
                         sum(point[1] for point in polygon) / len(polygon),
                     ])
         self._preview_world_points = route_points
+        self._preview_route_segments = route_segments
         self._preview_collision_points = invalid_points
         self._preview_status = str((document.get("properties") or {}).get("feasibility_status", "NOT_EVALUATED"))
         self.refresh_scene()
