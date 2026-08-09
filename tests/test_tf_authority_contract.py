@@ -43,6 +43,16 @@ def test_correction_manager_is_canonical_localization_status_owner():
     assert correction["correction_rejections_to_lost"] > 0
     assert '"/agt/localization/status"' in launch
     assert '"/agt/localization/evidence_status"' in launch
+
+
+def test_correction_generation_is_canonical_and_rejects_preserve_last_value():
+    message = _read(ROOT / "src" / "agt_interfaces" / "msg" / "LocalizationStatus.msg")
+    manager = _read(LOCALIZATION / "src" / "global_correction_manager.cpp")
+    assert "uint64 correction_generation" in message
+    assert "canonical.correction_generation = decision.generation" in manager
+    assert "rejected.correction_generation = core_->generation()" in manager
+    assert "evidence.correction_generation = 0U" in manager
+    assert "decision.map_from_odom.cast<float>()" in manager
     assert "canonical_status_pub_->publish" in manager
     assert "localization_accepted = false" in manager
     assert "STATE_RECOVERING" in manager

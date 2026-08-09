@@ -92,7 +92,12 @@ State limits are deliberately different:
 - `RECOVERING`: wider correction envelope
 - `LOST`: full accepted relocalization may reanchor if enabled
 
-Every accepted correction increments a monotonic `generation`.
+Every accepted correction increments a monotonic `correction_generation`. This is
+the GlobalCorrectionManager accepted `map -> odom` revision, not a TF sample
+count, Route segment count, snapshot count, or registration-attempt count.
+Relocalization evidence carries `correction_generation = 0`; canonical
+`/agt/localization/status` carries the last accepted value, including while a
+new correction is rejected.
 
 ## Canonical rejection escalation
 
@@ -211,6 +216,18 @@ After the package compiles and these tests are green:
 4. two-segment Route test: inject correction during s000; s000 stays unchanged; s001 consumes the new generation
 5. recorded-bag localization validation when a suitable bag / canonical localization prior is available
 6. vehicle field acceptance remains separate
+
+The Route runtime consumes this canonical value at segment projection
+boundaries:
+
+```text
+RuntimePath.alignment_generation = canonical correction_generation
+```
+
+An accepted correction during active `s000` does not reproject or resend its
+RuntimePath. The next segment snapshots the latest correction. Multiple
+segments may therefore share one correction generation when no new correction
+was accepted.
 
 ## Intentionally deferred
 

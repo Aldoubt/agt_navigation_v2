@@ -51,6 +51,22 @@ def test_route_runtime_does_not_add_public_action_or_native_global_planner_depen
     assert "controller_id_reverse" in adapter
 
 
+def test_route_alignment_uses_canonical_correction_generation_at_boundaries():
+    capability = _read(NAVIGATION / "scripts" / "navigation_capability_server.py")
+    backend = _read(NAVIGATION / "agt_navigation" / "route_backend.py")
+    integration = NAVIGATION / "test" / "test_v25_10_route_correction_generation.py"
+
+    assert "_localization_correction_generation" in capability
+    assert "_route_snapshot_generation" not in capability
+    assert "ROUTE_ALIGNMENT_GENERATION_UNAVAILABLE" in capability
+    assert "correction_generation" in capability
+    assert "update_global_alignment(self._snapshot_provider())" in backend
+    assert integration.is_file()
+    content = _read(integration)
+    assert "test_two_segment_route_consumes_correction_only_at_boundary" in content
+    assert "test_segments_without_new_correction_reuse_generation" in content
+
+
 def test_route_backend_uses_rclpy_future_not_asyncio_loop():
     backend = _read(NAVIGATION / "agt_navigation" / "route_backend.py")
 
@@ -115,6 +131,7 @@ def test_runtime_gate_action_tests_are_registered():
         "LOCALIZATION_NOT_READY",
         "TASK_READINESS_NOT_READY",
         "child_canceled",
+        "test_route_generation_zero_fails_closed_and_rejected_status_cancels",
     ):
         assert token in content
 
