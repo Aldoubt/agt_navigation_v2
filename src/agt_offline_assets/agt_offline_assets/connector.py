@@ -25,6 +25,7 @@ class ConnectorPlanningContext:
     semantic_keepouts: tuple[tuple[tuple[float, float], ...], ...] = ()
     field_boundaries: tuple[tuple[tuple[float, float], ...], ...] = ()
     unknown_space_allowed: bool = False
+    footprint_check_resolution_m: float = 0.05
     options: Mapping[str, Any] | None = None
 
 

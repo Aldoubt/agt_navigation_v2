@@ -1,7 +1,7 @@
 # Navigation Semantics Baseline (V25-08)
 
-本文冻结 V25-08 的导航架构和正式语义。它只定义概念、所有权和边界，
-不实现 ROUTE/LOCAL runtime，不新增 ROS Action、Service 或 topic，也不改变
+本文冻结 V25-08 的导航架构和正式语义，并记录当前已实现的 ROUTE runtime
+边界。它不实现 LOCAL runtime，不新增 ROS Action、Service 或 topic，也不改变
 现有 `ExecuteWaypointTask.action`。
 
 ## Navigation Capability
@@ -15,7 +15,7 @@ Mission、Behavior Tree 和前端只访问 project capability Action；它们不
 节点不发布速度或 TF，也不实现规划、定位、感知和控制算法。
 
 当前稳定的 project capability 是 `ExecuteWaypointTask`。WaypointTask 是任务
-输入，Route 是将来的内部 resolved representation；本阶段不公开
+输入，Route 是内部 resolved representation；本阶段不公开
 `ExecuteRouteTask` 或 `ExecuteNavigationTask`。
 
 ## Navigation Mode
@@ -44,7 +44,8 @@ prior semantic/geometric route + continuous robust odometry
 
 全局地图主要用于初始化、路线定义、localization anchor 和稀疏恢复。正常运动
 不要求当前点云持续高频匹配完整旧地图，更不能设计为每个 controller tick
-都用旧 PCD 匹配当前植被。ROUTE 是 V25-09 及以后实现的目标能力。
+都用旧 PCD 匹配当前植被。ROUTE 当前由 READY Route Asset、RouteSegment、冻结
+map->odom 投影和 FollowPath 组成；它仍不新增 public Route Action。
 
 ### LOCAL
 

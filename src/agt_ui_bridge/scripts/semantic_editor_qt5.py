@@ -744,7 +744,7 @@ class SemanticEditorWindow(QMainWindow):
         invalid_check.toggled.connect(self.refresh_scene)
         self._layer_checks["invalid_segments"] = invalid_check
         layout.addWidget(invalid_check)
-        connector_check = QCheckBox("Straight Connectors")
+        connector_check = QCheckBox("Connector Segments")
         connector_check.setChecked(True)
         connector_check.toggled.connect(self.refresh_scene)
         self._layer_checks["connectors"] = connector_check
@@ -803,10 +803,10 @@ class SemanticEditorWindow(QMainWindow):
         # Existing preview-only candidates remain available for compatibility;
         # Map & Route Studio generation uses the registered straight backend.
         self.preview_path_combo.addItem(
-            "Reeds-Shepp（仅历史预览候选，非 Studio backend）", "reeds_shepp"
+            "Coverage Preview Reeds-Shepp（preview only）", "reeds_shepp"
         )
         self.preview_path_combo.addItem(
-            "Dubins（仅历史预览候选，非 Studio backend）", "dubins"
+            "Coverage Preview Dubins（preview only）", "dubins"
         )
         layout.addWidget(self.preview_path_combo)
         buttons = QHBoxLayout()

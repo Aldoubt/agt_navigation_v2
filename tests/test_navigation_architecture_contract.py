@@ -19,15 +19,15 @@ def _flat(text: str) -> str:
     return " ".join(text.split())
 
 
-def test_navigation_modes_are_defined_without_claiming_route_runtime():
+def test_navigation_modes_reflect_current_route_runtime_boundary():
     semantics = _read(SEMANTICS)
     architecture = _read(ARCHITECTURE)
     for mode in ("MAP", "ROUTE", "LOCAL"):
         assert f"### {mode}" in semantics
         assert f"{mode} Navigation" in architecture
-    assert "ROUTE | RESERVED" in architecture
+    assert "ROUTE | SYSTEM-INTEGRATED" in architecture
     assert "LOCAL | RESERVED" in architecture
-    assert "ROUTE 是 V25-09 及以后实现的目标能力" in semantics
+    assert "ROUTE 当前由 READY Route Asset" in semantics
     assert "LOCAL 是预留能力，当前未实现" in semantics
 
 

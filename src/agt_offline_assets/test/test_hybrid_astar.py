@@ -79,3 +79,25 @@ def test_hybrid_astar_unknown_policy_and_impossible_barrier_fail_closed():
     result = create_connector_backend("hybrid_astar").plan(request, barrier)
     assert not result.success
     assert result.failure_reason in {"HYBRID_ASTAR_NO_PATH", "HYBRID_ASTAR_TIMEOUT", "HYBRID_ASTAR_MAX_ITERATIONS"}
+
+
+def test_hybrid_astar_detects_full_footprint_interior_and_threshold_65():
+    data = [0] * (40 * 40)
+    data[21 * 40 + 20] = 65
+    context = replace(
+        _context(),
+        occupancy_grid=GridMap(40, 40, 0.1, -2.0, -2.0, 0.0, tuple(data), "map"),
+        footprint=((-0.2, -0.2), (0.2, -0.2), (0.2, 0.2), (-0.2, 0.2)),
+    )
+    request = ConnectorRequest((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), 0.1, 0.5, True)
+    result = create_connector_backend("hybrid_astar").plan(request, context)
+    assert not result.success
+    assert result.failure_reason == "HYBRID_ASTAR_START_COLLISION"
+
+
+def test_hybrid_astar_invalid_cost_config_fails_closed():
+    context = replace(_context(), options={"angle_bins": 0})
+    request = ConnectorRequest((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), 0.1, 0.5, True)
+    result = create_connector_backend("hybrid_astar").plan(request, context)
+    assert not result.success
+    assert result.failure_reason == "HYBRID_ASTAR_INVALID_CONFIG"

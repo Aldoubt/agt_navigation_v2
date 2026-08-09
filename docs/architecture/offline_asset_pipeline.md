@@ -19,7 +19,11 @@ flowchart TD
   OCC["Global Navigation Occupancy"]
   SEM["Semantic Map"]
   POLICY["Route Policy"]
-  PLAN["Offline Kinematic Route Planner"]
+  LANES["Semantic Lane Sequencer"]
+  PLAN["ConnectorPlannerBackend"]
+  STRAIGHT["Straight"]
+  RS["Reeds-Shepp"]
+  HYBRID["Hybrid A*"]
   TUNE["Non-destructive Route Tuning"]
   FEAS["Vehicle Footprint / Kinematic Feasibility"]
   ROUTE["READY Route Asset"]
@@ -36,11 +40,18 @@ flowchart TD
   CLEAN --> PRIOR
   GROUND --> OCC
   OCC --> SEM
-  SEM --> POLICY
-  OCC --> PLAN
-  POLICY --> PLAN
+  SEM --> LANES
+  POLICY --> LANES
+  LANES --> PLAN
+  PLAN --> STRAIGHT
+  PLAN --> RS
+  PLAN --> HYBRID
+  OCC --> HYBRID
+  SEM --> HYBRID
   PROFILE --> PLAN
-  PLAN --> TUNE
+  STRAIGHT --> TUNE
+  RS --> TUNE
+  HYBRID --> TUNE
   TUNE --> FEAS
   PLAN --> FEAS
   PROFILE --> FEAS

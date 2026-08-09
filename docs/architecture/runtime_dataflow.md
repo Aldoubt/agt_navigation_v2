@@ -8,12 +8,29 @@ Mission 通过 `/agt/missions/execute` 调用项目 waypoint Action；活动地�
 
 ## Current Runtime Baseline / Target Navigation Semantics
 
-当前已经实现并可由本文件后续启动说明验证的是 MAP-oriented Nav2 navigation 和
-P0 BT Mission；BT 运行在唯一 `agt_mission_manager` backend 中，并通过项目
-`ExecuteWaypointTask` capability 执行。V25-08 冻结但尚未实现的目标语义包括
-ROUTE、LOCAL、Local Environment Mapping 和 sparse global correction。它们不是
-当前 launch、readiness 或 runtime 数据流的一部分，详见
+当前已经实现并可由本文件后续启动说明验证的是 MAP-oriented Nav2 navigation、ROUTE
+Route Asset backend 和 P0 BT Mission；BT 运行在唯一 `agt_mission_manager` backend 中，
+并通过项目 `ExecuteWaypointTask` capability 执行。LOCAL 与 Local Environment Mapping
+仍未实现，详见
 [`navigation_semantics.md`](navigation_semantics.md)。
+
+当前 ROUTE runtime chain 为：
+
+```text
+ExecuteWaypointTask
+  -> Navigation Capability / Route Resolver
+  -> READY RouteSegment (map)
+  -> frozen map->odom projection
+  -> RuntimePath (odom)
+  -> Nav2 FollowPath -> controller -> collision monitor/agt_safety -> chassis
+```
+
+Relocalization correction chain 为：
+
+```text
+relocalization evidence -> global_correction_manager
+  -> /agt/localization/status + authoritative map->odom
+```
 
 V25-06 first BT mission uses the following implemented chain behind the same
 public Mission Action; it does not add a second Mission owner:
@@ -208,7 +225,8 @@ ros2 run agt_map_manager map_registry.py \
 导航模式的主要内容来自 [navigation_system.launch.py](../../src/agt_bringup/launch/navigation_system.launch.py:122)：
 
 - 描述、MID360、FAST-LIVO2 adapter 和局部障碍过滤器。
-- `agt_localization/relocalization.launch.py`：读取 `global_map_pcd` 和 processing record，唯一负责 `map -> odom`。
+- `agt_localization/relocalization.launch.py`：启动 evidence relocalizer 与
+  `global_correction_manager`；后者是唯一 authoritative `map -> odom` publisher。
 - Nav2 map server、planner、controller、behavior、BT navigator、waypoint follower、collision monitor 和任务服务。
 - `agt_bringup/localization_navigation_gate.py`：定位无效或状态过期时阻断导航任务。
 - 可选的语义地图服务器、Keepout Filter、覆盖规划和语义编辑器。它们默认关闭。

@@ -265,9 +265,10 @@ class LEG_OPT,CAM,ESDF optional
 
 `agt_mapping_fast_livo2_adapter` 是唯一 `odom -> base_footprint` publisher。authoritative
 `map -> odom` 属于 localization subsystem，任一 runtime profile 只能选择一个 TF publisher。
-当前 baseline 是 `agt_localization` package 内的 `agt_relocalization` node；未来若启用 fusion
-owner，必须先关闭当前 publisher。NDT/ICP、GTSAM、GNSS、loop/place-recognition 都只能提供
-correction evidence/factor/candidate，不得并列竞争 TF。
+当前 `agt_localization` production authority 是 `global_correction_manager`，唯一发布
+authoritative `map → odom`；`agt_relocalization` 只发布 `evidence_status`。NDT/ICP、
+GTSAM、GNSS、loop/place-recognition 都只能提供 correction evidence/factor/candidate，
+不得并列竞争 TF。
 
 ### 2. 四类地图/知识产品不是同一个“地图”
 
@@ -303,9 +304,9 @@ Path 才是 controller 消费的几何轨迹。V25-08 不新增 Route Action 或
 | P0 BT Mission | SYSTEM-INTEGRATED | BT 是 Mission Manager backend，不是第二个 Mission owner |
 | Existing obstacle cloud + Nav2 local costmap | SYSTEM-INTEGRATED | 当前 MAP baseline 已使用 `base_footprint` obstacle cloud 与 `odom` rolling costmap |
 | V25-08 architecture semantics | IMPLEMENTED | 只冻结合同/语义，不增加 runtime ROS interface |
-| ROUTE | RESERVED | V25-09 目标；当前没有 route runtime |
+| ROUTE | SYSTEM-INTEGRATED | READY Route Resolver -> frozen `RuntimePath(odom)` -> FollowPath；vehicle acceptance remains separate |
 | LOCAL | RESERVED | 当前没有 local-target runtime |
-| Sparse Global Correction | RESERVED | V25-10 目标；correction producer 不拥有 TF |
+| Sparse Global Correction | IMPLEMENTED | GlobalCorrectionManager sole `map -> odom` authority with canonical correction generation |
 | Local Environment Mapping | RESERVED | V25-11 目标；canonical `/agt/map/local_occupancy` 当前无 publisher |
 | ESDF | OPTIONAL | 仅在 Local Occupancy 之后按需派生 |
 
@@ -327,7 +328,7 @@ seasonal maps 保持 P2 research track。
 
 - `agt_mapping_fast_livo2_adapter` uniquely publishes `odom -> base_footprint`.
 - localization subsystem uniquely owns authoritative `map -> odom`; current selected publisher is
-  `agt_relocalization` with `publish_tf=true`.
+  `global_correction_manager`; relocalization evidence never publishes production `map -> odom`.
 - `robot_state_publisher` owns the robot/sensor description chain below `base_footprint`.
 - `agt_mission_manager` remains the single project Mission Action/state owner.
 - BT nodes do not publish velocity or TF and do not call Nav2 native Actions directly.

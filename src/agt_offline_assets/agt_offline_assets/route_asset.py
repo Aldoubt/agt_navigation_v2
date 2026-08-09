@@ -381,6 +381,7 @@ def _connector_context(policy, map_yaml_path, semantic_map, platform):
         semantic_keepouts=tuple(keepouts),
         field_boundaries=tuple(boundaries),
         unknown_space_allowed=bool(hybrid.get("allow_unknown", policy.unknown_space_allowed)),
+        footprint_check_resolution_m=policy.footprint_check_resolution_m,
         options=hybrid,
     )
 

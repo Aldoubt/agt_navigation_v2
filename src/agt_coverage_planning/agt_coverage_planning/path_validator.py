@@ -260,6 +260,14 @@ def validate_path(
     )
 
 
+def check_footprint_pose(grid, footprint, pose, config=None) -> bool:
+    """Shared single-pose footprint collision semantics for offline planners."""
+    config = config or ValidatorConfig()
+    canonical_footprint = _validate_footprint(footprint)
+    check = _CollisionIndex(grid, config).check(pose, canonical_footprint)
+    return not check.collision and not check.unknown_collision and not check.out_of_bounds
+
+
 def interpolate_path(poses, linear_step, angular_step, maximum_sample_count=200000):
     if linear_step <= 0.0 or angular_step <= 0.0:
         raise PathValidationError(
