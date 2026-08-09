@@ -21,7 +21,7 @@ from agt_ui_bridge.semantic_io import load_semantic_task
 from .contracts import AssetContractError, RoutePolicy, load_yaml_mapping, sha256_file
 from .map_validation import validate_map_workspace
 from .workspace import compute_map_content_sha256
-from .connector import ConnectorRequest, create_connector_backend
+from .connector import ConnectorRequest, ConnectorSample, create_connector_backend
 
 
 _ROUTE_FIELDS = (
@@ -90,6 +90,7 @@ def derive_route_candidate(
     samples: list[RouteSample] = []
     segment_number = 0
     previous_end = None
+    previous_end_yaw = None
     for index, (_, feature_id, points) in enumerate(prepared):
         if index % 2 == 1:
             points = list(reversed(points))
@@ -97,8 +98,8 @@ def derive_route_candidate(
             connector_id = f"connector_{segment_number:03d}"
             connector_result = connector_backend.plan(
                 ConnectorRequest(
-                    (previous_end[0], previous_end[1], 0.0),
-                    (points[0][0], points[0][1], 0.0),
+                    (previous_end[0], previous_end[1], previous_end_yaw),
+                    (points[0][0], points[0][1], _polyline_tangent_yaw(points, at_end=False)),
                     policy.path_resolution_m,
                     float(platform.get("min_turning_radius", 0.0)),
                     policy.allow_reverse,
@@ -106,16 +107,13 @@ def derive_route_candidate(
             )
             if not connector_result.success:
                 raise AssetContractError("connector_planning_failed", connector_result.failure_reason)
-            samples.extend(
-                _samples_from_points(
-                    [list(point) for point in connector_result.samples],
-                    connector_id,
-                    "F",
-                    speed,
-                    "<connector>",
-                    start_seq=len(samples),
-                )
-            )
+            samples.extend(_samples_from_connector(
+                connector_result.samples,
+                connector_id,
+                "<connector>",
+                speed,
+                start_seq=len(samples),
+            ))
             segment_number += 1
         segment_id = f"lane_{segment_number:03d}"
         route_points = _resample_polyline(points, policy.path_resolution_m)
@@ -131,6 +129,7 @@ def derive_route_candidate(
         )
         segment_number += 1
         previous_end = points[-1]
+        previous_end_yaw = _polyline_tangent_yaw(points, at_end=True)
 
     if len(samples) < 2:
         raise AssetContractError("route_too_short", "derived route has fewer than two samples")
@@ -448,6 +447,37 @@ def _samples_from_points(
             semantic_ref=semantic_ref,
         ))
     return output
+
+
+def _samples_from_connector(
+    samples: Iterable[ConnectorSample],
+    segment_id: str,
+    semantic_ref: str,
+    speed: float,
+    *,
+    start_seq: int,
+) -> list[RouteSample]:
+    """Convert connector output without recomputing its heading or direction."""
+    return [
+        RouteSample(
+            seq=start_seq + index,
+            segment_id=segment_id,
+            x=float(sample.x),
+            y=float(sample.y),
+            yaw=float(sample.yaw),
+            direction=str(sample.direction),
+            v_ref=speed,
+            semantic_ref=semantic_ref,
+        )
+        for index, sample in enumerate(samples)
+    ]
+
+
+def _polyline_tangent_yaw(points, *, at_end: bool) -> float:
+    if len(points) < 2:
+        raise AssetContractError("route_lane_too_short", "lane tangent requires at least two points")
+    first, second = (points[-2], points[-1]) if at_end else (points[0], points[1])
+    return math.atan2(second[1] - first[1], second[0] - first[0])
 
 
 def _recompute_curvature(samples: list[RouteSample]) -> list[RouteSample]:

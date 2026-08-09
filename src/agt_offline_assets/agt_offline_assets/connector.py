@@ -17,8 +17,16 @@ class ConnectorRequest:
 
 
 @dataclass(frozen=True)
+class ConnectorSample:
+    x: float
+    y: float
+    yaw: float
+    direction: str
+
+
+@dataclass(frozen=True)
 class ConnectorResult:
-    samples: tuple[tuple[float, float], ...]
+    samples: tuple[ConnectorSample, ...]
     backend: str
     success: bool
     failure_reason: str = ""
@@ -41,12 +49,19 @@ class StraightConnectorBackend(ConnectorPlannerBackend):
         goal = request.goal_pose[:2]
         distance = math.dist(start, goal)
         if distance <= 1.0e-9:
-            return ConnectorResult((tuple(start),), self.name, True)
+            return ConnectorResult(
+                (ConnectorSample(start[0], start[1], request.start_pose[2], "F"),),
+                self.name,
+                True,
+            )
         count = max(1, int(math.ceil(distance / request.path_resolution_m)))
+        yaw = math.atan2(goal[1] - start[1], goal[0] - start[0])
         samples = tuple(
-            (
+            ConnectorSample(
                 start[0] + (goal[0] - start[0]) * index / count,
                 start[1] + (goal[1] - start[1]) * index / count,
+                yaw,
+                "F",
             )
             for index in range(count + 1)
         )
