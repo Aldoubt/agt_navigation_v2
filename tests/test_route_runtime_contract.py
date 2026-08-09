@@ -63,8 +63,11 @@ def test_route_alignment_uses_canonical_correction_generation_at_boundaries():
     assert "update_global_alignment(self._snapshot_provider())" in backend
     assert integration.is_file()
     content = _read(integration)
-    assert "test_two_segment_route_consumes_correction_only_at_boundary" in content
-    assert "test_segments_without_new_correction_reuse_generation" in content
+    assert "LocalizationStatus" in content
+    assert "NavigationCapabilityServer" in content
+    assert "test_localization_generation_reprojects_only_next_route_segment" in content
+    assert "alignment_generation == 7" in content
+    assert "alignment_generation == 8" in content
 
 
 def test_route_backend_uses_rclpy_future_not_asyncio_loop():
@@ -203,7 +206,7 @@ def test_full_route_system_smoke_uses_formal_action_assets_and_real_controller_o
     assert 'executable="navigation_capability_server.py"' in launch
     assert '"require_map": True' in launch
     assert '"require_safety_ready": True' in launch
-    assert '"require_localization_valid": False' in launch
+    assert '"require_localization_valid": True' in launch
     assert '"require_task_readiness": False' in launch
     assert "planner_server" not in launch
     assert "bt_navigator" not in launch
@@ -217,6 +220,10 @@ def test_full_route_system_smoke_uses_formal_action_assets_and_real_controller_o
         "platform_profile_sha256",
         "/agt/map/global_occupancy",
         "/agt/maps/active",
+        "/agt/localization/status",
+        "LocalizationStatus",
+        "correction_generation = 1",
+        "SOFTWARE_ONLY",
     ):
         assert token in fixture
 
@@ -246,6 +253,7 @@ def test_route_runtime_package_tests_are_registered():
         "test_route_task_binding",
         "test_navigation_capability_server",
         "test_navigation_capability_runtime_gates",
+        "test_v25_10_route_correction_generation",
     ):
         assert target in cmake
 
@@ -255,5 +263,6 @@ def test_route_runtime_package_tests_are_registered():
         "test/test_route_task_binding.py",
         "test/test_navigation_capability_server.py",
         "test/test_navigation_capability_runtime_gates.py",
+        "test/test_v25_10_route_correction_generation.py",
     ):
         assert (NAVIGATION / relative).is_file()
