@@ -194,7 +194,7 @@ def test_reeds_shepp_route_manifest_and_cusp_segments(tmp_path):
     _write_policy(policy, connector_backend="reeds_shepp")
     reeds_profile = tmp_path / "bunker_reeds_profile.yaml"
     profile = yaml.safe_load(PLATFORM.read_text(encoding="utf-8"))
-    profile["platform"]["geometry"]["min_turning_radius"] = 1.0
+    profile["platform"]["geometry"]["min_turning_radius"] = 0.25
     reeds_profile.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
     route_dir = create_route_candidate_asset(
         map_manifest_path=workspace.manifest_path,
@@ -207,11 +207,90 @@ def test_reeds_shepp_route_manifest_and_cusp_segments(tmp_path):
     )
     manifest = yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))
     assert manifest["planner"]["connector_backend"] == "reeds_shepp"
-    assert manifest["planner"]["connector_parameters"]["minimum_turning_radius_m"] == 1.0
+    assert manifest["planner"]["connector_parameters"]["minimum_turning_radius_m"] == 0.25
     samples = load_route_csv(route_dir / "route.csv")
     for first, second in zip(samples, samples[1:]):
         if first.segment_id == second.segment_id:
             assert first.direction == second.direction
+
+
+def test_reeds_shepp_route_validate_asset_draft_validated(tmp_path):
+    workspace, _, _ = _prepare_ready_workspace(tmp_path)
+    clone = clone_map_revision(
+        workspace.manifest_path,
+        target_map_version_id="map_20260808_120005_1234abcd",
+    )
+    semantic_path = clone.root / "semantic" / "semantic_map.geojson"
+    document = json.loads(semantic_path.read_text(encoding="utf-8"))
+    document["features"] = [
+        feature for feature in document["features"]
+        if feature.get("properties", {}).get("id") not in {"row_02", "row_03"}
+    ]
+    semantic_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    refresh_map_manifest(clone.manifest_path)
+    policy = tmp_path / "reeds_single_lane_policy.yaml"
+    _write_policy(policy, connector_backend="reeds_shepp")
+    reeds_profile = tmp_path / "bunker_reeds_profile.yaml"
+    profile = yaml.safe_load(PLATFORM.read_text(encoding="utf-8"))
+    profile["platform"]["geometry"]["min_turning_radius"] = 0.25
+    reeds_profile.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+    route_dir = create_route_candidate_asset(
+        map_manifest_path=clone.manifest_path,
+        semantic_path=semantic_path,
+        coverage_path=clone.root / "semantic" / "coverage.yaml",
+        policy_path=policy,
+        platform_profile_path=reeds_profile,
+        route_id="reeds_single_lane",
+        revision=1,
+    )
+    result = validate_route_asset(
+        route_dir,
+        map_manifest_path=clone.manifest_path,
+        platform_profile_path=reeds_profile,
+        maximum_preview_footprints=20,
+    )
+    assert result.passed, result.report
+    assert yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))["status"] == "DRAFT_VALIDATED"
+
+
+def test_reeds_shepp_success_can_still_fail_existing_keepout_feasibility(tmp_path):
+    workspace, _, _ = _prepare_ready_workspace(tmp_path)
+    clone = clone_map_revision(
+        workspace.manifest_path,
+        target_map_version_id="map_20260808_120004_1234abcd",
+    )
+    semantic_path = clone.root / "semantic" / "semantic_map.geojson"
+    document = json.loads(semantic_path.read_text(encoding="utf-8"))
+    document["features"].append({
+        "type": "Feature",
+        "geometry": {"type": "Polygon", "coordinates": [[[6.5, 1.0], [7.5, 1.0], [7.5, 4.5], [6.5, 4.5], [6.5, 1.0]]]},
+        "properties": {"id": "keepout_connector", "feature_type": "exclusion_zone", "name": "connector keepout", "enabled": True, "frame_id": "map"},
+    })
+    semantic_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
+    refresh_map_manifest(clone.manifest_path)
+    policy = tmp_path / "reeds_keepout_policy.yaml"
+    _write_policy(policy, connector_backend="reeds_shepp")
+    reeds_profile = tmp_path / "bunker_reeds_profile.yaml"
+    profile = yaml.safe_load(PLATFORM.read_text(encoding="utf-8"))
+    profile["platform"]["geometry"]["min_turning_radius"] = 1.0
+    reeds_profile.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+    route_dir = create_route_candidate_asset(
+        map_manifest_path=clone.manifest_path,
+        semantic_path=semantic_path,
+        coverage_path=clone.root / "semantic" / "coverage.yaml",
+        policy_path=policy,
+        platform_profile_path=reeds_profile,
+        route_id="reeds_keepout_route",
+        revision=1,
+    )
+    result = validate_route_asset(
+        route_dir,
+        map_manifest_path=clone.manifest_path,
+        platform_profile_path=reeds_profile,
+        maximum_preview_footprints=20,
+    )
+    assert result.report["status"] == "FAIL"
+    assert "semantic_footprint_violation" in result.report["errors"]
 
 
 def _prepare_ready_workspace(tmp_path):

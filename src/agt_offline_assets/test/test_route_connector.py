@@ -7,6 +7,7 @@ from agt_offline_assets import (
     create_connector_backend,
 )
 from agt_offline_assets.route_asset import _samples_from_connector
+from agt_offline_assets.reeds_shepp import solve_reeds_shepp, sample_reeds_shepp
 
 
 def _reeds(start, goal, *, allow_reverse=True, radius=1.0, resolution=0.1):
@@ -40,6 +41,37 @@ def test_reeds_shepp_endpoint_and_sampling_contract():
     assert abs(result.samples[-1].yaw - goal[2]) <= 1.0e-6
     for first, second in zip(result.samples, result.samples[1:]):
         assert ((second.x - first.x) ** 2 + (second.y - first.y) ** 2) ** 0.5 <= 0.05 + 1.0e-9
+
+
+def test_reeds_shepp_raw_endpoint_residual_is_validated(monkeypatch):
+    import agt_offline_assets.reeds_shepp as module
+
+    monkeypatch.setattr(
+        module,
+        "sample_reeds_shepp",
+        lambda *_args: [ConnectorSample(0.0, 0.0, 0.0, "F"), ConnectorSample(2.0, 0.0, 0.0, "F")],
+    )
+    result = _reeds((0.0, 0.0, 0.0), (1.0, 0.0, 0.0))
+    assert not result.success
+    assert result.failure_reason == "REEDS_SHEPP_ENDPOINT_RESIDUAL"
+
+
+def test_reeds_shepp_curvature_bound_and_solver_determinism():
+    request = ConnectorRequest((0.0, 0.0, 0.0), (0.0, 1.0, 0.0), 0.05, 0.5, True)
+    first, first_error = solve_reeds_shepp(request)
+    second, second_error = solve_reeds_shepp(request)
+    assert first_error == second_error == ""
+    assert first == second
+    assert all(
+        primitive.kind == "S" or abs(1.0 / request.min_turning_radius_m) <= 1.0 / request.min_turning_radius_m + 1.0e-12
+        for primitive in first.primitives
+    )
+
+
+def test_reeds_shepp_non_finite_input_fails_closed():
+    result = _reeds((float("nan"), 0.0, 0.0), (1.0, 0.0, 0.0))
+    assert not result.success
+    assert result.failure_reason == "REEDS_SHEPP_NON_FINITE_POSE"
 
 
 def test_reeds_shepp_forward_only_and_invalid_radius_fail_closed():

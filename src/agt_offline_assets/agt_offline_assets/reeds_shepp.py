@@ -267,6 +267,13 @@ def sample_reeds_shepp(path: ReedsSheppPath, start_pose, turning_radius_m, resol
     return output
 
 
+def _pose_residual(sample: ConnectorSample, pose) -> tuple[float, float]:
+    return (
+        math.hypot(sample.x - pose[0], sample.y - pose[1]),
+        abs(normalize_angle(sample.yaw - pose[2])),
+    )
+
+
 def solve_reeds_shepp(request: ConnectorRequest) -> tuple[ReedsSheppPath | None, str]:
     rho = float(request.min_turning_radius_m)
     if not math.isfinite(rho) or rho <= 0.0:
@@ -308,6 +315,13 @@ class ReedsSheppConnectorBackend(ConnectorPlannerBackend):
             )
             if not samples:
                 return ConnectorResult((), self.name, False, "REEDS_SHEPP_SAMPLING_FAILED")
+            position_error, yaw_error = _pose_residual(samples[0], request.start_pose)
+            goal_position_error, goal_yaw_error = _pose_residual(samples[-1], request.goal_pose)
+            if max(position_error, yaw_error, goal_position_error, goal_yaw_error) > 1.0e-6:
+                return ConnectorResult(
+                    (), self.name, False,
+                    "REEDS_SHEPP_ENDPOINT_RESIDUAL",
+                )
             samples[0] = ConnectorSample(*request.start_pose, samples[0].direction)
             samples[-1] = ConnectorSample(*request.goal_pose, samples[-1].direction)
             return ConnectorResult(tuple(samples), self.name, True)
