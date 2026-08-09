@@ -219,6 +219,8 @@ public:
     map_hash_ = declare_parameter<std::string>("map_hash", "");
     publish_tf_ = declare_parameter<bool>("publish_tf", true);
     publish_aligned_cloud_ = declare_parameter<bool>("publish_aligned_cloud", true);
+    publish_initial_guess_cloud_ = declare_parameter<bool>("publish_initial_guess_cloud", false);
+    publish_aligned_candidate_cloud_ = declare_parameter<bool>("publish_aligned_candidate_cloud", false);
     candidate_max_ = declare_parameter<int>("candidate_max", 128);
     max_expanded_candidates_ = declare_parameter<int>("max_expanded_candidates", 4096);
     candidate_position_dedup_tolerance_ =
@@ -368,6 +370,10 @@ public:
     aligned_cloud_pub_ =
       create_publisher<sensor_msgs::msg::PointCloud2>(
       "/agt/localization/aligned_points", rclcpp::SensorDataQoS());
+    initial_guess_cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+      "/agt/localization/initial_guess", rclcpp::SensorDataQoS());
+    aligned_candidate_cloud_pub_ = create_publisher<sensor_msgs::msg::PointCloud2>(
+      "/agt/localization/aligned_candidate", rclcpp::SensorDataQoS());
     tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);
     tf_timer_ = create_wall_timer(
       std::chrono::milliseconds(50), std::bind(&RelocalizationNode::publishLatestTf, this));
@@ -1066,6 +1072,21 @@ private:
         candidateToPose(candidate) * base_from_tracking;
       request.request_time_sec = cloud_stamp.seconds();
       request.enable_debug_outputs = publish_debug;
+      if (goal_handle) {
+        RCLCPP_INFO(
+          get_logger(),
+          "Relocalization candidate BEGIN index=%zu total=%zu candidate_id=%s candidate_source=%s",
+          index + 1U, candidates.size(), candidate.id.c_str(), candidate.source.c_str());
+      }
+      if (publish_debug && publish_initial_guess_cloud_) {
+        CloudT initial_guess_cloud;
+        pcl::transformPointCloud(*scan_cloud, initial_guess_cloud, request.initial_guess);
+        sensor_msgs::msg::PointCloud2 initial_guess_msg;
+        pcl::toROSMsg(initial_guess_cloud, initial_guess_msg);
+        initial_guess_msg.header.stamp = cloud_stamp;
+        initial_guess_msg.header.frame_id = global_frame_;
+        initial_guess_cloud_pub_->publish(initial_guess_msg);
+      }
       RCLCPP_DEBUG(
         get_logger(),
         "Relocalization candidate source=%s tracking_validation=%s initial_guess_source=%s",
@@ -1074,6 +1095,13 @@ private:
       attempt.result = relocalizer_.relocalize(request);
       attempt.debug = relocalizer_.latestDebugInfo();
       attempt.map_to_base = attempt.result.estimated_pose * tracking_from_base;
+      if (publish_debug && publish_aligned_candidate_cloud_ && attempt.result.aligned_cloud) {
+        sensor_msgs::msg::PointCloud2 aligned_candidate_msg;
+        pcl::toROSMsg(*attempt.result.aligned_cloud, aligned_candidate_msg);
+        aligned_candidate_msg.header.stamp = cloud_stamp;
+        aligned_candidate_msg.header.frame_id = global_frame_;
+        aligned_candidate_cloud_pub_->publish(aligned_candidate_msg);
+      }
 
       agt_localization::QualityObservation observation;
       observation.backend_success =
@@ -1109,6 +1137,20 @@ private:
         attempt.quality.accepted = false;
         attempt.quality.error_code = coreErrorCode(attempt.result);
         attempt.quality.message = attempt.result.status_message;
+      }
+
+      if (goal_handle) {
+        RCLCPP_INFO(
+          get_logger(),
+          "Relocalization candidate END index=%zu total=%zu candidate_id=%s candidate_source=%s "
+          "runtime_ms=%.3f fitness=%.6f has_converged=%s status_code=%s quality_accepted=%s "
+          "translation_innovation=%.3f yaw_innovation=%.3f",
+          index + 1U, candidates.size(), candidate.id.c_str(), candidate.source.c_str(),
+          attempt.debug.backend_runtime_ms, attempt.result.fitness_score,
+          attempt.result.has_converged ? "true" : "false",
+          relocalization_core::toString(attempt.result.status_code).c_str(),
+          attempt.quality.accepted ? "true" : "false",
+          attempt.quality.translation_innovation, attempt.quality.yaw_innovation);
       }
 
       (void)makeRunStatus(
@@ -1219,6 +1261,9 @@ private:
       aligned_msg.header.stamp = cloud_stamp;
       aligned_msg.header.frame_id = global_frame_;
       aligned_cloud_pub_->publish(aligned_msg);
+      if (publish_aligned_candidate_cloud_) {
+        aligned_candidate_cloud_pub_->publish(aligned_msg);
+      }
     }
 
     const auto final_pose = poseStampedFromEigen(best.map_to_base, cloud_stamp);
@@ -1635,6 +1680,8 @@ private:
   std::string map_hash_;
   bool publish_tf_{true};
   bool publish_aligned_cloud_{true};
+  bool publish_initial_guess_cloud_{false};
+  bool publish_aligned_candidate_cloud_{false};
   bool manual_initialpose_enabled_{true};
   int candidate_max_{128};
   int max_expanded_candidates_{4096};
@@ -1686,6 +1733,8 @@ private:
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr global_pose_pub_;
   rclcpp::Publisher<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr coarse_pose_pub_;
   rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr aligned_cloud_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr initial_guess_cloud_pub_;
+  rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr aligned_candidate_cloud_pub_;
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr cloud_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr initialpose_sub_;
   rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr

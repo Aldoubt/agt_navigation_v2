@@ -51,6 +51,25 @@ def test_route_runtime_does_not_add_public_action_or_native_global_planner_depen
     assert "controller_id_reverse" in adapter
 
 
+def test_route_alignment_uses_canonical_correction_generation_at_boundaries():
+    capability = _read(NAVIGATION / "scripts" / "navigation_capability_server.py")
+    backend = _read(NAVIGATION / "agt_navigation" / "route_backend.py")
+    integration = NAVIGATION / "test" / "test_v25_10_route_correction_generation.py"
+
+    assert "_localization_correction_generation" in capability
+    assert "_route_snapshot_generation" not in capability
+    assert "ROUTE_ALIGNMENT_GENERATION_UNAVAILABLE" in capability
+    assert "correction_generation" in capability
+    assert "update_global_alignment(self._snapshot_provider())" in backend
+    assert integration.is_file()
+    content = _read(integration)
+    assert "LocalizationStatus" in content
+    assert "NavigationCapabilityServer" in content
+    assert "test_localization_generation_reprojects_only_next_route_segment" in content
+    assert "alignment_generation == 7" in content
+    assert "alignment_generation == 8" in content
+
+
 def test_route_backend_uses_rclpy_future_not_asyncio_loop():
     backend = _read(NAVIGATION / "agt_navigation" / "route_backend.py")
 
@@ -115,6 +134,7 @@ def test_runtime_gate_action_tests_are_registered():
         "LOCALIZATION_NOT_READY",
         "TASK_READINESS_NOT_READY",
         "child_canceled",
+        "test_route_generation_zero_fails_closed_and_rejected_status_cancels",
     ):
         assert token in content
 
@@ -186,7 +206,7 @@ def test_full_route_system_smoke_uses_formal_action_assets_and_real_controller_o
     assert 'executable="navigation_capability_server.py"' in launch
     assert '"require_map": True' in launch
     assert '"require_safety_ready": True' in launch
-    assert '"require_localization_valid": False' in launch
+    assert '"require_localization_valid": True' in launch
     assert '"require_task_readiness": False' in launch
     assert "planner_server" not in launch
     assert "bt_navigator" not in launch
@@ -200,6 +220,10 @@ def test_full_route_system_smoke_uses_formal_action_assets_and_real_controller_o
         "platform_profile_sha256",
         "/agt/map/global_occupancy",
         "/agt/maps/active",
+        "/agt/localization/status",
+        "LocalizationStatus",
+        "correction_generation = 1",
+        "SOFTWARE_ONLY",
     ):
         assert token in fixture
 
@@ -229,6 +253,7 @@ def test_route_runtime_package_tests_are_registered():
         "test_route_task_binding",
         "test_navigation_capability_server",
         "test_navigation_capability_runtime_gates",
+        "test_v25_10_route_correction_generation",
     ):
         assert target in cmake
 
@@ -238,5 +263,6 @@ def test_route_runtime_package_tests_are_registered():
         "test/test_route_task_binding.py",
         "test/test_navigation_capability_server.py",
         "test/test_navigation_capability_runtime_gates.py",
+        "test/test_v25_10_route_correction_generation.py",
     ):
         assert (NAVIGATION / relative).is_file()

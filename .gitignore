@@ -21,6 +21,12 @@ runtime/evaluation/*.pids
 runtime/evaluation/*.time
 /myeasylog.log
 
+# Generated V25-10 real-bag validation reports, logs, and result bags.
+runtime/validation/
+
+# Local localization PCDs are large; retain their YAML lineage records.
+runtime/localization_validation/**/*.pcd
+
 # Local map-production assets (keep small records, matrices, and READMEs trackable)
 runtime/*.pcd
 runtime/*.pgm
@@ -45,3 +51,5 @@ runtime/config/
 
 # OS
 .DS_Store
+runtime/localization_validation/handheld_20260719/candidates.yaml
+runtime/localization_validation/handheld_20260719/processing_record.yaml
