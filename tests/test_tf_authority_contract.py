@@ -51,7 +51,11 @@ def test_correction_generation_is_canonical_and_rejects_preserve_last_value():
     assert "uint64 correction_generation" in message
     assert "canonical.correction_generation = decision.generation" in manager
     assert "rejected.correction_generation = core_->generation()" in manager
-    assert "evidence.correction_generation = 0U" in manager
+    # Canonical health/degraded status preserves the last accepted map->odom
+    # revision. A non-accepted localization update does not erase correction
+    # history; readiness is still controlled by state/pose_valid/accepted flags.
+    assert "canonical.correction_generation = core_->generation()" in manager
+    assert "evidence.correction_generation = 0U" not in manager
     assert "decision.map_from_odom.cast<float>()" in manager
     assert "canonical_status_pub_->publish" in manager
     assert "localization_accepted = false" in manager
