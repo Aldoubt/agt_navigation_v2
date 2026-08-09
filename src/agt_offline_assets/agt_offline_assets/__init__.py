@@ -12,6 +12,7 @@ from .workspace import (
     MapWorkspace,
     compute_map_content_sha256,
     create_map_workspace,
+    clone_map_revision,
     refresh_map_manifest,
 )
 from .map_validation import MapComplianceResult, validate_map_workspace
@@ -28,6 +29,8 @@ from .alignment import AlignmentResult, identity_alignment, solve_site_control_p
 from .preview import write_route_preview
 from .tuning import apply_route_tuning
 from .cleaning import append_cleaning_operation
+from .map_edit import append_map_edit_operation
+from .connector import ConnectorRequest, ConnectorResult, ConnectorPlannerBackend, create_connector_backend
 
 __all__ = [
     "AssetContractError",
@@ -39,6 +42,7 @@ __all__ = [
     "MapWorkspace",
     "compute_map_content_sha256",
     "create_map_workspace",
+    "clone_map_revision",
     "refresh_map_manifest",
     "MapComplianceResult",
     "validate_map_workspace",
@@ -58,4 +62,9 @@ __all__ = [
     "write_route_preview",
     "apply_route_tuning",
     "append_cleaning_operation",
+    "append_map_edit_operation",
+    "ConnectorRequest",
+    "ConnectorResult",
+    "ConnectorPlannerBackend",
+    "create_connector_backend",
 ]

@@ -21,6 +21,7 @@ from agt_ui_bridge.semantic_io import load_semantic_task
 from .contracts import AssetContractError, RoutePolicy, load_yaml_mapping, sha256_file
 from .map_validation import validate_map_workspace
 from .workspace import compute_map_content_sha256
+from .connector import ConnectorRequest, create_connector_backend
 
 
 _ROUTE_FIELDS = (
@@ -81,44 +82,11 @@ def derive_route_candidate(
         raise AssetContractError("route_speed_invalid", "default speed must be positive")
 
     semantic_map = task.semantic_map
-    if policy.row_interpretation == "crop_centerlines":
-        try:
-            route_map = derive_inter_row_aisles(semantic_map)
-        except CoveragePreviewError as exc:
-            raise AssetContractError("route_aisle_derivation_failed", str(exc)) from exc
-        features = [
-            feature for feature in route_map.features
-            if feature.enabled and feature.feature_type == "row_centerline"
-        ]
-        if not policy.use_access_lanes:
-            features = [feature for feature in features if feature.id.startswith("preview_aisle_")]
-    else:
-        features = [
-            feature for feature in semantic_map.features
-            if feature.enabled and feature.feature_type == "row_centerline"
-        ]
-        if policy.use_access_lanes:
-            features += explicit_access_lane_swaths(semantic_map)
-
-    if not features:
-        raise AssetContractError("route_no_lanes", "no enabled row/access lane is available")
-
     direction = _work_direction(semantic_map)
-    normal = (-direction[1], direction[0])
-    prepared = []
-    for feature in features:
-        points = [[float(value) for value in point[:2]] for point in feature.coordinates]
-        if len(points) < 2:
-            raise AssetContractError("route_lane_too_short", f"{feature.id} needs at least two points")
-        if _dot((points[-1][0] - points[0][0], points[-1][1] - points[0][1]), direction) < 0.0:
-            points.reverse()
-        centroid = (
-            sum(point[0] for point in points) / len(points),
-            sum(point[1] for point in points) / len(points),
-        )
-        prepared.append((_dot(centroid, normal), str(feature.id), points))
-    prepared.sort(key=lambda item: (-item[0], item[1]))
+    features = _extract_lane_features(semantic_map, policy)
+    prepared = _order_lanes(features, direction)
 
+    connector_backend = create_connector_backend(policy.connector_backend)
     samples: list[RouteSample] = []
     segment_number = 0
     previous_end = None
@@ -127,12 +95,20 @@ def derive_route_candidate(
             points = list(reversed(points))
         if previous_end is not None and math.dist(previous_end, points[0]) > 1e-6:
             connector_id = f"connector_{segment_number:03d}"
-            connector = _resample_polyline(
-                [previous_end, points[0]], policy.path_resolution_m
+            connector_result = connector_backend.plan(
+                ConnectorRequest(
+                    (previous_end[0], previous_end[1], 0.0),
+                    (points[0][0], points[0][1], 0.0),
+                    policy.path_resolution_m,
+                    float(platform.get("min_turning_radius", 0.0)),
+                    policy.allow_reverse,
+                )
             )
+            if not connector_result.success:
+                raise AssetContractError("connector_planning_failed", connector_result.failure_reason)
             samples.extend(
                 _samples_from_points(
-                    connector,
+                    [list(point) for point in connector_result.samples],
                     connector_id,
                     "F",
                     speed,
@@ -172,13 +148,13 @@ def create_route_candidate_asset(
     coverage_path: str | Path | None = None,
     default_speed_mps: float = 0.3,
 ) -> Path:
-    """Create a DRAFT Route Asset under the bound compliant READY map version."""
+    """Create a DRAFT Route Asset under a compliant DRAFT or READY map revision."""
     map_manifest_path = Path(map_manifest_path).expanduser().resolve()
     compliance = validate_map_workspace(map_manifest_path)
-    if not compliance.valid or compliance.state != "READY":
+    if not compliance.valid or compliance.state not in {"DRAFT", "READY"}:
         raise AssetContractError(
             "route_map_not_compliant",
-            "Route Asset requires a currently compliant READY map: " + ",".join(compliance.errors),
+            "Route Asset requires a currently compliant DRAFT or READY map: " + ",".join(compliance.errors),
         )
     map_manifest = load_yaml_mapping(map_manifest_path)
     map_content_sha256 = str(map_manifest.get("map_content_sha256", ""))
@@ -199,6 +175,7 @@ def create_route_candidate_asset(
     )
     policy_path = Path(policy_path).expanduser().resolve()
     platform_path = Path(platform_profile_path).expanduser().resolve()
+    policy = RoutePolicy.from_file(policy_path)
     platform = load_platform_profile(platform_path)
     actual_platform_hash = sha256_file(platform_path)
 
@@ -262,8 +239,8 @@ def create_route_candidate_asset(
         },
         "route_csv_sha256": sha256_file(route_csv),
         "planner": {
-            "backend": "semantic_boustrophedon_mvp",
-            "connector_backend": "straight_candidate_only",
+            "backend": "semantic_boustrophedon",
+            "connector_backend": policy.connector_backend,
         },
         "status": "DRAFT",
     }
@@ -381,6 +358,50 @@ def _work_direction(semantic_map) -> tuple[float, float]:
     if length <= 1e-9:
         raise AssetContractError("route_work_direction_invalid", "work_direction length is zero")
     return dx / length, dy / length
+
+
+def _extract_lane_features(semantic_map, policy):
+    """Extract semantic lanes; ordering and connector planning stay separate."""
+    if policy.row_interpretation == "crop_centerlines":
+        try:
+            route_map = derive_inter_row_aisles(semantic_map)
+        except CoveragePreviewError as exc:
+            raise AssetContractError("route_aisle_derivation_failed", str(exc)) from exc
+        features = [
+            feature for feature in route_map.features
+            if feature.enabled and feature.feature_type == "row_centerline"
+        ]
+        if not policy.use_access_lanes:
+            features = [feature for feature in features if feature.id.startswith("preview_aisle_")]
+    else:
+        features = [
+            feature for feature in semantic_map.features
+            if feature.enabled and feature.feature_type == "row_centerline"
+        ]
+        if policy.use_access_lanes:
+            features += explicit_access_lane_swaths(semantic_map)
+    if not features:
+        raise AssetContractError("route_no_lanes", "no enabled row/access lane is available")
+    return features
+
+
+def _order_lanes(features, direction):
+    """Apply deterministic boustrophedon ordering without planning connectors."""
+    normal = (-direction[1], direction[0])
+    prepared = []
+    for feature in features:
+        points = [[float(value) for value in point[:2]] for point in feature.coordinates]
+        if len(points) < 2:
+            raise AssetContractError("route_lane_too_short", f"{feature.id} needs at least two points")
+        if _dot((points[-1][0] - points[0][0], points[-1][1] - points[0][1]), direction) < 0.0:
+            points.reverse()
+        centroid = (
+            sum(point[0] for point in points) / len(points),
+            sum(point[1] for point in points) / len(points),
+        )
+        prepared.append((_dot(centroid, normal), str(feature.id), points))
+    prepared.sort(key=lambda item: (-item[0], item[1]))
+    return prepared
 
 
 def _resample_polyline(points: list[list[float]], step: float) -> list[list[float]]:

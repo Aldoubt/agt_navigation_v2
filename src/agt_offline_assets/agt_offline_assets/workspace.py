@@ -224,6 +224,75 @@ def create_map_workspace(
     return MapWorkspace(version_root, manifest_path, map_id, version_id)
 
 
+def clone_map_revision(
+    source_manifest_path: str | Path,
+    *,
+    target_map_version_id: str,
+    operator_note: str = "",
+) -> MapWorkspace:
+    """Clone an immutable READY map into a new DRAFT revision.
+
+    The source bundle is never written. Lineage and all reproducibility inputs
+    are copied so the new revision can be validated independently.
+    """
+    source_manifest_path = Path(source_manifest_path).expanduser().resolve()
+    source_manifest = load_yaml_mapping(source_manifest_path)
+    source_root = source_manifest_path.parent
+    if str(source_manifest.get("state", "")).upper() != "READY":
+        raise AssetContractError("clone_source_not_ready", "only READY map revisions may be cloned")
+    from .map_validation import validate_map_workspace
+
+    source_compliance = validate_map_workspace(source_manifest_path)
+    if not source_compliance.valid:
+        raise AssetContractError(
+            "clone_source_invalid", "source READY map is not compliant: " + ",".join(source_compliance.errors)
+        )
+    target_map_version_id = str(target_map_version_id).strip()
+    if not _VERSION_RE.fullmatch(target_map_version_id):
+        raise AssetContractError("map_version_invalid", "map_version_id has invalid format")
+    target_root = source_root.parent / target_map_version_id
+    if target_root.exists():
+        raise AssetContractError("map_version_exists", f"map version already exists: {target_root}")
+    target_root.mkdir(parents=True, exist_ok=False)
+
+    for relative in (
+        "source", "derivation", "alignment", "pointcloud", "processing", "navigation", "semantic", "reports"
+    ):
+        source_path = source_root / relative
+        if source_path.is_dir():
+            shutil.copytree(source_path, target_root / relative)
+        else:
+            (target_root / relative).mkdir(parents=True, exist_ok=True)
+
+    target_manifest = json.loads(json.dumps(source_manifest))
+    source_hash = str(source_manifest.get("map_content_sha256", ""))
+    target_manifest["map_version_id"] = target_map_version_id
+    target_manifest["parent_version_id"] = str(source_manifest.get("map_version_id", ""))
+    target_manifest["parent"] = {
+        "map_id": str(source_manifest.get("map_id", "")),
+        "map_version_id": str(source_manifest.get("map_version_id", "")),
+        "map_content_sha256": source_hash,
+    }
+    target_manifest["state"] = "DRAFT"
+    target_manifest["active"] = False
+    target_manifest["pinned"] = False
+    target_manifest["created_at"] = _now()
+    target_manifest["notes"] = operator_note or "Cloned from READY map revision for Studio editing."
+    assets = {}
+    for asset_id, record in (source_manifest.get("assets") or {}).items():
+        if not isinstance(record, dict):
+            continue
+        relative = Path(str(record.get("path", "")))
+        path = target_root / relative
+        if path.is_file():
+            assets[asset_id] = {"path": str(relative), "sha256": sha256_file(path)}
+    target_manifest["assets"] = assets
+    target_manifest["map_content_sha256"] = compute_map_content_sha256(target_manifest)
+    manifest_path = target_root / "manifest.yaml"
+    _atomic_yaml(manifest_path, target_manifest)
+    return MapWorkspace(target_root, manifest_path, str(target_manifest["map_id"]), target_map_version_id)
+
+
 def refresh_map_manifest(manifest_path: str | Path, *, requested_state: str | None = None) -> dict[str, Any]:
     """Hash canonical products and optionally promote a derived bundle to READY.
 
@@ -249,6 +318,7 @@ def refresh_map_manifest(manifest_path: str | Path, *, requested_state: str | No
         "semantic_map": "semantic/semantic_map.geojson",
         "semantic_coverage": "semantic/coverage.yaml",
         "semantic_validation_report": "semantic/validation_report.json",
+        "map_edit_record": "map_edit_record.yaml",
         "alignment_report": "alignment/alignment_report.json",
         "map_quality_report": "reports/map_quality_report.json",
     }

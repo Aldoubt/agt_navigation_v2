@@ -49,10 +49,10 @@ def validate_route_asset(
         )
     map_manifest_path = Path(map_manifest_path).expanduser().resolve()
     compliance = validate_map_workspace(map_manifest_path)
-    if not compliance.valid or compliance.state != "READY":
+    if not compliance.valid or compliance.state not in {"DRAFT", "READY"}:
         raise AssetContractError(
             "route_map_not_compliant",
-            "route feasibility requires a currently compliant READY map: " + ",".join(compliance.errors),
+            "route feasibility requires a currently compliant DRAFT or READY map: " + ",".join(compliance.errors),
         )
     map_manifest = load_yaml_mapping(map_manifest_path)
     platform_path = Path(platform_profile_path).expanduser().resolve()
@@ -190,7 +190,11 @@ def validate_route_asset(
         updated["route_csv_sha256"] = sha256_file(route_csv)
         updated["feasibility_report_sha256"] = sha256_file(report_path)
         updated["preview_sha256"] = sha256_file(preview_path)
-        updated["status"] = "READY" if passed else "INVALID"
+        updated["status"] = (
+            "READY" if passed and compliance.state == "READY"
+            else "DRAFT_VALIDATED" if passed
+            else "INVALID"
+        )
         write_route_manifest(route_manifest_path, updated)
     return result
 

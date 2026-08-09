@@ -497,6 +497,7 @@ class SemanticEditorWindow(QMainWindow):
         platform_profile_path=None,
         map_path=None,
         semantic_path=None,
+        map_manifest_path=None,
     ):
         super().__init__()
         self.defaults = defaults or EditorDefaults()
@@ -508,6 +509,11 @@ class SemanticEditorWindow(QMainWindow):
         self.platform = None
         self.navigation_footprint = []
         self.map_path = None
+        self.map_manifest_path = Path(map_manifest_path).expanduser().resolve() if map_manifest_path else None
+        self._studio_manifest = None
+        self._studio_parent_manifest_path = None
+        self._studio_route_dir = None
+        self._last_map_edit = None
         self.semantic_path = None
         self.coverage_path = None
         self.coverage = None
@@ -568,6 +574,15 @@ class SemanticEditorWindow(QMainWindow):
             self.load_task(semantic_path)
         elif map_path:
             self.load_base_map(map_path)
+        if self.map_manifest_path is not None:
+            self._load_studio_manifest(self.map_manifest_path)
+            if self.map_path is not None and map_path is None:
+                self.load_base_map(self.map_path)
+            if self.semantic_path is not None and semantic_path is None:
+                self.load_task(self.semantic_path)
+        if self._studio_manifest is not None:
+            self.read_only = str(self._studio_manifest.get("state", "")).upper() == "READY"
+            self._update_title()
 
     def _build_ui(self):
         self.setStyleSheet(
@@ -669,6 +684,7 @@ class SemanticEditorWindow(QMainWindow):
 
         self._build_object_dock()
         self._build_layer_dock()
+        self._build_revision_dock()
         self._build_validation_dock()
         self._build_preview_dock()
 
@@ -721,6 +737,17 @@ class SemanticEditorWindow(QMainWindow):
         footprint_check.setChecked(True)
         footprint_check.toggled.connect(self.refresh_scene)
         self._layer_checks["footprint"] = footprint_check
+        layout.addWidget(footprint_check)
+        invalid_check = QCheckBox("Invalid Segments")
+        invalid_check.setChecked(True)
+        invalid_check.toggled.connect(self.refresh_scene)
+        self._layer_checks["invalid_segments"] = invalid_check
+        layout.addWidget(invalid_check)
+        connector_check = QCheckBox("Straight Connectors")
+        connector_check.setChecked(True)
+        connector_check.toggled.connect(self.refresh_scene)
+        self._layer_checks["connectors"] = connector_check
+        layout.addWidget(connector_check)
         layout.addStretch(1)
         dock.setWidget(panel)
         self.addDockWidget(Qt.LeftDockWidgetArea, dock)
@@ -730,6 +757,32 @@ class SemanticEditorWindow(QMainWindow):
         self.validation_list = QListWidget()
         dock.setWidget(self.validation_list)
         self.addDockWidget(Qt.BottomDockWidgetArea, dock)
+
+    def _build_revision_dock(self):
+        dock = QDockWidget("Map Revision / Studio", self)
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        self.revision_labels = {}
+        for key, label in (("map_id", "Map ID"), ("map_version_id", "Map Version"),
+                           ("state", "State"), ("parent", "Parent Revision"),
+                           ("content_sha256", "Content SHA"), ("dirty", "Dirty")):
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            value = QLabel("-")
+            value.setTextInteractionFlags(Qt.TextSelectableByMouse)
+            row.addWidget(value, 1)
+            layout.addLayout(row)
+            self.revision_labels[key] = value
+        clone_button = QPushButton("Clone New Revision")
+        clone_button.clicked.connect(self.clone_new_revision)
+        validate_button = QPushButton("Validate Map")
+        validate_button.clicked.connect(self.validate_studio_map)
+        layout.addWidget(clone_button)
+        layout.addWidget(validate_button)
+        layout.addStretch(1)
+        dock.setWidget(panel)
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self._refresh_revision_panel()
 
     def _build_preview_dock(self):
         dock = QDockWidget("路线预览", self)
@@ -744,10 +797,15 @@ class SemanticEditorWindow(QMainWindow):
         layout.addWidget(QLabel("连接模型"))
         self.preview_path_combo = QComboBox()
         self.preview_path_combo.addItem(
-            "Reeds-Shepp（几何连接，允许倒车，不避障）", "reeds_shepp"
+            "Straight connector（MVP，需通过完整 feasibility）", "straight"
+        )
+        # Existing preview-only candidates remain available for compatibility;
+        # Map & Route Studio generation uses the registered straight backend.
+        self.preview_path_combo.addItem(
+            "Reeds-Shepp（仅历史预览候选，非 Studio backend）", "reeds_shepp"
         )
         self.preview_path_combo.addItem(
-            "Dubins（几何连接，仅前进，不避障）", "dubins"
+            "Dubins（仅历史预览候选，非 Studio backend）", "dubins"
         )
         layout.addWidget(self.preview_path_combo)
         buttons = QHBoxLayout()
@@ -762,6 +820,14 @@ class SemanticEditorWindow(QMainWindow):
         self.preview_info.setWordWrap(True)
         self.preview_info.setTextInteractionFlags(Qt.TextSelectableByMouse)
         layout.addWidget(self.preview_info)
+        route_buttons = QHBoxLayout()
+        generate_asset = QPushButton("Generate Route")
+        generate_asset.clicked.connect(self.generate_studio_route)
+        validate_asset = QPushButton("Validate Route")
+        validate_asset.clicked.connect(self.validate_studio_route)
+        route_buttons.addWidget(generate_asset)
+        route_buttons.addWidget(validate_asset)
+        layout.addLayout(route_buttons)
         dock.setWidget(panel)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
 
@@ -1403,6 +1469,7 @@ class SemanticEditorWindow(QMainWindow):
         self.map_metadata = loaded_map.metadata
         self.map_array = loaded_map.image
         self.map_dirty = False
+        self._last_map_edit = None
         self._map_undo_stack.clear()
         self._map_redo_stack.clear()
         self._map_edit_before = None
@@ -1507,6 +1574,11 @@ class SemanticEditorWindow(QMainWindow):
         if np.all(patch == new_pixel):
             return
         self.map_array[y0:y1, x0:x1] = new_pixel
+        self._last_map_edit = (
+            {OCCUPIED_PIXEL: "paint_occupied", FREE_PIXEL: "paint_free", UNKNOWN_PIXEL: "paint_unknown"}[new_pixel],
+            self.map_draw_mode,
+            {"x": image_x, "y": image_y, "radius_px": self.map_brush_size},
+        )
         self.map_dirty = True
         self._update_map_pixmap()
         if refresh:
@@ -2114,12 +2186,13 @@ class SemanticEditorWindow(QMainWindow):
         self.semantic_path = semantic_path
         self.coverage_path = coverage_path
         self.model_scene.mark_saved()
+        self._refresh_studio_manifest()
         self._update_title()
         self.statusBar().showMessage(f"已保存 {semantic_path}", 5000)
         return True
 
     def _save_map_in_place(self):
-        if self.map_array is None or self.map_path is None or self.map_metadata is None:
+        if self.read_only or self.map_array is None or self.map_path is None or self.map_metadata is None:
             return False
         try:
             save_nav2_map_image(self.map_path, self.map_metadata, self.map_array)
@@ -2127,6 +2200,24 @@ class SemanticEditorWindow(QMainWindow):
             QMessageBox.critical(self, "底图保存失败", str(exc))
             return False
         self.map_dirty = False
+        if self.map_manifest_path is not None and self._last_map_edit is not None:
+            try:
+                from agt_offline_assets import append_map_edit_operation
+
+                operation, mode, parameters = self._last_map_edit
+                append_map_edit_operation(
+                    self.map_manifest_path.parent / "map_edit_record.yaml",
+                    source_manifest_path=self._studio_parent_manifest_path or self.map_manifest_path,
+                    target_manifest_path=self.map_manifest_path,
+                    operation=operation,
+                    mode=mode,
+                    parameters=parameters,
+                )
+                self._last_map_edit = None
+            except Exception as exc:
+                QMessageBox.critical(self, "编辑记录失败", str(exc))
+                return False
+        self._refresh_studio_manifest()
         self._update_title()
         self.statusBar().showMessage(f"已保存底图 {self.map_path}", 5000)
         return True
@@ -2256,6 +2347,149 @@ class SemanticEditorWindow(QMainWindow):
         map_id = self.model_scene.semantic_map.map_id if self.model_scene else "未加载"
         self.setWindowTitle(f"AGT 农业语义地图编辑器 · {map_id}{suffix}")
 
+    def _load_studio_manifest(self, manifest_path):
+        self.map_manifest_path = Path(manifest_path).expanduser().resolve()
+        self._studio_manifest = yaml.safe_load(self.map_manifest_path.read_text(encoding="utf-8")) or {}
+        root = self.map_manifest_path.parent
+        nav_yaml = root / "navigation" / "map.yaml"
+        semantic = root / "semantic" / "semantic_map.geojson"
+        self.map_path = nav_yaml if nav_yaml.is_file() else None
+        self.semantic_path = semantic if semantic.is_file() else None
+        parent = self._studio_manifest.get("parent") or {}
+        parent_path = root.parent / str(parent.get("map_version_id", "")) / "manifest.yaml"
+        self._studio_parent_manifest_path = parent_path if parent_path.is_file() else None
+        self.read_only = str(self._studio_manifest.get("state", "")).upper() == "READY"
+        self._refresh_revision_panel()
+
+    def _refresh_studio_manifest(self):
+        if self.map_manifest_path is None or not self.map_manifest_path.is_file():
+            return
+        self._studio_manifest = yaml.safe_load(self.map_manifest_path.read_text(encoding="utf-8")) or {}
+        self._refresh_revision_panel()
+
+    def _refresh_revision_panel(self):
+        labels = getattr(self, "revision_labels", None)
+        if labels is None:
+            return
+        manifest = self._studio_manifest or {}
+        parent = manifest.get("parent") or {}
+        labels["map_id"].setText(str(manifest.get("map_id", "-")))
+        labels["map_version_id"].setText(str(manifest.get("map_version_id", "-")))
+        labels["state"].setText(str(manifest.get("state", "-")).upper())
+        labels["parent"].setText(str(parent.get("map_version_id", "-")))
+        labels["content_sha256"].setText(str(manifest.get("map_content_sha256", "-")))
+        labels["dirty"].setText("YES" if self.map_dirty or (self.model_scene and self.model_scene.dirty) else "NO")
+
+    def clone_new_revision(self):
+        if self.map_manifest_path is None:
+            QMessageBox.warning(self, "无法克隆", "请先打开 Map manifest")
+            return False
+        target, accepted = QInputDialog.getText(self, "Clone New Revision", "Target map_version_id")
+        if not accepted or not target.strip():
+            return False
+        try:
+            from agt_offline_assets import clone_map_revision
+
+            clone = clone_map_revision(self.map_manifest_path, target_map_version_id=target.strip())
+            self._load_studio_manifest(clone.manifest_path)
+            self.load_base_map(self.map_path, self.platform_profile_path)
+            if self.semantic_path and self.semantic_path.is_file():
+                self.load_task(self.semantic_path)
+            self.read_only = False
+            self.statusBar().showMessage(f"已创建 DRAFT revision {target.strip()}", 5000)
+            return True
+        except Exception as exc:
+            QMessageBox.critical(self, "Clone 失败", str(exc))
+            return False
+
+    def validate_studio_map(self):
+        if self.map_manifest_path is None:
+            return False
+        try:
+            from agt_offline_assets import validate_map_workspace
+
+            result = validate_map_workspace(self.map_manifest_path)
+            self.statusBar().showMessage(
+                f"Map validation: {'PASS' if result.valid else 'FAIL'} · "
+                f"identity={result.map_id}/{result.map_version_id} · "
+                f"errors={','.join(result.errors) or 'none'}", 10000
+            )
+            return result.valid
+        except Exception as exc:
+            QMessageBox.critical(self, "Map validation 失败", str(exc))
+            return False
+
+    def generate_studio_route(self):
+        if self.map_manifest_path is None or self.semantic_path is None:
+            QMessageBox.warning(self, "无法生成 Route", "需要打开 Map manifest 和 semantic map")
+            return False
+        policy, _ = QFileDialog.getOpenFileName(self, "选择 Route Policy", "", "YAML (*.yaml)")
+        if not policy:
+            return False
+        route_id, accepted = QInputDialog.getText(self, "Generate Route", "Route ID", text="studio_route")
+        if not accepted or not route_id.strip():
+            return False
+        try:
+            from agt_offline_assets import create_route_candidate_asset
+
+            self._studio_route_dir = create_route_candidate_asset(
+                map_manifest_path=self.map_manifest_path,
+                semantic_path=self.semantic_path,
+                policy_path=policy,
+                platform_profile_path=self.platform_profile_path,
+                route_id=route_id.strip(),
+                revision=1,
+            )
+            self.statusBar().showMessage(f"DRAFT Route 已生成: {self._studio_route_dir}", 5000)
+            return True
+        except Exception as exc:
+            QMessageBox.critical(self, "Generate Route 失败", str(exc))
+            return False
+
+    def validate_studio_route(self):
+        if self._studio_route_dir is None or self.map_manifest_path is None:
+            QMessageBox.warning(self, "无法验证 Route", "请先 Generate Route")
+            return False
+        try:
+            from agt_offline_assets import validate_route_asset
+
+            result = validate_route_asset(
+                self._studio_route_dir,
+                map_manifest_path=self.map_manifest_path,
+                platform_profile_path=self.platform_profile_path,
+                write_outputs=True,
+            )
+            self._load_studio_route_preview(self._studio_route_dir / "preview.geojson")
+            self.statusBar().showMessage(
+                f"Route validation: {'PASS' if result.passed else 'FAIL'} · status={result.report['status']}",
+                10000,
+            )
+            return result.passed
+        except Exception as exc:
+            QMessageBox.critical(self, "Validate Route 失败", str(exc))
+            return False
+
+    def _load_studio_route_preview(self, preview_path):
+        document = json.loads(Path(preview_path).read_text(encoding="utf-8"))
+        route_points = []
+        invalid_points = []
+        for feature in document.get("features", []):
+            properties = feature.get("properties") or {}
+            geometry = feature.get("geometry") or {}
+            if properties.get("layer") == "route_segment" and geometry.get("type") == "LineString":
+                route_points.extend(geometry.get("coordinates") or [])
+            elif properties.get("layer") == "invalid_footprint":
+                polygon = (geometry.get("coordinates") or [[]])[0]
+                if polygon:
+                    invalid_points.append([
+                        sum(point[0] for point in polygon) / len(polygon),
+                        sum(point[1] for point in polygon) / len(polygon),
+                    ])
+        self._preview_world_points = route_points
+        self._preview_collision_points = invalid_points
+        self._preview_status = str((document.get("properties") or {}).get("feasibility_status", "NOT_EVALUATED"))
+        self.refresh_scene()
+
 
 def default_config_path():
     try:
@@ -2274,6 +2508,7 @@ def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description="AGT semantic map editor")
     parser.add_argument("--map", default="")
     parser.add_argument("--semantic-map", default="")
+    parser.add_argument("--map-manifest", default="")
     parser.add_argument("--platform-profile", default="")
     parser.add_argument("--config", default=default_config_path() or "")
     return parser.parse_known_args(argv)[0]
@@ -2290,6 +2525,7 @@ def main(argv=None):
             platform_profile_path=arguments.platform_profile or None,
             map_path=arguments.map or None,
             semantic_path=arguments.semantic_map or None,
+            map_manifest_path=arguments.map_manifest or None,
         )
         window.show()
         return app.exec_()

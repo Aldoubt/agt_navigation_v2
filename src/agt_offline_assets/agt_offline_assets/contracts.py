@@ -309,6 +309,7 @@ class DerivationRecipe:
 class RoutePolicy:
     policy_id: str
     planning_mode: str
+    connector_backend: str
     row_interpretation: str
     use_access_lanes: bool
     use_headland_zones: bool
@@ -362,6 +363,7 @@ class RoutePolicy:
         return cls(
             policy_id=_require_text(data, "policy_id", code="route_policy_id_missing"),
             planning_mode=str(source.get("planning_mode", "annotated_rows")),
+            connector_backend=str(source.get("connector_backend", "straight")),
             row_interpretation=row_interpretation,
             use_access_lanes=bool(source.get("use_access_lanes", True)),
             use_headland_zones=bool(source.get("use_headland_zones", True)),

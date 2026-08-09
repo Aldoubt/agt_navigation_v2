@@ -11,6 +11,8 @@ from agt_offline_assets import (
     apply_route_tuning,
     compute_map_content_sha256,
     create_map_workspace,
+    clone_map_revision,
+    append_map_edit_operation,
     create_route_candidate_asset,
     refresh_map_manifest,
     sha256_file,
@@ -88,6 +90,7 @@ def _write_policy(path, *, row_interpretation="direct_swaths"):
         "policy_id": f"test_{row_interpretation}",
         "source": {
             "planning_mode": "annotated_rows",
+            "connector_backend": "straight",
             "row_interpretation": row_interpretation,
             "use_access_lanes": True,
             "use_headland_zones": True,
@@ -106,6 +109,83 @@ def _write_policy(path, *, row_interpretation="direct_swaths"):
         "postprocess": {"smoothing": False, "preserve_stop_anchors": True},
     }
     Path(path).write_text(yaml.safe_dump(policy, sort_keys=False), encoding="utf-8")
+
+
+def test_clone_ready_map_creates_draft_revision_and_preserves_parent(tmp_path):
+    workspace, _, _ = _prepare_ready_workspace(tmp_path)
+    source_manifest = yaml.safe_load(workspace.manifest_path.read_text(encoding="utf-8"))
+    clone = clone_map_revision(
+        workspace.manifest_path,
+        target_map_version_id="map_20260808_120001_1234abcd",
+        operator_note="studio test clone",
+    )
+    target = yaml.safe_load(clone.manifest_path.read_text(encoding="utf-8"))
+    assert target["state"] == "DRAFT"
+    assert target["parent"]["map_content_sha256"] == source_manifest["map_content_sha256"]
+    assert target["parent"]["map_version_id"] == source_manifest["map_version_id"]
+    assert validate_map_workspace(workspace.manifest_path).valid
+    assert source_manifest["map_content_sha256"] != target["map_content_sha256"]
+
+
+def test_map_edit_record_tracks_operations_and_changes_target_hash(tmp_path):
+    workspace, _, _ = _prepare_ready_workspace(tmp_path)
+    source_hash = yaml.safe_load(workspace.manifest_path.read_text(encoding="utf-8"))["map_content_sha256"]
+    clone = clone_map_revision(
+        workspace.manifest_path,
+        target_map_version_id="map_20260808_120002_1234abcd",
+    )
+    target_manifest = yaml.safe_load(clone.manifest_path.read_text(encoding="utf-8"))
+    original_hash = target_manifest["map_content_sha256"]
+    image = clone.root / "navigation" / "map.pgm"
+    image_lines = image.read_text(encoding="ascii").splitlines()
+    image_lines[3] = image_lines[3].replace("255", "0", 1)
+    image.write_text("\n".join(image_lines) + "\n", encoding="ascii")
+    record_path = clone.root / "map_edit_record.yaml"
+    for operation in ("paint_free", "paint_occupied", "paint_unknown"):
+        append_map_edit_operation(
+            record_path,
+            source_manifest_path=workspace.manifest_path,
+            target_manifest_path=clone.manifest_path,
+            operation=operation,
+            mode="brush",
+            parameters={"x": 2, "y": 3, "radius_px": 1},
+        )
+    record = yaml.safe_load(record_path.read_text(encoding="utf-8"))
+    target = yaml.safe_load(clone.manifest_path.read_text(encoding="utf-8"))
+    assert [item["operation"] for item in record["operations"]] == [
+        "paint_free", "paint_occupied", "paint_unknown"
+    ]
+    assert target["map_content_sha256"] != original_hash
+    assert yaml.safe_load(workspace.manifest_path.read_text(encoding="utf-8"))["map_content_sha256"] == source_hash
+
+
+def test_draft_clone_generates_and_validates_route_without_promoting_ready(tmp_path):
+    workspace, _, _ = _prepare_ready_workspace(tmp_path)
+    clone = clone_map_revision(
+        workspace.manifest_path,
+        target_map_version_id="map_20260808_120003_1234abcd",
+    )
+    policy = tmp_path / "studio_policy.yaml"
+    _write_policy(policy)
+    route_dir = create_route_candidate_asset(
+        map_manifest_path=clone.manifest_path,
+        semantic_path=clone.root / "semantic" / "semantic_map.geojson",
+        coverage_path=clone.root / "semantic" / "coverage.yaml",
+        policy_path=policy,
+        platform_profile_path=PLATFORM,
+        route_id="studio_route",
+        revision=1,
+    )
+    result = validate_route_asset(
+        route_dir,
+        map_manifest_path=clone.manifest_path,
+        platform_profile_path=PLATFORM,
+        maximum_preview_footprints=20,
+    )
+    assert result.passed, result.report
+    route_manifest = yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))
+    assert route_manifest["status"] == "DRAFT_VALIDATED"
+    assert route_manifest["planner"]["connector_backend"] == "straight"
 
 
 def _prepare_ready_workspace(tmp_path):
@@ -308,6 +388,7 @@ def test_route_survives_registry_metadata_changes_but_keeps_content_binding(tmp_
     )
     route_manifest = yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))
     bound_content = route_manifest["map_binding"]["map_content_sha256"]
+    assert route_manifest["planner"]["connector_backend"] == "straight"
 
     map_manifest = yaml.safe_load(workspace.manifest_path.read_text(encoding="utf-8"))
     map_manifest["active"] = True

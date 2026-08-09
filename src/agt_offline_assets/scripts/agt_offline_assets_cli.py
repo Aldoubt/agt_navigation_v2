@@ -9,6 +9,8 @@ from agt_offline_assets import (
     AssetContractError,
     apply_route_tuning,
     create_map_workspace,
+    clone_map_revision,
+    append_map_edit_operation,
     create_route_candidate_asset,
     ingest_mapping_session,
     refresh_map_manifest,
@@ -35,6 +37,20 @@ def _parser() -> argparse.ArgumentParser:
     init_map.add_argument("--alignment", required=True)
     init_map.add_argument("--platform-profile", required=True)
     init_map.add_argument("--calibration", required=True)
+
+    clone = sub.add_parser("clone-map-revision", help="clone an immutable READY map into a DRAFT revision")
+    clone.add_argument("--source-manifest", required=True)
+    clone.add_argument("--target-map-version-id", required=True)
+    clone.add_argument("--operator-note", default="")
+
+    edit = sub.add_parser("record-map-edit", help="append a raster Map Edit Record operation")
+    edit.add_argument("--record", required=True)
+    edit.add_argument("--source-manifest", required=True)
+    edit.add_argument("--target-manifest", required=True)
+    edit.add_argument("--operation", choices=["paint_free", "paint_occupied", "paint_unknown"], required=True)
+    edit.add_argument("--mode", choices=["brush", "line"], required=True)
+    edit.add_argument("--parameters", default="{}")
+    edit.add_argument("--operator-note", default="")
 
     ingest = sub.add_parser(
         "ingest-mapping-session",
@@ -100,6 +116,26 @@ def main(argv=None) -> int:
                 calibration_path=args.calibration,
             )
             print(workspace.manifest_path)
+            return 0
+        if args.command == "clone-map-revision":
+            workspace = clone_map_revision(
+                args.source_manifest,
+                target_map_version_id=args.target_map_version_id,
+                operator_note=args.operator_note,
+            )
+            print(workspace.manifest_path)
+            return 0
+        if args.command == "record-map-edit":
+            record = append_map_edit_operation(
+                args.record,
+                source_manifest_path=args.source_manifest,
+                target_manifest_path=args.target_manifest,
+                operation=args.operation,
+                mode=args.mode,
+                parameters=json.loads(args.parameters),
+                operator_note=args.operator_note,
+            )
+            print(json.dumps(record, ensure_ascii=False))
             return 0
         if args.command == "ingest-mapping-session":
             result = ingest_mapping_session(
