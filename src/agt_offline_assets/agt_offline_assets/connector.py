@@ -17,6 +17,18 @@ class ConnectorRequest:
 
 
 @dataclass(frozen=True)
+class ConnectorPlanningContext:
+    occupancy_grid: Any
+    map_resolution_m: float
+    map_origin: tuple[float, float, float]
+    footprint: tuple[tuple[float, float], ...]
+    semantic_keepouts: tuple[tuple[tuple[float, float], ...], ...] = ()
+    field_boundaries: tuple[tuple[tuple[float, float], ...], ...] = ()
+    unknown_space_allowed: bool = False
+    options: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class ConnectorSample:
     x: float
     y: float
@@ -75,6 +87,10 @@ def create_connector_backend(name: str) -> ConnectorPlannerBackend:
         from .reeds_shepp import ReedsSheppConnectorBackend
 
         return ReedsSheppConnectorBackend()
+    if str(name).strip().lower() == "hybrid_astar":
+        from .hybrid_astar import HybridAStarConnectorBackend
+
+        return HybridAStarConnectorBackend()
     raise AssetContractError(
         "connector_backend_unknown", f"unsupported connector backend: {name}"
     )

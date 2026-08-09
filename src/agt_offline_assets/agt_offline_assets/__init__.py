@@ -30,7 +30,7 @@ from .preview import write_route_preview
 from .tuning import apply_route_tuning
 from .cleaning import append_cleaning_operation
 from .map_edit import append_map_edit_operation
-from .connector import ConnectorRequest, ConnectorSample, ConnectorResult, ConnectorPlannerBackend, create_connector_backend
+from .connector import ConnectorPlanningContext, ConnectorRequest, ConnectorSample, ConnectorResult, ConnectorPlannerBackend, create_connector_backend
 from .reeds_shepp import ReedsSheppPath, ReedsSheppPrimitive
 
 __all__ = [
@@ -65,6 +65,7 @@ __all__ = [
     "append_cleaning_operation",
     "append_map_edit_operation",
     "ConnectorRequest",
+    "ConnectorPlanningContext",
     "ConnectorSample",
     "ConnectorResult",
     "ConnectorPlannerBackend",

@@ -133,5 +133,5 @@ def test_connector_heading_and_direction_survive_route_conversion():
 
 def test_unknown_connector_backend_fails_closed():
     with pytest.raises(AssetContractError) as error:
-        create_connector_backend("hybrid_astar")
+        create_connector_backend("unknown_backend")
     assert error.value.code == "connector_backend_unknown"

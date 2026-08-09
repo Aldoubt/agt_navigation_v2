@@ -21,7 +21,8 @@ from agt_ui_bridge.semantic_io import load_semantic_task
 from .contracts import AssetContractError, RoutePolicy, load_yaml_mapping, sha256_file
 from .map_validation import validate_map_workspace
 from .workspace import compute_map_content_sha256
-from .connector import ConnectorRequest, ConnectorSample, create_connector_backend
+from .connector import ConnectorPlanningContext, ConnectorRequest, ConnectorSample, create_connector_backend
+from .grid_io import load_nav2_grid
 
 
 _ROUTE_FIELDS = (
@@ -52,6 +53,7 @@ def derive_route_candidate(
     *,
     coverage_path: str | Path | None = None,
     default_speed_mps: float = 0.3,
+    connector_context: ConnectorPlanningContext | None = None,
 ) -> list[RouteSample]:
     """Derive a deterministic boustrophedon candidate from annotated semantic lanes.
 
@@ -103,7 +105,8 @@ def derive_route_candidate(
                     policy.path_resolution_m,
                     float(platform.get("min_turning_radius", 0.0)),
                     policy.allow_reverse,
-                )
+                ),
+                connector_context,
             )
             if not connector_result.success:
                 raise AssetContractError("connector_planning_failed", connector_result.failure_reason)
@@ -180,6 +183,7 @@ def create_route_candidate_asset(
     platform_path = Path(platform_profile_path).expanduser().resolve()
     policy = RoutePolicy.from_file(policy_path)
     platform = load_platform_profile(platform_path)
+    task = load_semantic_task(semantic_path, coverage_source)
     actual_platform_hash = sha256_file(platform_path)
 
     assets = map_manifest.get("assets") or {}
@@ -204,6 +208,12 @@ def create_route_candidate_asset(
         platform_path,
         coverage_path=coverage_source,
         default_speed_mps=default_speed_mps,
+        connector_context=_connector_context(
+            policy,
+            map_manifest_path.parent / "navigation" / "map.yaml",
+            task.semantic_map,
+            platform,
+        ) if policy.connector_backend == "hybrid_astar" else None,
     )
     route_dir = map_manifest_path.parent / "routes" / route_id / str(int(revision))
     if route_dir.exists():
@@ -248,6 +258,8 @@ def create_route_candidate_asset(
                 "minimum_turning_radius_m": float(platform.get("min_turning_radius", 0.0)),
                 "path_resolution_m": policy.path_resolution_m,
                 "allow_reverse": policy.allow_reverse,
+                **({"hybrid_astar": dict(policy.raw.get("hybrid_astar") or {})}
+                   if policy.connector_backend == "hybrid_astar" else {}),
             },
         },
         "status": "DRAFT",
@@ -346,6 +358,31 @@ def _require_frozen_map_asset(
             f"{code_prefix}_hash_mismatch",
             f"selected {asset_id} content differs from READY map manifest hash",
         )
+
+
+def _connector_context(policy, map_yaml_path, semantic_map, platform):
+    grid = load_nav2_grid(map_yaml_path)
+    keepouts = []
+    boundaries = []
+    for feature in semantic_map.features:
+        if not feature.enabled or feature.geometry_type != "Polygon":
+            continue
+        polygon = tuple(tuple(point[:2]) for point in feature.coordinates[0])
+        if feature.feature_type in {"exclusion_zone", "keepout_zone"}:
+            keepouts.append(polygon)
+        elif feature.feature_type == "field_boundary":
+            boundaries.append(polygon)
+    hybrid = dict((policy.raw.get("hybrid_astar") or {}))
+    return ConnectorPlanningContext(
+        occupancy_grid=grid,
+        map_resolution_m=grid.resolution,
+        map_origin=(grid.origin_x, grid.origin_y, grid.origin_yaw),
+        footprint=tuple(tuple(point) for point in platform["footprint"]),
+        semantic_keepouts=tuple(keepouts),
+        field_boundaries=tuple(boundaries),
+        unknown_space_allowed=bool(hybrid.get("allow_unknown", policy.unknown_space_allowed)),
+        options=hybrid,
+    )
 
 
 def _work_direction(semantic_map) -> tuple[float, float]:
