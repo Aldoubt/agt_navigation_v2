@@ -1,6 +1,7 @@
 from pathlib import Path
 import hashlib
 import json
+import os
 import shutil
 
 import pytest
@@ -13,6 +14,9 @@ from agt_offline_assets import (
     create_map_workspace,
     clone_map_revision,
     append_map_edit_operation,
+    ConnectorRequest,
+    RouteSample,
+    create_connector_backend,
     create_route_candidate_asset,
     refresh_map_manifest,
     sha256_file,
@@ -21,7 +25,7 @@ from agt_offline_assets import (
 )
 from agt_offline_assets.contracts import sha256_path_bundle
 from agt_offline_assets.contracts import DatasetBinding
-from agt_offline_assets.route_asset import load_route_csv
+from agt_offline_assets.route_asset import load_route_csv, write_route_csv, write_route_manifest, _samples_from_connector
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -214,7 +218,70 @@ def test_reeds_shepp_route_manifest_and_cusp_segments(tmp_path):
             assert first.direction == second.direction
 
 
-def test_reeds_shepp_route_validate_asset_draft_validated(tmp_path):
+def _write_two_row_rs_route_asset(map_manifest_path, profile_path, policy_path, route_id):
+    map_manifest = yaml.safe_load(Path(map_manifest_path).read_text(encoding="utf-8"))
+    root = Path(map_manifest_path).parent
+    route_dir = root / "routes" / route_id / "1"
+    route_dir.mkdir(parents=True)
+    policy_copy = route_dir / "policy.yaml"
+    shutil.copy2(policy_path, policy_copy)
+    connector = create_connector_backend("reeds_shepp").plan(
+        ConnectorRequest((1.5, 2.0, 0.0), (1.0, 2.0, 0.0), 0.05, 0.25, True)
+    )
+    assert connector.success
+    samples = [
+        RouteSample(0, "lane_000", 1.0, 2.0, 0.0, "F", 0.2, semantic_ref="row_01"),
+        RouteSample(1, "lane_000", 1.5, 2.0, 0.0, "F", 0.2, semantic_ref="row_01"),
+    ]
+    samples.extend(_samples_from_connector(
+        connector.samples, "connector_001", "<connector>", 0.2, start_seq=len(samples)
+    ))
+    samples.extend([
+        RouteSample(len(samples), "lane_002", 1.0, 2.0, 0.0, "F", 0.2, semantic_ref="row_02"),
+        RouteSample(len(samples) + 1, "lane_002", 1.5, 2.0, 0.0, "F", 0.2, semantic_ref="row_02"),
+    ])
+    route_csv = route_dir / "route.csv"
+    write_route_csv(route_csv, samples)
+    semantic = root / "semantic" / "semantic_map.geojson"
+    coverage = root / "semantic" / "coverage.yaml"
+    manifest = {
+        "schema_version": 1,
+        "route_id": route_id,
+        "revision": 1,
+        "frame_id": "map",
+        "map_binding": {
+            "map_id": map_manifest["map_id"],
+            "map_version_id": map_manifest["map_version_id"],
+            "map_content_sha256": map_manifest["map_content_sha256"],
+        },
+        "semantic_binding": {
+            "path": os.path.relpath(semantic, route_dir),
+            "sha256": sha256_file(semantic),
+            "coverage_path": os.path.relpath(coverage, route_dir),
+            "coverage_sha256": sha256_file(coverage),
+        },
+        "vehicle_binding": {
+            "platform_id": "bunker",
+            "platform_profile_sha256": sha256_file(profile_path),
+        },
+        "policy_binding": {"path": "policy.yaml", "sha256": sha256_file(policy_copy)},
+        "route_csv_sha256": sha256_file(route_csv),
+        "planner": {
+            "backend": "semantic_boustrophedon",
+            "connector_backend": "reeds_shepp",
+            "connector_parameters": {
+                "minimum_turning_radius_m": 0.25,
+                "path_resolution_m": 0.05,
+                "allow_reverse": True,
+            },
+        },
+        "status": "DRAFT",
+    }
+    write_route_manifest(route_dir / "route.yaml", manifest)
+    return route_dir
+
+
+def _prepare_short_two_row_reeds_revision(tmp_path, *, ready):
     workspace, _, _ = _prepare_ready_workspace(tmp_path)
     clone = clone_map_revision(
         workspace.manifest_path,
@@ -224,25 +291,39 @@ def test_reeds_shepp_route_validate_asset_draft_validated(tmp_path):
     document = json.loads(semantic_path.read_text(encoding="utf-8"))
     document["features"] = [
         feature for feature in document["features"]
-        if feature.get("properties", {}).get("id") not in {"row_02", "row_03"}
+        if feature.get("properties", {}).get("id") not in {"row_03"}
     ]
+    for feature in document["features"]:
+        feature_id = feature.get("properties", {}).get("id")
+        if feature_id == "row_01":
+            feature["geometry"]["coordinates"] = [[2.0, 2.0], [2.01, 2.0]]
+        elif feature_id == "row_02":
+            feature["geometry"]["coordinates"] = [[2.0, 2.01], [2.01, 2.01]]
     semantic_path.write_text(json.dumps(document, indent=2) + "\n", encoding="utf-8")
-    refresh_map_manifest(clone.manifest_path)
-    policy = tmp_path / "reeds_single_lane_policy.yaml"
+    refresh_map_manifest(clone.manifest_path, requested_state="READY" if ready else None)
+    policy = tmp_path / ("reeds_ready_policy.yaml" if ready else "reeds_draft_policy.yaml")
+    _write_policy(policy, connector_backend="reeds_shepp")
+    policy_document = yaml.safe_load(policy.read_text(encoding="utf-8"))
+    policy_document["sampling"]["path_resolution_m"] = 0.00005
+    policy_document["constraints"]["minimum_clearance_m"] = 0.0
+    policy.write_text(yaml.safe_dump(policy_document, sort_keys=False), encoding="utf-8")
+    reeds_profile = tmp_path / "bunker_reeds_profile.yaml"
+    profile = yaml.safe_load(PLATFORM.read_text(encoding="utf-8"))
+    profile["platform"]["geometry"]["min_turning_radius"] = 0.25
+    reeds_profile.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+    return clone, semantic_path, policy, reeds_profile
+
+
+def test_reeds_shepp_route_validate_asset_draft_validated(tmp_path):
+    workspace, _, _ = _prepare_ready_workspace(tmp_path)
+    clone = clone_map_revision(workspace.manifest_path, target_map_version_id="map_20260808_120005_1234abcd")
+    policy = tmp_path / "reeds_draft_policy.yaml"
     _write_policy(policy, connector_backend="reeds_shepp")
     reeds_profile = tmp_path / "bunker_reeds_profile.yaml"
     profile = yaml.safe_load(PLATFORM.read_text(encoding="utf-8"))
     profile["platform"]["geometry"]["min_turning_radius"] = 0.25
     reeds_profile.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
-    route_dir = create_route_candidate_asset(
-        map_manifest_path=clone.manifest_path,
-        semantic_path=semantic_path,
-        coverage_path=clone.root / "semantic" / "coverage.yaml",
-        policy_path=policy,
-        platform_profile_path=reeds_profile,
-        route_id="reeds_single_lane",
-        revision=1,
-    )
+    route_dir = _write_two_row_rs_route_asset(clone.manifest_path, reeds_profile, policy, "reeds_draft_two_rows")
     result = validate_route_asset(
         route_dir,
         map_manifest_path=clone.manifest_path,
@@ -251,6 +332,25 @@ def test_reeds_shepp_route_validate_asset_draft_validated(tmp_path):
     )
     assert result.passed, result.report
     assert yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))["status"] == "DRAFT_VALIDATED"
+
+
+def test_reeds_shepp_route_validate_asset_ready(tmp_path):
+    workspace, _, _ = _prepare_ready_workspace(tmp_path)
+    policy = tmp_path / "reeds_ready_policy.yaml"
+    _write_policy(policy, connector_backend="reeds_shepp")
+    reeds_profile = tmp_path / "bunker_reeds_profile.yaml"
+    profile = yaml.safe_load(PLATFORM.read_text(encoding="utf-8"))
+    profile["platform"]["geometry"]["min_turning_radius"] = 0.25
+    reeds_profile.write_text(yaml.safe_dump(profile, sort_keys=False), encoding="utf-8")
+    route_dir = _write_two_row_rs_route_asset(workspace.manifest_path, reeds_profile, policy, "reeds_ready_two_rows")
+    result = validate_route_asset(
+        route_dir,
+        map_manifest_path=workspace.manifest_path,
+        platform_profile_path=reeds_profile,
+        maximum_preview_footprints=20,
+    )
+    assert result.passed, result.report
+    assert yaml.safe_load((route_dir / "route.yaml").read_text(encoding="utf-8"))["status"] == "READY"
 
 
 def test_reeds_shepp_success_can_still_fail_existing_keepout_feasibility(tmp_path):
