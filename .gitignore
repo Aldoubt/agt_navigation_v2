@@ -51,3 +51,5 @@ runtime/config/
 
 # OS
 .DS_Store
+runtime/localization_validation/handheld_20260719/candidates.yaml
+runtime/localization_validation/handheld_20260719/processing_record.yaml
