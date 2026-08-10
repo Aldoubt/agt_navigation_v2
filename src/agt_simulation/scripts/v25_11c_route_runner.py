@@ -129,6 +129,25 @@ class RouteRunner(Node):
             and status.map_hash == self.map_hash
         )
 
+    def _localization_failure_reason(self) -> str:
+        status = self.latest_localization
+        if status is None:
+            return "no canonical localization status received"
+        reasons: list[str] = []
+        if status.state != LocalizationStatus.STATE_TRACKING:
+            reasons.append(f"state={status.state}")
+        if not status.localization_accepted:
+            reasons.append("localization_accepted=false")
+        if not status.pose_valid:
+            reasons.append("pose_valid=false")
+        if status.correction_generation < 1:
+            reasons.append(f"generation={status.correction_generation}")
+        if status.map_id != self.map_id:
+            reasons.append(f"map_id={status.map_id!r} expected={self.map_id!r}")
+        if status.map_hash != self.map_hash:
+            reasons.append(f"map_hash={status.map_hash!r} expected={self.map_hash!r}")
+        return "; ".join(reasons) if reasons else "canonical localization guard failed"
+
     def _pose(self, point: dict[str, Any]) -> PoseStamped:
         pose = PoseStamped()
         pose.header.frame_id = self.frame_id
@@ -178,15 +197,57 @@ class RouteRunner(Node):
             response.message = "route execution requested"
         return response
 
-    def _wait_future(self, future, timeout_s: float, label: str):
-        if not spin_until(self, future.done, timeout_s):
-            raise RuntimeError(f"timeout waiting for {label}")
-        result = future.result()
-        if result is None:
-            raise RuntimeError(f"{label} returned no result")
-        return result
+    def _wait_future(
+        self,
+        future,
+        timeout_s: float,
+        label: str,
+        *,
+        require_localization: bool = False,
+    ):
+        deadline = time.monotonic() + timeout_s
+        while rclpy.ok() and time.monotonic() < deadline:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            if future.done():
+                result = future.result()
+                if result is None:
+                    raise RuntimeError(f"{label} returned no result")
+                return result
+            if require_localization and not self._localization_ready():
+                raise RuntimeError(
+                    "LOCALIZATION_GUARD_FAILED: " + self._localization_failure_reason()
+                )
+        if future.done():
+            result = future.result()
+            if result is None:
+                raise RuntimeError(f"{label} returned no result")
+            return result
+        raise RuntimeError(f"timeout waiting for {label}")
+
+    def _cancel_goal(self, handle, label: str) -> None:
+        try:
+            cancel_future = handle.cancel_goal_async()
+            spin_until(self, cancel_future.done, 2.0)
+        except Exception as error:  # noqa: BLE001
+            self.get_logger().warning(f"failed to cancel {label}: {error}")
+
+    def _wait_goal_result(self, handle, timeout_s: float, label: str):
+        try:
+            return self._wait_future(
+                handle.get_result_async(),
+                timeout_s,
+                label,
+                require_localization=True,
+            )
+        except Exception:
+            self._cancel_goal(handle, label)
+            raise
 
     def _plan(self, start_point, goal_point) -> NavPath:
+        if not self._localization_ready():
+            raise RuntimeError(
+                "LOCALIZATION_GUARD_FAILED: " + self._localization_failure_reason()
+            )
         goal = ComputePathToPose.Goal()
         goal.start = self._pose(start_point)
         goal.goal = self._pose(goal_point)
@@ -196,19 +257,22 @@ class RouteRunner(Node):
             self.planner_client.send_goal_async(goal),
             self.server_timeout_s,
             "planner goal response",
+            require_localization=True,
         )
         if not handle.accepted:
-            raise RuntimeError("ComputePathToPose rejected")
-        result = self._wait_future(
-            handle.get_result_async(), self.segment_timeout_s, "planner result"
-        )
+            raise RuntimeError("PLANNER_GOAL_REJECTED")
+        result = self._wait_goal_result(handle, self.segment_timeout_s, "planner result")
         if result.status != GoalStatus.STATUS_SUCCEEDED:
-            raise RuntimeError(f"planner failed status={result.status}")
+            raise RuntimeError(f"PLANNER_RESULT_FAILED: status={result.status}")
         if len(result.result.path.poses) < 2:
-            raise RuntimeError("planner returned degenerate path")
+            raise RuntimeError("PLANNER_DEGENERATE_PATH")
         return result.result.path
 
     def _follow(self, path: NavPath) -> None:
+        if not self._localization_ready():
+            raise RuntimeError(
+                "LOCALIZATION_GUARD_FAILED: " + self._localization_failure_reason()
+            )
         goal = FollowPath.Goal()
         goal.path = path
         goal.controller_id = self.controller_id
@@ -217,14 +281,13 @@ class RouteRunner(Node):
             self.controller_client.send_goal_async(goal),
             self.server_timeout_s,
             "controller goal response",
+            require_localization=True,
         )
         if not handle.accepted:
-            raise RuntimeError("FollowPath rejected")
-        result = self._wait_future(
-            handle.get_result_async(), self.segment_timeout_s, "controller result"
-        )
+            raise RuntimeError("CONTROLLER_GOAL_REJECTED")
+        result = self._wait_goal_result(handle, self.segment_timeout_s, "controller result")
         if result.status != GoalStatus.STATUS_SUCCEEDED:
-            raise RuntimeError(f"controller failed status={result.status}")
+            raise RuntimeError(f"CONTROLLER_RESULT_FAILED: status={result.status}")
 
     def run_route(self) -> None:
         if self.running:
@@ -236,18 +299,20 @@ class RouteRunner(Node):
         self._publish_state()
         try:
             if not spin_until(self, self._localization_ready, self.server_timeout_s):
-                status = self.latest_localization
-                identity = None if status is None else (status.map_id, status.map_hash)
                 raise RuntimeError(
-                    "canonical localization is not TRACKING on route map; "
-                    f"expected=({self.map_id}, {self.map_hash}) latest={identity}"
+                    "LOCALIZATION_NOT_READY: " + self._localization_failure_reason()
                 )
             if not self.planner_client.wait_for_server(timeout_sec=self.server_timeout_s):
-                raise RuntimeError("/compute_path_to_pose unavailable")
+                raise RuntimeError("PLANNER_SERVER_UNAVAILABLE")
             if not self.controller_client.wait_for_server(timeout_sec=self.server_timeout_s):
-                raise RuntimeError("/follow_path unavailable")
+                raise RuntimeError("CONTROLLER_SERVER_UNAVAILABLE")
 
             for index in range(1, len(self.points)):
+                if not self._localization_ready():
+                    raise RuntimeError(
+                        "LOCALIZATION_GUARD_FAILED: "
+                        + self._localization_failure_reason()
+                    )
                 self.last_message = f"planning segment {index}/{len(self.points)-1}"
                 self._publish_state()
                 path = self._plan(self.points[index - 1], self.points[index])
