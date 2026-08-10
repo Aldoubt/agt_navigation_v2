@@ -1,0 +1,3 @@
+[submodule "tools/rosbag_sensor_trimmer"]
+	path = tools/rosbag_sensor_trimmer
+	url = https://github.com/Aldoubt/rosbag_sensor_trimmer.git
