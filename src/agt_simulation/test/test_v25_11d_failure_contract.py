@@ -65,8 +65,11 @@ def test_failure_launch_supports_deterministic_matrix_without_second_localizer()
         "gazebo_navigation_validation.launch.py",
         "v25_11d_fault_injector.py",
         "v25_11d_failure_acceptance.py",
+        'trigger_delay_s = float(trigger_delay_text)',
+        '"trigger_delay_s": trigger_delay_s',
     ):
         assert token in launch
+    assert "ParameterValue(\n                            trigger_delay_s" not in launch
     assert "amcl" not in launch.lower()
 
 
