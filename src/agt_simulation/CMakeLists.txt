@@ -22,6 +22,7 @@ file(MAKE_DIRECTORY "${AGT_SIMULATION_GENERATED_SCRIPT_DIR}")
 set(AGT_SIMULATION_ENTRYPOINTS
   gazebo_odom_adapter.py
   gazebo_sensor_adapter.py
+  v25_11a_baseline_acceptance.py
 )
 
 foreach(_script IN LISTS AGT_SIMULATION_ENTRYPOINTS)
