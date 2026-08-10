@@ -13,6 +13,18 @@ Visualization Manager:
       Enabled: true
       Name: TF
       Frame Timeout: 15
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: AGT Odometry
+      Topic:
+        Depth: 20
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/mapping/odometry
+      Keep: 100
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.10
     - Class: rviz_default_plugins/LaserScan
       Enabled: true
       Name: Gazebo Lidar
@@ -24,6 +36,27 @@ Visualization Manager:
         Value: /agt/sensors/lidar/scan
       Size (m): 0.03
       Style: Points
+    - Class: rviz_default_plugins/PointCloud2
+      Enabled: false
+      Name: Mapping Registered Points (enable with mapping frontend)
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /agt/mapping/registered_points
+      Size (m): 0.03
+      Style: Flat Squares
+    - Class: rviz_default_plugins/Map
+      Enabled: false
+      Name: Global Occupancy (enable with map stack)
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/map/global_occupancy
+      Alpha: 0.7
     - Class: rviz_default_plugins/Path
       Enabled: true
       Name: Nav2 Global Plan
