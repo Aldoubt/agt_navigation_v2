@@ -22,10 +22,6 @@ The BUNKER model geometry, mass, inertia, wheel radius, friction and controller 
 
 ## Install
 
-On ROS 2 Humble use the ROS-paired Gazebo Fortress / ros_gz packages available for the distribution.
-
-Then from the workspace root:
-
 ```bash
 source /opt/ros/humble/setup.bash
 rosdep install --from-paths src --ignore-src -r -y
@@ -33,31 +29,27 @@ colcon build --symlink-install --packages-up-to agt_simulation
 source install/setup.bash
 ```
 
-## Launch V25-11A
+## V25-11A — simulation foundation
 
-Terminal 1:
+Launch:
 
 ```bash
 ros2 launch agt_simulation gazebo_system_validation.launch.py
 ```
 
-The launch starts Gazebo, the ROS/Gazebo bridge, AGT odometry and sensor adapters, required static sensor TF, and RViz.
-
-Terminal 2 runs the automated baseline smoke:
+Automated baseline:
 
 ```bash
-source /opt/ros/humble/setup.bash
-source install/setup.bash
 ros2 run agt_simulation v25_11a_baseline_acceptance.py
 ```
 
-The smoke publishes motion through `/agt/safety/cmd_vel`, verifies both wheel odometry and Gazebo physics ground truth movement, checks topic rates and TF, and writes:
+The report is written to:
 
 ```text
 /tmp/agt_v25_11a_baseline_result.json
 ```
 
-Expected PASS checks:
+Expected baseline contracts:
 
 ```text
 /clock                              active
@@ -73,18 +65,13 @@ wheel odometry displacement         >= 0.05 m
 Gazebo physics displacement         >= 0.05 m
 ```
 
-## Manual keyboard validation
+### Manual keyboard validation
 
-Use a separate interactive terminal. Do not embed the keyboard node inside a launch file because it requires direct TTY input.
+Use a dedicated interactive terminal:
 
 ```bash
-cd ~/agt_navigation_v2
-source /opt/ros/humble/setup.bash
-source install/setup.bash
 ros2 run agt_simulation keyboard_teleop.py
 ```
-
-Default controls:
 
 ```text
 q  w  e     forward-left / forward / forward-right
@@ -98,43 +85,114 @@ h           show help
 Ctrl-C      stop and quit
 ```
 
-The teleop publishes directly to `/agt/safety/cmd_vel`, the same post-safety simulation command topic used by the V25-11A acceptance smoke. It has a deadman watchdog: if keyboard input stops, zero velocity is published automatically. The default motion parameters can be overridden, for example:
+The teleop publishes to `/agt/safety/cmd_vel` and has a deadman watchdog. A visible V25-11A 2D LaserScan is not evidence that FAST-LIVO2 3D mapping works; the 3D / Livox-style frontend remains a separate validation item.
 
-```bash
-ros2 run agt_simulation keyboard_teleop.py --ros-args \
-  -p linear_speed:=0.20 \
-  -p angular_speed:=0.50 \
-  -p deadman_timeout_s:=1.0
-```
+## V25-11B — localization and fault injection
 
-During manual driving, inspect these signals:
-
-```bash
-ros2 topic hz /agt/mapping/odometry
-ros2 topic hz /agt/sensors/lidar/scan
-ros2 topic hz /agt/sensors/imu/data
-ros2 topic echo /agt/mapping/odometry --once
-```
-
-In RViz, verify that the `odom -> base_footprint -> base_link -> lidar_link / imu_link` TF tree moves consistently with the robot, the odometry arrow follows the chassis, and the 2D lidar scan stays rigidly attached to the lidar frame while the environment moves relative to the robot.
-
-The RViz configuration also contains disabled placeholders for:
+V25-11B adds no competing localization stack. The authority chain is:
 
 ```text
-/agt/mapping/registered_points
-/agt/map/global_occupancy
+Gazebo physics ground truth
+        ↓
+synthetic_localization_evidence.py
+        ↓  LocalizationStatus evidence, correction_generation=0
+/agt/localization/evidence_status
+        ↓
+GlobalCorrectionManager
+        ↓
+/agt/localization/status
+map -> odom
+correction_generation
 ```
 
-Enable them only when the corresponding mapping stack is actually running.
+`synthetic_localization_evidence.py` never publishes TF and never publishes canonical `/agt/localization/status`.
 
-Important: V25-11A currently validates a 2D Gazebo LaserScan, IMU, odometry and TF chain. A visible 2D scan is not evidence that FAST-LIVO2 3D mapping works. FAST-LIVO2 requires a compatible 3D point-cloud / Livox-style input pipeline, which will be connected and validated separately before claiming the mapping frontend is covered.
+### Launch manually
 
-`agt_simulation` must never publish `map -> odom`. V25-11B will connect simulated localization evidence to the existing V25-10 GlobalCorrectionManager so that production correction logic remains the authority for that transform.
+```bash
+ros2 launch agt_simulation gazebo_localization_validation.launch.py
+```
+
+The V25-11B RViz profile uses `map` as the fixed frame. After the initial correction, verify:
+
+```bash
+ros2 topic echo /agt/localization/status
+ros2 topic echo /agt/localization/global_correction_status
+ros2 run tf2_ros tf2_echo map odom
+```
+
+### Run the automated V25-11B gate
+
+Start a fresh launch and let the launch start the observer before the first correction:
+
+```bash
+ros2 launch agt_simulation gazebo_localization_validation.launch.py \
+  run_acceptance:=true
+```
+
+The acceptance sequence verifies:
+
+```text
+initial correction                  TRACKING, generation >= 1
++0.20 m correction in TRACKING      accepted, generation +1
++1.00 m jump in TRACKING            rejected -> RECOVERING, generation frozen
+same jump in RECOVERING             accepted, generation +1
+3 bad-fitness corrections           LOST, generation frozen
+large correction while LOST         REANCHOR_ACCEPTED, generation +1
+```
+
+The machine-readable result is:
+
+```text
+/tmp/agt_v25_11b_localization_result.json
+```
+
+### Manual fault injection
+
+The fault adapter exposes ordinary ROS parameters and `std_srvs/Trigger` services.
+
+Small translation bias:
+
+```bash
+ros2 param set /agt_synthetic_localization_evidence translation_bias_x_m 0.2
+sleep 1.2
+ros2 service call /agt/simulation/localization/submit_correction std_srvs/srv/Trigger '{}'
+```
+
+Yaw bias:
+
+```bash
+ros2 param set /agt_synthetic_localization_evidence yaw_bias_deg 20.0
+sleep 1.2
+ros2 service call /agt/simulation/localization/submit_correction std_srvs/srv/Trigger '{}'
+```
+
+Quality rejection:
+
+```bash
+ros2 param set /agt_synthetic_localization_evidence fitness_score 99.0
+ros2 service call /agt/simulation/localization/submit_correction std_srvs/srv/Trigger '{}'
+```
+
+Explicit health-state injection:
+
+```bash
+ros2 service call /agt/simulation/localization/publish_recovering std_srvs/srv/Trigger '{}'
+ros2 service call /agt/simulation/localization/publish_lost std_srvs/srv/Trigger '{}'
+```
+
+Clear injected bias / quality parameters:
+
+```bash
+ros2 service call /agt/simulation/localization/clear_faults std_srvs/srv/Trigger '{}'
+```
+
+Important: accepted correction evidence is intentionally sparse. Do not publish accepted synthetic correction evidence at sensor frequency; V25-10 applies correction-rate and duplicate gates by design.
 
 ## Validation stages
 
-1. V25-11A: simulator foundation, command / odometry / sensor / TF baseline and manual keyboard inspection
-2. V25-11B: synthetic localization evidence, correction generation, localization fault injection
+1. V25-11A: simulator foundation — COMPLETE after host automated + manual acceptance
+2. V25-11B: synthetic localization evidence, correction generation and localization fault injection
 3. V25-11C: full Nav2 MAP and ROUTE execution in Gazebo
 4. V25-11D: failure injection and automated acceptance matrix
 5. V25-11E: global-path / Route / RuntimePath visualization and planner comparison
