@@ -34,15 +34,41 @@ def test_bunker_proxy_is_explicitly_software_only_and_has_drive_sensors():
     assert "navigation_imu" in model
     assert "/model/bunker_sim/cmd_vel" in model
     assert "/model/bunker_sim/odometry" in model
+    assert "/model/bunker_sim/ground_truth" in model
+    assert "OdometryPublisher" in model
 
 
-def test_world_contains_rows_headland_and_obstacle_fixture():
+def test_wheel_frames_follow_fortress_sdf_semantics():
+    model = _read("models/bunker_sim/model.sdf")
+    for wheel in (
+        "front_left_wheel",
+        "rear_left_wheel",
+        "front_right_wheel",
+        "rear_right_wheel",
+    ):
+        assert f'<pose relative_to="{wheel}"/>' in model
+    assert model.count('xyz expressed_in="__model__">0 1 0</xyz>') == 4
+    assert model.count('pose relative_to="base_link"') >= 6
+
+
+def test_lidar_has_visible_mount_and_launch_tf_matches_model_offset():
+    model = _read("models/bunker_sim/model.sdf")
+    launch = _read("launch/gazebo_system_validation.launch.py")
+    assert "lidar_mount_visual" in model
+    assert '<pose relative_to="base_link">0.10 0 0.195 0 0 0</pose>' in model
+    assert '"--x", "0.10", "--y", "0", "--z", "0.195"' in launch
+
+
+def test_world_contains_rows_headland_obstacle_and_required_sensor_systems():
     world = _read("worlds/agri_validation.sdf")
     assert "crop_row_north_outer" in world
     assert "crop_row_south_outer" in world
     assert "fixed_obstacle" in world
     assert "headland_marker" in world
     assert "model://bunker_sim" in world
+    assert "libignition-gazebo-sensors-system.so" in world
+    assert "libignition-gazebo-imu-system.so" in world
+    assert "ignition::gazebo::systems::Imu" in world
 
 
 def test_simulation_odom_adapter_never_claims_map_odom():
@@ -63,40 +89,40 @@ def test_rviz_config_is_valid_and_reserves_planning_visualization_topics():
     assert "/agt/navigation/runtime_path" in text
 
 
-def test_launch_bridges_clock_drive_odom_lidar_and_imu():
+def test_launch_bridges_clock_drive_odom_ground_truth_lidar_and_imu():
     launch = _read("launch/gazebo_system_validation.launch.py")
     for token in (
         "/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock",
         "/model/bunker_sim/cmd_vel@geometry_msgs/msg/Twist]ignition.msgs.Twist",
         "/model/bunker_sim/odometry@nav_msgs/msg/Odometry[ignition.msgs.Odometry",
+        "/model/bunker_sim/ground_truth@nav_msgs/msg/Odometry[ignition.msgs.Odometry",
         "/simulation/bunker/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan",
         "/simulation/bunker/imu@sensor_msgs/msg/Imu[ignition.msgs.IMU",
     ):
         assert token in launch
     assert "/agt/safety/cmd_vel" in launch
     assert "/simulation/bunker/odometry" in launch
+    assert "/simulation/bunker/ground_truth" in launch
 
 
-def test_baseline_acceptance_exercises_command_rates_tf_and_no_map_odom():
-    smoke = _read("scripts/v25_11a_baseline_acceptance.py")
-    assert '"/agt/safety/cmd_vel"' in smoke
-    assert '"/agt/mapping/odometry"' in smoke
-    assert '"/agt/sensors/lidar/scan"' in smoke
-    assert '"/agt/sensors/imu/data"' in smoke
-    assert 'not node.tf.can_transform("map", "odom", Time())' in smoke
-    assert 'displacement >= 0.05' in smoke
-    assert 'node.rate("scan") >= 5.0' in smoke
-    assert 'node.rate("imu") >= 50.0' in smoke
+def test_baseline_acceptance_requires_physics_truth_not_only_wheel_odometry():
+    acceptance = _read("scripts/v25_11a_baseline_acceptance.py")
+    assert '"/simulation/bunker/ground_truth"' in acceptance
+    assert '"ground_truth_ge_5_hz"' in acceptance
+    assert '"wheel_odom_reports_motion"' in acceptance
+    assert '"physics_model_moves"' in acceptance
+    assert "ground_truth_displacement_m" in acceptance
+    assert "odom_truth_displacement_error_m" in acceptance
 
 
 def test_symlink_install_entrypoints_are_materialized_executable():
     cmake = _read("CMakeLists.txt")
-    assert "AGT_SIMULATION_GENERATED_SCRIPT_DIR" in cmake
-    assert "FILE_PERMISSIONS" in cmake
-    assert "OWNER_EXECUTE" in cmake
-    for script in (
-        "gazebo_odom_adapter.py",
-        "gazebo_sensor_adapter.py",
+    for token in (
+        "AGT_SIMULATION_GENERATED_SCRIPT_DIR",
+        "FILE_PERMISSIONS",
+        "OWNER_EXECUTE",
+        "GROUP_EXECUTE",
+        "WORLD_EXECUTE",
         "v25_11a_baseline_acceptance.py",
     ):
-        assert script in cmake
+        assert token in cmake
