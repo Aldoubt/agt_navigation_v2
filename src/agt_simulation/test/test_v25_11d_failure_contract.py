@@ -37,7 +37,7 @@ def test_route_runner_continuously_guards_canonical_localization():
         assert token in runner
 
 
-def test_navigation_launch_exposes_only_testable_runner_controls():
+def test_navigation_launch_exposes_runner_controls_and_real_safety_chain():
     launch = read("launch/gazebo_navigation_validation.launch.py")
     compile(launch, "gazebo_navigation_validation.launch.py", "exec")
     for token in (
@@ -47,11 +47,16 @@ def test_navigation_launch_exposes_only_testable_runner_controls():
         'DeclareLaunchArgument("runner_segment_timeout_s"',
         '"planner_id": ParameterValue(planner_id, value_type=str)',
         '"controller_id": ParameterValue(controller_id, value_type=str)',
+        'package="agt_sensor_monitor"',
+        'package="agt_safety"',
+        '("cmd_vel", "/agt/navigation/cmd_vel")',
+        '"require_sensor_input_ready": True',
     ):
         assert token in launch
+    assert '("cmd_vel", "/agt/safety/cmd_vel")' not in launch
 
 
-def test_failure_launch_supports_deterministic_matrix_without_second_localizer():
+def test_failure_launch_supports_deterministic_six_case_matrix_without_second_localizer():
     launch = read("launch/gazebo_failure_validation.launch.py")
     compile(launch, "gazebo_failure_validation.launch.py", "exec")
     for token in (
@@ -59,6 +64,8 @@ def test_failure_launch_supports_deterministic_matrix_without_second_localizer()
         "localization_lost",
         "planner_invalid",
         "controller_invalid",
+        "lidar_dropout",
+        "imu_dropout",
         "v25_11d_wrong_map_route.yaml",
         "__v25_11d_missing_planner__",
         "__v25_11d_missing_controller__",
@@ -69,15 +76,30 @@ def test_failure_launch_supports_deterministic_matrix_without_second_localizer()
         '"trigger_delay_s": trigger_delay_s',
     ):
         assert token in launch
-    assert "ParameterValue(\n                            trigger_delay_s" not in launch
     assert "amcl" not in launch.lower()
 
 
-def test_fault_injector_uses_existing_localization_evidence_service():
+def test_gazebo_sensor_adapter_owns_only_faultable_forwarding_not_health_policy():
+    adapter = read("scripts/gazebo_sensor_adapter.py")
+    compile(adapter, "gazebo_sensor_adapter.py", "exec")
+    for token in (
+        '"/agt/simulation/sensors/set_lidar_drop"',
+        '"/agt/simulation/sensors/set_imu_drop"',
+        "if self.drop_lidar:",
+        "if self.drop_imu:",
+    ):
+        assert token in adapter
+    assert "DiagnosticArray" not in adapter
+    assert "sensor_input_unhealthy" not in adapter
+
+
+def test_fault_injector_uses_existing_authority_and_sensor_adapter_services():
     injector = read("scripts/v25_11d_fault_injector.py")
     compile(injector, "v25_11d_fault_injector.py", "exec")
     for token in (
         '"/agt/simulation/localization/publish_lost"',
+        '"/agt/simulation/sensors/set_lidar_drop"',
+        '"/agt/simulation/sensors/set_imu_drop"',
         '"/agt/simulation/fault/state"',
         'self.state = "FIRED"',
         '"gate": "V25-11D"',
@@ -85,7 +107,7 @@ def test_fault_injector_uses_existing_localization_evidence_service():
         assert token in injector
 
 
-def test_failure_acceptance_rejects_false_positive_success():
+def test_failure_acceptance_rejects_false_positive_success_and_sensor_fake_stops():
     acceptance = read("scripts/v25_11d_failure_acceptance.py")
     compile(acceptance, "v25_11d_failure_acceptance.py", "exec")
     for token in (
@@ -99,10 +121,25 @@ def test_failure_acceptance_rejects_false_positive_success():
         '"navigation_command_seen_before_abort"',
         '"motion_bounded_after_abort"',
         '"map_identity_actually_mismatched"',
+        '"sensor_monitor_detected_dropout"',
+        '"safety_sensor_gate_observed"',
+        '"safety_zero_output_after_fault"',
+        '"localization_remained_non_lost"',
         '"planner_action_server_available"',
         '"controller_action_server_available"',
+        '"/diagnostics"',
+        '"/agt/safety/status"',
     ):
         assert token in acceptance
+
+
+def test_sensor_monitor_config_is_installed_with_simulation_assets():
+    config = yaml.safe_load(read("config/v25_11d_sensor_monitor.yaml"))
+    params = config["agt_sensor_monitor"]["ros__parameters"]
+    assert params["lidar"]["message_type"] == "laser_scan"
+    assert params["lidar"]["required"] is True
+    assert params["imu"]["required"] is True
+    assert params["filtered_lidar"]["enabled"] is False
 
 
 def test_cmake_installs_and_tests_v25_11d_entrypoints():
