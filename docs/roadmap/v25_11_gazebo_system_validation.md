@@ -39,19 +39,24 @@ Do not introduce new Gazebo Classic dependencies.
 
 Simulation assets live in the isolated `agt_simulation` package. Navigation and localization packages must not gain Gazebo-specific imports.
 
-## V25-11A — Simulation foundation
+## V25-11A — Simulation foundation — COMPLETE
 
-Deliverables:
+Accepted on host with both automated and manual validation.
+
+Delivered:
 
 - `agt_simulation` package
 - SOFTWARE_ONLY BUNKER proxy
 - simple row / headland / fixed-obstacle world
 - ROS <-> Gazebo command, odometry, lidar, IMU bridge
+- physics ground-truth odometry independent of DiffDrive odometry
 - simulation odometry adapter owning `odom -> base_footprint`
 - sensor-frame normalization
-- RViz profile with placeholders for Nav2 global plan and AGT RuntimePath
+- RViz TF / odometry / lidar inspection
+- deadman keyboard teleop through `/agt/safety/cmd_vel`
+- automated V25-11A acceptance JSON
 
-Acceptance:
+Accepted contracts:
 
 ```text
 /clock                         one simulation authority
@@ -61,26 +66,93 @@ odom -> base_footprint         available
 /agt/sensors/lidar/scan        >= 5 Hz
 /agt/sensors/imu/data          >= 50 Hz
 base -> sensor TF              available
-map -> odom                    MUST NOT be published by agt_simulation
+map -> odom                    absent in V25-11A
+wheel odometry motion          agrees with physical chassis motion
 ```
 
-## V25-11B — Localization and fault injection
+## V25-11B — Localization and fault injection — CURRENT
 
 Do not create a competing localization stack.
 
-Add a simulation truth / evidence adapter that feeds the existing V25-10 relocalization / GlobalCorrectionManager contract. `global_correction_manager` remains the only `map -> odom` authority.
+Authority chain:
 
-Fault-injection cases:
+```text
+Gazebo physics ground truth
+        ↓
+SOFTWARE_ONLY synthetic localization evidence
+        ↓
+/agt/localization/evidence_status
+        ↓
+V25-10 GlobalCorrectionManager
+        ↓
+/agt/localization/status
+map -> odom
+correction_generation
+```
+
+Rules:
+
+- synthetic evidence never broadcasts TF
+- synthetic evidence always carries `correction_generation=0`
+- `global_correction_manager` remains the only V25-11 `map -> odom` authority
+- accepted evidence is sparse / event-driven, not sensor-rate streaming
+- V25-10 map identity and correction thresholds remain unchanged
+- simulation map identity is explicit and SOFTWARE_ONLY
+
+Fault controls:
+
+- translation bias X / Y
+- yaw bias
+- fitness score
+- translation / yaw innovation
+- explicit RECOVERING evidence
+- explicit LOST evidence
+- reset injected fault parameters
+
+Automated V25-11B sequence:
+
+```text
+initial correction
+  -> TRACKING, generation >= 1
+
++0.20 m while TRACKING
+  -> accepted, generation +1
+
++1.00 m while TRACKING
+  -> TRANSLATION_JUMP_REJECTED
+  -> RECOVERING
+  -> generation unchanged
+
+same correction while RECOVERING
+  -> accepted under recovering envelope
+  -> generation +1
+
+3 quality-rejected corrections
+  -> LOST
+  -> generation unchanged
+
+large correction while LOST
+  -> REANCHOR_ACCEPTED
+  -> TRACKING
+  -> generation +1
+```
+
+Manual / later matrix cases also include:
 
 - translation correction: 0.2 m / 0.5 m / 1.0 m
 - yaw correction: 5 deg / 10 deg / 20 deg
-- temporary evidence loss: 1 s / 5 s
+- temporary upstream evidence loss: 1 s / 5 s
 - stale evidence
-- rejected correction
-- RECOVERING -> LOST escalation
-- accepted reanchor
+- invalid map identity
+- measurement-innovation rejection
 
-Acceptance must verify canonical `correction_generation` and the V25-10 next-segment-only Route behavior.
+Machine-readable report:
+
+```text
+/tmp/agt_v25_11b_localization_result.json
+```
+
+V25-10C already freezes the next-segment-only Route correction rule in cross-layer tests. Gazebo runtime verification of active-segment immutability and next-segment generation consumption belongs to V25-11C, where the real Route backend is present.
 
 ## V25-11C — Full navigation system
 
@@ -110,6 +182,8 @@ Required cases:
 - forward segment
 - reverse segment
 - segment boundary
+- correction during active segment does not move active RuntimePath
+- next Route segment consumes latest correction generation
 - localization loss during active segment
 - safety stop
 - fixed obstacle
@@ -189,4 +263,8 @@ Path-planning development can proceed in parallel after V25-11C once planner inp
 
 ## V25-11 branch gate
 
-V25-11A is complete only after host execution proves the simulator starts and all A-stage topic / TF gates pass. Static file contracts alone are not runtime acceptance.
+- V25-11A: COMPLETE
+- V25-11B: requires package tests plus host runtime acceptance PASS
+- V25-11C+: not started
+
+Static contracts are never sufficient for a Gazebo runtime acceptance claim.
