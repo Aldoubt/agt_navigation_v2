@@ -138,6 +138,78 @@ def test_keyboard_teleop_is_tty_deadman_tool_on_post_safety_topic():
     assert '"d": (0.0, -1.0)' in teleop
 
 
+def test_v25_11b_truth_adapter_only_publishes_sparse_evidence_not_tf_or_canonical():
+    adapter = _read("scripts/synthetic_localization_evidence.py")
+    assert "SOFTWARE_ONLY" in adapter
+    assert '"/simulation/bunker/ground_truth"' in adapter
+    assert '"/agt/localization/evidence_status"' in adapter
+    assert 'message.correction_generation = 0' in adapter
+    assert "TransformBroadcaster" not in adapter
+    assert '"/agt/localization/status"' not in adapter
+    assert '"/agt/simulation/localization/submit_correction"' in adapter
+    assert '"/agt/simulation/localization/publish_recovering"' in adapter
+    assert '"/agt/simulation/localization/publish_lost"' in adapter
+    assert '"translation_bias_x_m"' in adapter
+    assert '"yaw_bias_deg"' in adapter
+    assert '"fitness_score"' in adapter
+
+
+def test_v25_11b_config_reuses_v25_10_correction_envelopes_and_map_identity():
+    config = yaml.safe_load(_read("config/v25_11_localization.yaml"))
+    manager = config["global_correction_manager"]["ros__parameters"]
+    evidence = config["agt_synthetic_localization_evidence"]["ros__parameters"]
+    assert manager["use_sim_time"] is True
+    assert evidence["use_sim_time"] is True
+    assert manager["map_id"] == evidence["map_id"] == "v25_11_gazebo"
+    assert manager["map_hash"] == evidence["map_hash"]
+    assert manager["tracking_max_translation_m"] == 0.50
+    assert manager["tracking_max_yaw_rad"] == 0.20
+    assert manager["recovering_max_translation_m"] == 2.0
+    assert manager["recovering_max_yaw_rad"] == 0.70
+    assert manager["correction_rejections_to_lost"] == 3
+    assert manager["allow_lost_reanchor"] is True
+
+
+def test_v25_11b_launch_keeps_global_correction_manager_as_map_odom_authority():
+    launch = _read("launch/gazebo_localization_validation.launch.py")
+    rviz = yaml.safe_load(_read("rviz/gazebo_localization_validation.rviz"))
+    assert 'package="agt_localization"' in launch
+    assert 'executable="global_correction_manager"' in launch
+    assert 'executable="synthetic_localization_evidence.py"' in launch
+    assert 'executable="v25_11b_localization_acceptance.py"' in launch
+    assert 'DeclareLaunchArgument("run_acceptance"' in launch
+    assert "period=0.5" in launch
+    assert "period=3.0" in launch
+    assert rviz["Visualization Manager"]["Global Options"]["Fixed Frame"] == "map"
+
+
+def test_v25_11b_acceptance_freezes_generation_on_reject_and_tests_reanchor():
+    acceptance = _read("scripts/v25_11b_localization_acceptance.py")
+    for token in (
+        "tracking_small_correction_accepted",
+        "TRANSLATION_JUMP_REJECTED",
+        "rejected_generation_frozen",
+        "recovering_envelope_accepted",
+        "three_rejections_escalate_lost",
+        "REANCHOR_ACCEPTED",
+        "lost_reanchor_accepted",
+        "/tmp/agt_v25_11b_localization_result.json",
+    ):
+        assert token in acceptance
+
+
+def test_simulation_package_declares_v25_11b_runtime_dependencies():
+    package = _read("package.xml")
+    for dependency in (
+        "agt_interfaces",
+        "agt_localization",
+        "rcl_interfaces",
+        "std_msgs",
+        "std_srvs",
+    ):
+        assert f"<exec_depend>{dependency}</exec_depend>" in package
+
+
 def test_symlink_install_entrypoints_are_materialized_executable():
     cmake = _read("CMakeLists.txt")
     for token in (
@@ -147,6 +219,8 @@ def test_symlink_install_entrypoints_are_materialized_executable():
         "GROUP_EXECUTE",
         "WORLD_EXECUTE",
         "keyboard_teleop.py",
+        "synthetic_localization_evidence.py",
         "v25_11a_baseline_acceptance.py",
+        "v25_11b_localization_acceptance.py",
     ):
         assert token in cmake
