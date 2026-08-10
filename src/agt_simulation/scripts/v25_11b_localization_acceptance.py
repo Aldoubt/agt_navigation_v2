@@ -33,6 +33,7 @@ class LocalizationAcceptance(Node):
         self.latest_status = None
         self.status_sequence = 0
         self.latest_decision = None
+        self.decision_sequence = 0
         self.create_subscription(
             LocalizationStatus,
             "/agt/localization/status",
@@ -68,6 +69,7 @@ class LocalizationAcceptance(Node):
             self.latest_decision = json.loads(message.data)
         except json.JSONDecodeError:
             self.latest_decision = {"raw": message.data}
+        self.decision_sequence += 1
 
 
 def _spin_until(node: Node, predicate, timeout_s: float) -> bool:
@@ -144,6 +146,63 @@ def _wait_status_after(
     return node.latest_status
 
 
+def _wait_decision_after(
+    node: LocalizationAcceptance,
+    sequence: int,
+    *,
+    code: str,
+    generation: int,
+    accepted: bool,
+    timeout_s: float = 5.0,
+):
+    def matches() -> bool:
+        decision = node.latest_decision
+        if node.decision_sequence <= sequence or not isinstance(decision, dict):
+            return False
+        return (
+            decision.get("code") == code
+            and int(decision.get("generation", -1)) == generation
+            and bool(decision.get("accepted")) is accepted
+        )
+
+    if not _spin_until(node, matches, timeout_s):
+        raise RuntimeError(
+            "global correction decision did not reach expected event; "
+            f"expected=(code={code}, generation={generation}, accepted={accepted}) "
+            f"latest={node.latest_decision} decision_sequence={node.decision_sequence}"
+        )
+    return node.latest_decision
+
+
+def _submit_and_wait(
+    node: LocalizationAcceptance,
+    *,
+    status_predicate,
+    decision_code: str,
+    decision_generation: int,
+    decision_accepted: bool,
+    timeout_s: float = 5.0,
+):
+    status_sequence = node.status_sequence
+    decision_sequence = node.decision_sequence
+    _call_trigger(node, node.submit_client, timeout_s)
+    status = _wait_status_after(
+        node,
+        status_sequence,
+        status_predicate,
+        timeout_s,
+    )
+    decision = _wait_decision_after(
+        node,
+        decision_sequence,
+        code=decision_code,
+        generation=decision_generation,
+        accepted=decision_accepted,
+        timeout_s=timeout_s,
+    )
+    return status, decision
+
+
 def _map_odom_xy(node: LocalizationAcceptance):
     if not node.tf.can_transform("map", "odom", Time()):
         return None
@@ -166,8 +225,6 @@ def main(args=None) -> None:
     exit_code = 1
 
     try:
-        # The launch starts this smoke before the synthetic node's delayed initial
-        # correction, so the first canonical TRACKING status must be generation 1+.
         initial = _wait_status_after(
             node,
             0,
@@ -191,14 +248,15 @@ def main(args=None) -> None:
         # TRACKING: +0.20 m is inside the 0.50 m envelope and must increment generation.
         _set_remote_parameters(node, {"translation_bias_x_m": 0.20})
         _spin_for(node, 1.20)
-        sequence = node.status_sequence
-        _call_trigger(node, node.submit_client)
-        accepted_small = _wait_status_after(
+        small_generation = initial_generation + 1
+        accepted_small, small_decision = _submit_and_wait(
             node,
-            sequence,
-            lambda status: status.state == LocalizationStatus.STATE_TRACKING
+            status_predicate=lambda status: status.state == LocalizationStatus.STATE_TRACKING
             and status.localization_accepted
-            and status.correction_generation == initial_generation + 1,
+            and status.correction_generation == small_generation,
+            decision_code="CORRECTION_ACCEPTED",
+            decision_generation=small_generation,
+            decision_accepted=True,
         )
         _spin_for(node, 0.20)
         shifted_tf = _map_odom_xy(node)
@@ -209,6 +267,7 @@ def main(args=None) -> None:
             {
                 "event": "tracking_small_correction",
                 "generation": int(accepted_small.correction_generation),
+                "decision": small_decision["code"],
                 "map_odom_shift_m": shift,
             }
         )
@@ -218,47 +277,44 @@ def main(args=None) -> None:
         _set_remote_parameters(node, {"translation_bias_x_m": 1.00})
         _spin_for(node, 1.20)
         generation_before_reject = int(accepted_small.correction_generation)
-        sequence = node.status_sequence
-        _call_trigger(node, node.submit_client)
-        rejected = _wait_status_after(
+        rejected, reject_decision = _submit_and_wait(
             node,
-            sequence,
-            lambda status: status.state == LocalizationStatus.STATE_RECOVERING
+            status_predicate=lambda status: status.state == LocalizationStatus.STATE_RECOVERING
             and not status.localization_accepted
             and status.correction_generation == generation_before_reject,
-        )
-        decision_code = (
-            node.latest_decision.get("code")
-            if isinstance(node.latest_decision, dict)
-            else None
+            decision_code="TRANSLATION_JUMP_REJECTED",
+            decision_generation=generation_before_reject,
+            decision_accepted=False,
         )
         result["events"].append(
             {
                 "event": "tracking_jump_rejected",
                 "generation": int(rejected.correction_generation),
-                "decision": decision_code,
+                "decision": reject_decision["code"],
             }
         )
-        result["checks"]["tracking_jump_rejected"] = (
-            decision_code == "TRANSLATION_JUMP_REJECTED"
-        )
+        result["checks"]["tracking_jump_rejected"] = True
         result["checks"]["rejected_generation_frozen"] = (
             int(rejected.correction_generation) == generation_before_reject
         )
 
         # The same jump is inside the RECOVERING 2.0 m envelope and must be accepted.
-        sequence = node.status_sequence
-        _call_trigger(node, node.submit_client)
-        recovered = _wait_status_after(
+        recovered_generation = generation_before_reject + 1
+        recovered, recover_decision = _submit_and_wait(
             node,
-            sequence,
-            lambda status: status.state == LocalizationStatus.STATE_TRACKING
+            status_predicate=lambda status: status.state == LocalizationStatus.STATE_TRACKING
             and status.localization_accepted
-            and status.correction_generation == generation_before_reject + 1,
+            and status.correction_generation == recovered_generation,
+            decision_code="CORRECTION_ACCEPTED",
+            decision_generation=recovered_generation,
+            decision_accepted=True,
         )
-        recovered_generation = int(recovered.correction_generation)
         result["events"].append(
-            {"event": "recovering_correction_accepted", "generation": recovered_generation}
+            {
+                "event": "recovering_correction_accepted",
+                "generation": int(recovered.correction_generation),
+                "decision": recover_decision["code"],
+            }
         )
         result["checks"]["recovering_envelope_accepted"] = True
 
@@ -267,13 +323,13 @@ def main(args=None) -> None:
         _set_remote_parameters(node, {"fitness_score": 99.0})
         lost_status = None
         for attempt in range(1, 4):
-            sequence = node.status_sequence
-            _call_trigger(node, node.submit_client)
-            lost_status = _wait_status_after(
+            lost_status, fitness_decision = _submit_and_wait(
                 node,
-                sequence,
-                lambda status: not status.localization_accepted
+                status_predicate=lambda status: not status.localization_accepted
                 and status.correction_generation == recovered_generation,
+                decision_code="FITNESS_REJECTED",
+                decision_generation=recovered_generation,
+                decision_accepted=False,
             )
             result["events"].append(
                 {
@@ -281,6 +337,7 @@ def main(args=None) -> None:
                     "attempt": attempt,
                     "state": int(lost_status.state),
                     "generation": int(lost_status.correction_generation),
+                    "decision": fitness_decision["code"],
                 }
             )
         result["checks"]["three_rejections_escalate_lost"] = (
@@ -295,30 +352,24 @@ def main(args=None) -> None:
             {"fitness_score": 0.01, "translation_bias_x_m": 5.0},
         )
         _spin_for(node, 1.20)
-        sequence = node.status_sequence
-        _call_trigger(node, node.submit_client)
-        reanchored = _wait_status_after(
+        reanchor_generation = recovered_generation + 1
+        reanchored, reanchor_decision = _submit_and_wait(
             node,
-            sequence,
-            lambda status: status.state == LocalizationStatus.STATE_TRACKING
+            status_predicate=lambda status: status.state == LocalizationStatus.STATE_TRACKING
             and status.localization_accepted
-            and status.correction_generation == recovered_generation + 1,
-        )
-        decision_code = (
-            node.latest_decision.get("code")
-            if isinstance(node.latest_decision, dict)
-            else None
+            and status.correction_generation == reanchor_generation,
+            decision_code="REANCHOR_ACCEPTED",
+            decision_generation=reanchor_generation,
+            decision_accepted=True,
         )
         result["events"].append(
             {
                 "event": "lost_reanchor",
                 "generation": int(reanchored.correction_generation),
-                "decision": decision_code,
+                "decision": reanchor_decision["code"],
             }
         )
-        result["checks"]["lost_reanchor_accepted"] = (
-            decision_code == "REANCHOR_ACCEPTED"
-        )
+        result["checks"]["lost_reanchor_accepted"] = True
 
         _call_trigger(node, node.clear_client)
         passed = all(bool(value) for value in result["checks"].values())
