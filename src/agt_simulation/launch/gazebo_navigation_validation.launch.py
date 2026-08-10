@@ -81,6 +81,10 @@ def generate_launch_description():
     map_yaml = LaunchConfiguration("map_yaml")
     route_file = LaunchConfiguration("route_file")
     nav2_params = LaunchConfiguration("nav2_params")
+    planner_id = LaunchConfiguration("planner_id")
+    controller_id = LaunchConfiguration("controller_id")
+    runner_server_timeout_s = LaunchConfiguration("runner_server_timeout_s")
+    runner_segment_timeout_s = LaunchConfiguration("runner_segment_timeout_s")
 
     localization_stack = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -103,6 +107,14 @@ def generate_launch_description():
                 "route_file": route_file,
                 "auto_start": ParameterValue(auto_start_route, value_type=bool),
                 "startup_delay_s": 7.0,
+                "planner_id": ParameterValue(planner_id, value_type=str),
+                "controller_id": ParameterValue(controller_id, value_type=str),
+                "server_timeout_s": ParameterValue(
+                    runner_server_timeout_s, value_type=float
+                ),
+                "segment_timeout_s": ParameterValue(
+                    runner_segment_timeout_s, value_type=float
+                ),
             }
         ],
     )
@@ -160,6 +172,10 @@ def generate_launch_description():
             DeclareLaunchArgument("map_yaml", default_value=default_map_yaml),
             DeclareLaunchArgument("route_file", default_value=str(default_route)),
             DeclareLaunchArgument("nav2_params", default_value=str(default_nav2_params)),
+            DeclareLaunchArgument("planner_id", default_value="GridBased"),
+            DeclareLaunchArgument("controller_id", default_value="FollowPath"),
+            DeclareLaunchArgument("runner_server_timeout_s", default_value="20.0"),
+            DeclareLaunchArgument("runner_segment_timeout_s", default_value="45.0"),
             localization_stack,
             # /agt/localization/status is volatile and the initial correction is one-shot.
             # Subscribe before that event, then delay actual route execution.
