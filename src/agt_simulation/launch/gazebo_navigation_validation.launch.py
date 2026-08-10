@@ -119,6 +119,9 @@ def generate_launch_description():
                 "startup_motion_enabled": True,
                 "require_sensor_input_ready": True,
                 "sensor_status_timeout": 1.0,
+                # SOFTWARE_ONLY localization evidence is intentionally sparse.
+                # LOST still invalidates immediately through the status callback.
+                "localization_status_timeout": 60.0,
             },
         ],
     )
