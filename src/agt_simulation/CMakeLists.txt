@@ -23,7 +23,9 @@ set(AGT_SIMULATION_ENTRYPOINTS
   gazebo_odom_adapter.py
   gazebo_sensor_adapter.py
   keyboard_teleop.py
+  synthetic_localization_evidence.py
   v25_11a_baseline_acceptance.py
+  v25_11b_localization_acceptance.py
 )
 
 foreach(_script IN LISTS AGT_SIMULATION_ENTRYPOINTS)
