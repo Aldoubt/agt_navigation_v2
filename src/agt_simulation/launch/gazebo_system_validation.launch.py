@@ -20,6 +20,7 @@ def generate_launch_description():
         "/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock",
         "/model/bunker_sim/cmd_vel@geometry_msgs/msg/Twist]ignition.msgs.Twist",
         "/model/bunker_sim/odometry@nav_msgs/msg/Odometry[ignition.msgs.Odometry",
+        "/model/bunker_sim/ground_truth@nav_msgs/msg/Odometry[ignition.msgs.Odometry",
         "/simulation/bunker/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan",
         "/simulation/bunker/imu@sensor_msgs/msg/Imu[ignition.msgs.IMU",
     ]
@@ -40,6 +41,7 @@ def generate_launch_description():
                 remappings=[
                     ("/model/bunker_sim/cmd_vel", "/agt/safety/cmd_vel"),
                     ("/model/bunker_sim/odometry", "/simulation/bunker/odometry"),
+                    ("/model/bunker_sim/ground_truth", "/simulation/bunker/ground_truth"),
                     ("/simulation/bunker/scan", "/simulation/raw/scan"),
                     ("/simulation/bunker/imu", "/simulation/raw/imu"),
                 ],
@@ -73,7 +75,7 @@ def generate_launch_description():
                 executable="static_transform_publisher",
                 name="agt_sim_lidar_tf",
                 arguments=[
-                    "--x", "0.10", "--y", "0", "--z", "0.28",
+                    "--x", "0.10", "--y", "0", "--z", "0.195",
                     "--roll", "0", "--pitch", "0", "--yaw", "0",
                     "--frame-id", "base_link", "--child-frame-id", "lidar_link",
                 ],
@@ -83,7 +85,7 @@ def generate_launch_description():
                 executable="static_transform_publisher",
                 name="agt_sim_imu_tf",
                 arguments=[
-                    "--x", "0", "--y", "0", "--z", "0.14",
+                    "--x", "0", "--y", "0", "--z", "0.08",
                     "--roll", "0", "--pitch", "0", "--yaw", "0",
                     "--frame-id", "base_link", "--child-frame-id", "imu_link",
                 ],
