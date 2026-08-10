@@ -1,0 +1,30 @@
+schema_version: 1
+validation_scope: SOFTWARE_ONLY
+simulator:
+  ros_distro: humble
+  gazebo_distribution: fortress
+  integration: ros_gz
+platform:
+  model: bunker_sim
+  dynamics_verified: false
+  geometry_verified: false
+sensors:
+  lidar:
+    topic: /agt/sensors/lidar/scan
+    frame_id: lidar_link
+    rate_hz: 10.0
+  imu:
+    topic: /agt/sensors/imu/data
+    frame_id: imu_link
+    rate_hz: 100.0
+odometry:
+  topic: /agt/mapping/odometry
+  frame_id: odom
+  child_frame_id: base_footprint
+planning_visualization:
+  nav2_global_plan: /plan
+  route_runtime_path: /agt/navigation/runtime_path
+acceptance:
+  field_evidence: false
+  vehicle_acceptance: false
+  localization_accuracy_claim: false
