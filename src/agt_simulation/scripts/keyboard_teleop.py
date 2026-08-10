@@ -134,7 +134,8 @@ def main(args=None) -> None:
 
     rclpy.init(args=args)
     node = KeyboardTeleop()
-    old_settings = termios.tcgetattr(sys.stdin)
+    stdin_fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(stdin_fd)
     keymap = {
         "w": (1.0, 0.0),
         "s": (-1.0, 0.0),
@@ -154,7 +155,7 @@ def main(args=None) -> None:
     )
 
     try:
-        tty.setcbreak(sys.stdin.fileno())
+        tty.setcbreak(stdin_fd)
         while rclpy.ok():
             rclpy.spin_once(node, timeout_sec=0.0)
             key = _read_key(0.05)
@@ -187,7 +188,7 @@ def main(args=None) -> None:
                 rclpy.spin_once(node, timeout_sec=0.02)
                 node.publisher.publish(Twist())
         finally:
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_settings)
+            termios.tcsetattr(stdin_fd, termios.TCSADRAIN, old_settings)
             node.destroy_node()
             if rclpy.ok():
                 rclpy.shutdown()
