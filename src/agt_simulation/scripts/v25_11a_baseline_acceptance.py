@@ -32,15 +32,29 @@ class BaselineObserver(Node):
                 ).value
             )
         )
-        self.counts = {"clock": 0, "odom": 0, "scan": 0, "imu": 0}
+        self.counts = {
+            "clock": 0,
+            "odom": 0,
+            "ground_truth": 0,
+            "scan": 0,
+            "imu": 0,
+        }
         self.first_wall = {}
         self.last_wall = {}
-        self.initial_xy = None
-        self.latest_xy = None
+        self.initial_odom_xy = None
+        self.latest_odom_xy = None
+        self.initial_truth_xy = None
+        self.latest_truth_xy = None
         self.cmd_pub = self.create_publisher(Twist, "/agt/safety/cmd_vel", 10)
         self.create_subscription(Clock, "/clock", lambda msg: self._seen("clock"), 10)
         self.create_subscription(
             Odometry, "/agt/mapping/odometry", self._odom, 20
+        )
+        self.create_subscription(
+            Odometry,
+            "/simulation/bunker/ground_truth",
+            self._ground_truth,
+            20,
         )
         self.create_subscription(
             LaserScan,
@@ -66,9 +80,16 @@ class BaselineObserver(Node):
     def _odom(self, message: Odometry) -> None:
         self._seen("odom")
         xy = (float(message.pose.pose.position.x), float(message.pose.pose.position.y))
-        if self.initial_xy is None:
-            self.initial_xy = xy
-        self.latest_xy = xy
+        if self.initial_odom_xy is None:
+            self.initial_odom_xy = xy
+        self.latest_odom_xy = xy
+
+    def _ground_truth(self, message: Odometry) -> None:
+        self._seen("ground_truth")
+        xy = (float(message.pose.pose.position.x), float(message.pose.pose.position.y))
+        if self.initial_truth_xy is None:
+            self.initial_truth_xy = xy
+        self.latest_truth_xy = xy
 
     def rate(self, name: str) -> float:
         elapsed = self.last_wall.get(name, 0.0) - self.first_wall.get(name, 0.0)
@@ -96,6 +117,12 @@ def _publish_motion(node: BaselineObserver, duration_s: float = 2.0) -> None:
         rclpy.spin_once(node, timeout_sec=0.05)
 
 
+def _displacement(before, after) -> float:
+    if before is None or after is None:
+        return 0.0
+    return math.hypot(after[0] - before[0], after[1] - before[1])
+
+
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = BaselineObserver()
@@ -105,6 +132,7 @@ def main(args=None) -> None:
         warmed = _spin_until(
             node,
             lambda: node.counts["odom"] >= 20
+            and node.counts["ground_truth"] >= 20
             and node.counts["scan"] >= 10
             and node.counts["imu"] >= 50
             and node.counts["clock"] >= 20,
@@ -112,7 +140,8 @@ def main(args=None) -> None:
         )
         result["checks"]["topics_warm"] = warmed
         result["rates_hz"] = {
-            name: round(node.rate(name), 3) for name in ("odom", "scan", "imu")
+            name: round(node.rate(name), 3)
+            for name in ("odom", "ground_truth", "scan", "imu")
         }
 
         tf_checks = {}
@@ -125,17 +154,29 @@ def main(args=None) -> None:
         tf_checks["map_odom_absent"] = not node.tf.can_transform("map", "odom", Time())
         result["checks"]["tf"] = tf_checks
 
-        before = node.latest_xy
+        before_odom = node.latest_odom_xy
+        before_truth = node.latest_truth_xy
         _publish_motion(node)
-        after = node.latest_xy
-        displacement = 0.0
-        if before is not None and after is not None:
-            displacement = math.hypot(after[0] - before[0], after[1] - before[1])
-        result["measured_displacement_m"] = displacement
-        result["checks"]["command_path_moves_vehicle"] = displacement >= 0.05
+        after_odom = node.latest_odom_xy
+        after_truth = node.latest_truth_xy
+
+        odom_displacement = _displacement(before_odom, after_odom)
+        truth_displacement = _displacement(before_truth, after_truth)
+        result["wheel_odom_displacement_m"] = odom_displacement
+        result["ground_truth_displacement_m"] = truth_displacement
+        result["odom_truth_displacement_error_m"] = abs(
+            odom_displacement - truth_displacement
+        )
+        result["checks"]["wheel_odom_reports_motion"] = odom_displacement >= 0.05
+        result["checks"]["physics_model_moves"] = truth_displacement >= 0.05
+        result["checks"]["command_path_moves_vehicle"] = (
+            result["checks"]["wheel_odom_reports_motion"]
+            and result["checks"]["physics_model_moves"]
+        )
 
         rate_checks = {
             "odom_ge_5_hz": node.rate("odom") >= 5.0,
+            "ground_truth_ge_5_hz": node.rate("ground_truth") >= 5.0,
             "scan_ge_5_hz": node.rate("scan") >= 5.0,
             "imu_ge_50_hz": node.rate("imu") >= 50.0,
         }
