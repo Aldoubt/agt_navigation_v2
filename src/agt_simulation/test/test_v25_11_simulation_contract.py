@@ -38,24 +38,25 @@ def test_bunker_proxy_is_explicitly_software_only_and_has_drive_sensors():
     assert "OdometryPublisher" in model
 
 
-def test_wheel_frames_follow_fortress_sdf_semantics():
+def test_model_avoids_relative_to_gui_serialization_warning_and_keeps_wheel_axes():
     model = _read("models/bunker_sim/model.sdf")
-    for wheel in (
-        "front_left_wheel",
-        "rear_left_wheel",
-        "front_right_wheel",
-        "rear_right_wheel",
-    ):
-        assert f'<pose relative_to="{wheel}"/>' in model
+    assert "relative_to=" not in model
+    assert model.count("<pose/>") == 4
     assert model.count('xyz expressed_in="__model__">0 1 0</xyz>') == 4
-    assert model.count('pose relative_to="base_link"') >= 6
+    for pose in (
+        "0.34 0.40 0.14 -1.57079632679 0 0",
+        "-0.34 0.40 0.14 -1.57079632679 0 0",
+        "0.34 -0.40 0.14 -1.57079632679 0 0",
+        "-0.34 -0.40 0.14 -1.57079632679 0 0",
+    ):
+        assert f"<pose>{pose}</pose>" in model
 
 
 def test_lidar_has_visible_mount_and_launch_tf_matches_model_offset():
     model = _read("models/bunker_sim/model.sdf")
     launch = _read("launch/gazebo_system_validation.launch.py")
     assert "lidar_mount_visual" in model
-    assert '<pose relative_to="base_link">0.10 0 0.195 0 0 0</pose>' in model
+    assert "<pose>0.10 0 0.535 0 0 0</pose>" in model
     assert '"--x", "0.10", "--y", "0", "--z", "0.195"' in launch
 
 
@@ -94,7 +95,7 @@ def test_rviz_config_is_valid_and_reserves_planning_and_mapping_topics():
     assert "Global Occupancy (enable with map stack)" in text
 
 
-def test_launch_bridges_clock_drive_odom_ground_truth_lidar_and_imu():
+def test_launch_bridges_clock_drive_odom_ground_truth_lidar_and_imu_and_delays_rviz():
     launch = _read("launch/gazebo_system_validation.launch.py")
     for token in (
         "/clock@rosgraph_msgs/msg/Clock[ignition.msgs.Clock",
@@ -108,6 +109,8 @@ def test_launch_bridges_clock_drive_odom_ground_truth_lidar_and_imu():
     assert "/agt/safety/cmd_vel" in launch
     assert "/simulation/bunker/odometry" in launch
     assert "/simulation/bunker/ground_truth" in launch
+    assert "TimerAction" in launch
+    assert "period=1.5" in launch
 
 
 def test_baseline_acceptance_requires_physics_truth_not_only_wheel_odometry():
