@@ -80,13 +80,18 @@ def test_simulation_odom_adapter_never_claims_map_odom():
     assert 'frame_id = "map"' not in adapter
 
 
-def test_rviz_config_is_valid_and_reserves_planning_visualization_topics():
+def test_rviz_config_is_valid_and_reserves_planning_and_mapping_topics():
     rviz = yaml.safe_load(_read("rviz/gazebo_system_validation.rviz"))
     assert rviz["Visualization Manager"]["Global Options"]["Fixed Frame"] == "odom"
     text = _read("rviz/gazebo_system_validation.rviz")
+    assert "/agt/mapping/odometry" in text
     assert "/agt/sensors/lidar/scan" in text
+    assert "/agt/mapping/registered_points" in text
+    assert "/agt/map/global_occupancy" in text
     assert "/plan" in text
     assert "/agt/navigation/runtime_path" in text
+    assert "Mapping Registered Points (enable with mapping frontend)" in text
+    assert "Global Occupancy (enable with map stack)" in text
 
 
 def test_launch_bridges_clock_drive_odom_ground_truth_lidar_and_imu():
@@ -115,6 +120,21 @@ def test_baseline_acceptance_requires_physics_truth_not_only_wheel_odometry():
     assert "odom_truth_displacement_error_m" in acceptance
 
 
+def test_keyboard_teleop_is_tty_deadman_tool_on_post_safety_topic():
+    teleop = _read("scripts/keyboard_teleop.py")
+    assert "SOFTWARE_ONLY" in teleop
+    assert '"/agt/safety/cmd_vel"' in teleop
+    assert "deadman_timeout_s" in teleop
+    assert "sys.stdin.isatty()" in teleop
+    assert "requires an interactive TTY" in teleop
+    assert "node.stop()" in teleop
+    assert "node.publisher.publish(Twist())" in teleop
+    assert '"w": (1.0, 0.0)' in teleop
+    assert '"s": (-1.0, 0.0)' in teleop
+    assert '"a": (0.0, 1.0)' in teleop
+    assert '"d": (0.0, -1.0)' in teleop
+
+
 def test_symlink_install_entrypoints_are_materialized_executable():
     cmake = _read("CMakeLists.txt")
     for token in (
@@ -123,6 +143,7 @@ def test_symlink_install_entrypoints_are_materialized_executable():
         "OWNER_EXECUTE",
         "GROUP_EXECUTE",
         "WORLD_EXECUTE",
+        "keyboard_teleop.py",
         "v25_11a_baseline_acceptance.py",
     ):
         assert token in cmake
