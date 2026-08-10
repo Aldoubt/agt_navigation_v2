@@ -75,3 +75,28 @@ def test_launch_bridges_clock_drive_odom_lidar_and_imu():
         assert token in launch
     assert "/agt/safety/cmd_vel" in launch
     assert "/simulation/bunker/odometry" in launch
+
+
+def test_baseline_acceptance_exercises_command_rates_tf_and_no_map_odom():
+    smoke = _read("scripts/v25_11a_baseline_acceptance.py")
+    assert '"/agt/safety/cmd_vel"' in smoke
+    assert '"/agt/mapping/odometry"' in smoke
+    assert '"/agt/sensors/lidar/scan"' in smoke
+    assert '"/agt/sensors/imu/data"' in smoke
+    assert 'not node.tf.can_transform("map", "odom", Time())' in smoke
+    assert 'displacement >= 0.05' in smoke
+    assert 'node.rate("scan") >= 5.0' in smoke
+    assert 'node.rate("imu") >= 50.0' in smoke
+
+
+def test_symlink_install_entrypoints_are_materialized_executable():
+    cmake = _read("CMakeLists.txt")
+    assert "AGT_SIMULATION_GENERATED_SCRIPT_DIR" in cmake
+    assert "FILE_PERMISSIONS" in cmake
+    assert "OWNER_EXECUTE" in cmake
+    for script in (
+        "gazebo_odom_adapter.py",
+        "gazebo_sensor_adapter.py",
+        "v25_11a_baseline_acceptance.py",
+    ):
+        assert script in cmake
