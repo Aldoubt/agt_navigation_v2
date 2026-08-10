@@ -35,7 +35,7 @@ def test_nav2_contract_uses_canonical_frames_topics_and_plugins():
     assert local_map["obstacle_layer"]["scan"]["topic"] == "/agt/sensors/lidar/scan"
 
 
-def test_launch_reuses_global_correction_manager_path_without_amcl():
+def test_launch_reuses_global_correction_and_routes_motion_through_safety():
     launch = read("launch/gazebo_navigation_validation.launch.py")
     compile(launch, "gazebo_navigation_validation.launch.py", "exec")
     assert "gazebo_localization_validation.launch.py" in launch
@@ -43,9 +43,25 @@ def test_launch_reuses_global_correction_manager_path_without_amcl():
     assert 'package="nav2_map_server"' in launch
     assert 'package="nav2_planner"' in launch
     assert 'package="nav2_controller"' in launch
-    assert '("cmd_vel", "/agt/safety/cmd_vel")' in launch
+    assert '("cmd_vel", "/agt/navigation/cmd_vel")' in launch
+    assert 'package="agt_safety"' in launch
+    assert 'package="agt_sensor_monitor"' in launch
+    assert '"startup_motion_enabled": True' in launch
+    assert '"require_sensor_input_ready": True' in launch
+    assert "v25_11d_sensor_monitor.yaml" in launch
     assert "nav2_amcl" not in launch
     assert "SOFTWARE_ONLY" in launch
+
+
+def test_sim_sensor_monitor_contract_matches_gazebo_rates_and_standard_messages():
+    config = yaml.safe_load(read("config/v25_11d_sensor_monitor.yaml"))
+    params = config["agt_sensor_monitor"]["ros__parameters"]
+    assert params["lidar"]["topic"] == "/agt/sensors/lidar/scan"
+    assert params["lidar"]["message_type"] == "laser_scan"
+    assert params["lidar"]["required"] is True
+    assert params["imu"]["topic"] == "/agt/sensors/imu/data"
+    assert params["imu"]["required"] is True
+    assert params["filtered_lidar"]["enabled"] is False
 
 
 def test_runner_is_fail_closed_on_localization_map_identity():
