@@ -1,4 +1,6 @@
+import ast
 from pathlib import Path
+from types import SimpleNamespace
 
 import yaml
 
@@ -202,6 +204,49 @@ def test_v25_11b_acceptance_correlates_each_decision_with_its_status_event():
         assert token in acceptance
     assert 'decision.get("generation", -1)' in acceptance
     assert 'bool(decision.get("accepted")) is accepted' in acceptance
+
+
+def test_v25_11b_acceptance_correlates_decision_with_new_async_callback():
+    acceptance = _read("scripts/v25_11b_localization_acceptance.py")
+    tree = ast.parse(acceptance)
+    functions = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name in {"_decision_matches", "_wait_decision_after"}
+    ]
+    namespace = {"LocalizationAcceptance": object}
+    exec(compile(ast.Module(body=functions, type_ignores=[]), "acceptance", "exec"), namespace)
+    matches = namespace["_decision_matches"]
+
+    old_decision = {"accepted": True, "code": "CORRECTION_ACCEPTED", "generation": 4}
+    new_decision = {"accepted": False, "code": "TRANSLATION_JUMP_REJECTED", "generation": 4}
+    assert matches(old_decision, "CORRECTION_ACCEPTED", 4, True)
+    assert not matches(old_decision, "TRANSLATION_JUMP_REJECTED", 4, False)
+    assert matches(new_decision, "TRANSLATION_JUMP_REJECTED", 4, False)
+    assert not matches(new_decision, "TRANSLATION_JUMP_REJECTED", 5, False)
+
+    node = SimpleNamespace(
+        decision_sequence=7,
+        latest_decision=old_decision,
+    )
+
+    def spin_until(_node, predicate, _timeout_s):
+        assert not predicate()
+        node.decision_sequence = 8
+        node.latest_decision = new_decision
+        return predicate()
+
+    namespace["_spin_until"] = spin_until
+    waited = namespace["_wait_decision_after"](
+        node, 7, "TRANSLATION_JUMP_REJECTED", 4, False
+    )
+    assert waited is new_decision
+
+    assert "self.decision_sequence = 0" in acceptance
+    assert "self.decision_sequence += 1" in acceptance
+    assert "_wait_decision_after" in acceptance
+    assert "node.decision_sequence > sequence" in acceptance
+    assert "_spin_for" not in acceptance
 
 
 def test_simulation_package_declares_v25_11b_runtime_dependencies():
