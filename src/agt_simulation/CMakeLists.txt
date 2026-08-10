@@ -12,9 +12,38 @@ install(DIRECTORY
   DESTINATION share/${PROJECT_NAME}
 )
 
+# Keep ROS entrypoints executable under colcon --symlink-install even when the
+# repository checkout stores Python sources with mode 0644.
+set(AGT_SIMULATION_GENERATED_SCRIPT_DIR
+  "${CMAKE_CURRENT_BINARY_DIR}/generated_scripts"
+)
+file(MAKE_DIRECTORY "${AGT_SIMULATION_GENERATED_SCRIPT_DIR}")
+
+set(AGT_SIMULATION_ENTRYPOINTS
+  gazebo_odom_adapter.py
+  gazebo_sensor_adapter.py
+)
+
+foreach(_script IN LISTS AGT_SIMULATION_ENTRYPOINTS)
+  file(COPY
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/${_script}"
+    DESTINATION "${AGT_SIMULATION_GENERATED_SCRIPT_DIR}"
+    FILE_PERMISSIONS
+      OWNER_READ OWNER_WRITE OWNER_EXECUTE
+      GROUP_READ GROUP_EXECUTE
+      WORLD_READ WORLD_EXECUTE
+  )
+endforeach()
+
+set(AGT_SIMULATION_GENERATED_ENTRYPOINTS "")
+foreach(_script IN LISTS AGT_SIMULATION_ENTRYPOINTS)
+  list(APPEND AGT_SIMULATION_GENERATED_ENTRYPOINTS
+    "${AGT_SIMULATION_GENERATED_SCRIPT_DIR}/${_script}"
+  )
+endforeach()
+
 install(PROGRAMS
-  scripts/gazebo_odom_adapter.py
-  scripts/gazebo_sensor_adapter.py
+  ${AGT_SIMULATION_GENERATED_ENTRYPOINTS}
   DESTINATION lib/${PROJECT_NAME}
 )
 
