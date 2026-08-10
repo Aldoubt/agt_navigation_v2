@@ -14,6 +14,7 @@ def generate_launch_description():
     config = simulation_share / "config" / "v25_11_localization.yaml"
     rviz = simulation_share / "rviz" / "gazebo_localization_validation.rviz"
     use_rviz = LaunchConfiguration("use_rviz")
+    run_acceptance = LaunchConfiguration("run_acceptance")
 
     base_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
@@ -38,6 +39,14 @@ def generate_launch_description():
         parameters=[str(config)],
     )
 
+    acceptance = Node(
+        package="agt_simulation",
+        executable="v25_11b_localization_acceptance.py",
+        name="agt_v25_11b_localization_acceptance",
+        output="screen",
+        condition=IfCondition(run_acceptance),
+    )
+
     rviz_node = Node(
         package="rviz2",
         executable="rviz2",
@@ -51,9 +60,13 @@ def generate_launch_description():
     return LaunchDescription(
         [
             DeclareLaunchArgument("use_rviz", default_value="true"),
+            DeclareLaunchArgument("run_acceptance", default_value="false"),
             base_launch,
             correction_manager,
             synthetic_evidence,
+            # Start the observer before the delayed initial correction so it cannot
+            # miss the first canonical generation on a volatile status topic.
+            TimerAction(period=0.5, actions=[acceptance]),
             # Wait for the initial sparse correction so RViz starts with map->odom.
             TimerAction(period=3.0, actions=[rviz_node]),
         ]
