@@ -15,6 +15,14 @@ FAULT_CASES = {
     "localization_lost",
     "planner_invalid",
     "controller_invalid",
+    "lidar_dropout",
+    "imu_dropout",
+}
+
+ACTIVE_FAULT_CASES = {
+    "localization_lost",
+    "lidar_dropout",
+    "imu_dropout",
 }
 
 
@@ -80,7 +88,7 @@ def launch_setup(context):
     )
 
     actions = [navigation_stack, acceptance]
-    if fault_case == "localization_lost":
+    if fault_case in ACTIVE_FAULT_CASES:
         actions.append(
             Node(
                 package="agt_simulation",
@@ -90,7 +98,7 @@ def launch_setup(context):
                 parameters=[
                     {
                         "use_sim_time": True,
-                        "fault_case": "localization_lost",
+                        "fault_case": fault_case,
                         "trigger_delay_s": trigger_delay_s,
                         "service_timeout_s": 5.0,
                     }
@@ -108,14 +116,14 @@ def generate_launch_description():
                 default_value="map_identity_mismatch",
                 description=(
                     "V25-11D case: map_identity_mismatch, localization_lost, "
-                    "planner_invalid, controller_invalid"
+                    "planner_invalid, controller_invalid, lidar_dropout, imu_dropout"
                 ),
             ),
             DeclareLaunchArgument("use_rviz", default_value="false"),
             DeclareLaunchArgument(
                 "trigger_delay_s",
                 default_value="9.0",
-                description="wall-clock delay for active localization LOST injection",
+                description="wall-clock delay for active V25-11D fault injection",
             ),
             OpaqueFunction(function=launch_setup),
         ]
