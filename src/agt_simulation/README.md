@@ -34,31 +34,47 @@ source install/setup.bash
 
 ## Launch V25-11A
 
+Terminal 1:
+
 ```bash
 ros2 launch agt_simulation gazebo_system_validation.launch.py
 ```
 
 The launch starts Gazebo, the ROS/Gazebo bridge, AGT odometry and sensor adapters, required static sensor TF, and RViz.
 
-Drive manually through the same command path that later Nav2 / safety will use:
+Terminal 2 runs the automated baseline smoke:
+
+```bash
+source /opt/ros/humble/setup.bash
+source install/setup.bash
+ros2 run agt_simulation v25_11a_baseline_acceptance.py
+```
+
+The smoke publishes motion through `/agt/safety/cmd_vel`, verifies that the simulated vehicle moves, checks topic rates and TF, and writes:
+
+```text
+/tmp/agt_v25_11a_baseline_result.json
+```
+
+Expected PASS checks:
+
+```text
+/clock                         active
+/agt/mapping/odometry          >= 5 Hz
+/agt/sensors/lidar/scan        >= 5 Hz
+/agt/sensors/imu/data          >= 50 Hz
+odom -> base_footprint         available
+base_footprint -> lidar_link   available
+base_footprint -> imu_link     available
+map -> odom                    absent in V25-11A
+command displacement           >= 0.05 m
+```
+
+For manual control through the same command path that later Nav2 / safety will use:
 
 ```bash
 ros2 topic pub --rate 10 /agt/safety/cmd_vel geometry_msgs/msg/Twist \
   "{linear: {x: 0.2}, angular: {z: 0.0}}"
-```
-
-Expected baseline ROS contracts:
-
-```text
-/clock
-/agt/mapping/odometry
-/agt/sensors/lidar/scan
-/agt/sensors/imu/data
-
-odom -> base_footprint
-base_footprint -> base_link
-base_link -> lidar_link
-base_link -> imu_link
 ```
 
 `agt_simulation` must never publish `map -> odom`. V25-11B will connect simulated localization evidence to the existing V25-10 GlobalCorrectionManager so that production correction logic remains the authority for that transform.
