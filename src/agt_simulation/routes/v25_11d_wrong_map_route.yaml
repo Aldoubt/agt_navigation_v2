@@ -1,0 +1,16 @@
+schema: agt_route/v1
+route_id: v25_11d_wrong_map_identity
+map_id: v25_11_gazebo
+map_hash: software-only:agri-validation-v1-mismatch
+frame_id: map
+source: V25-11D_FAULT_INJECTION
+direction: forward
+clearance_m: 0.75
+nominal_speed_mps: 0.45
+points:
+  - {x: -7.0, y: 0.0, yaw: 0.0}
+  - {x: -6.0, y: 0.0, yaw: 0.0}
+  - {x: -5.0, y: 0.0, yaw: 0.0}
+  - {x: -4.0, y: 0.0, yaw: 0.0}
+  - {x: -3.0, y: 0.0, yaw: 0.0}
+  - {x: -2.0, y: 0.0, yaw: 0.0}
