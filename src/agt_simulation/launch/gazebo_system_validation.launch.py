@@ -2,7 +2,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -24,6 +24,16 @@ def generate_launch_description():
         "/simulation/bunker/scan@sensor_msgs/msg/LaserScan[ignition.msgs.LaserScan",
         "/simulation/bunker/imu@sensor_msgs/msg/Imu[ignition.msgs.IMU",
     ]
+
+    rviz_node = Node(
+        package="rviz2",
+        executable="rviz2",
+        name="agt_gazebo_validation_rviz",
+        arguments=["-d", str(rviz)],
+        parameters=[{"use_sim_time": True}],
+        condition=IfCondition(use_rviz),
+        output="screen",
+    )
 
     return LaunchDescription(
         [
@@ -90,14 +100,9 @@ def generate_launch_description():
                     "--frame-id", "base_link", "--child-frame-id", "imu_link",
                 ],
             ),
-            Node(
-                package="rviz2",
-                executable="rviz2",
-                name="agt_gazebo_validation_rviz",
-                arguments=["-d", str(rviz)],
-                parameters=[{"use_sim_time": True}],
-                condition=IfCondition(use_rviz),
-                output="screen",
-            ),
+            # Let /clock and the dynamic odom->base transform warm up before RViz
+            # subscribes to stamped sensor data. This avoids startup-only message
+            # filter drops for the first LaserScan frames near t=0.
+            TimerAction(period=1.5, actions=[rviz_node]),
         ]
     )
