@@ -71,9 +71,12 @@ def write_validation_map() -> str:
 
 def generate_launch_description():
     share = Path(get_package_share_directory("agt_simulation"))
+    safety_share = Path(get_package_share_directory("agt_safety"))
     default_map_yaml = write_validation_map()
     default_route = share / "routes" / "v25_11c_map_route.yaml"
     default_nav2_params = share / "config" / "v25_11c_nav2.yaml"
+    sensor_monitor_params = share / "config" / "v25_11d_sensor_monitor.yaml"
+    safety_params = safety_share / "config" / "bunker_safety.yaml"
 
     use_rviz = LaunchConfiguration("use_rviz")
     run_acceptance = LaunchConfiguration("run_acceptance")
@@ -94,6 +97,30 @@ def generate_launch_description():
             "use_rviz": use_rviz,
             "run_acceptance": "false",
         }.items(),
+    )
+
+    sensor_monitor = Node(
+        package="agt_sensor_monitor",
+        executable="agt_sensor_monitor_node",
+        name="agt_sensor_monitor",
+        output="screen",
+        parameters=[sensor_monitor_params, {"use_sim_time": True}],
+    )
+
+    safety_controller = Node(
+        package="agt_safety",
+        executable="tracked_safety_controller.py",
+        name="agt_tracked_safety_controller",
+        output="screen",
+        parameters=[
+            safety_params,
+            {
+                "use_sim_time": True,
+                "startup_motion_enabled": True,
+                "require_sensor_input_ready": True,
+                "sensor_status_timeout": 1.0,
+            },
+        ],
     )
 
     route_runner = Node(
@@ -148,7 +175,7 @@ def generate_launch_description():
         name="controller_server",
         output="screen",
         parameters=[nav2_params],
-        remappings=[("cmd_vel", "/agt/safety/cmd_vel")],
+        remappings=[("cmd_vel", "/agt/navigation/cmd_vel")],
     )
     lifecycle_manager = Node(
         package="nav2_lifecycle_manager",
@@ -177,6 +204,8 @@ def generate_launch_description():
             DeclareLaunchArgument("runner_server_timeout_s", default_value="20.0"),
             DeclareLaunchArgument("runner_segment_timeout_s", default_value="45.0"),
             localization_stack,
+            sensor_monitor,
+            safety_controller,
             # /agt/localization/status is volatile and the initial correction is one-shot.
             # Subscribe before that event, then delay actual route execution.
             TimerAction(period=0.5, actions=[route_runner, acceptance]),
