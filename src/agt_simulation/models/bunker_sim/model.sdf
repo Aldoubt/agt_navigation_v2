@@ -51,7 +51,7 @@
     </link>
     <link name="front_right_wheel">
       <pose>0.34 -0.40 0.14 -1.57079632679 0 0</pose>
-      <inertial><mass>4.0</mass><inertia><ixx>0.04</ixx><iyy>0.04</iyy><izz>0.04</izz></inertial>
+      <inertial><mass>4.0</mass><inertia><ixx>0.04</ixx><iyy>0.04</iyy><izz>0.04</izz></inertia></inertial>
       <collision name="collision">
         <geometry><cylinder><radius>0.14</radius><length>0.10</length></cylinder></geometry>
         <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2><slip1>0.02</slip1><slip2>0.02</slip2></ode></friction></surface>
@@ -60,7 +60,7 @@
     </link>
     <link name="rear_right_wheel">
       <pose>-0.34 -0.40 0.14 -1.57079632679 0 0</pose>
-      <inertial><mass>4.0</mass><inertia><ixx>0.04</ixx><iyy>0.04</iyy><izz>0.04</izz></inertial>
+      <inertial><mass>4.0</mass><inertia><ixx>0.04</ixx><iyy>0.04</iyy><izz>0.04</izz></inertia></inertial>
       <collision name="collision">
         <geometry><cylinder><radius>0.14</radius><length>0.10</length></cylinder></geometry>
         <surface><friction><ode><mu>1.0</mu><mu2>1.0</mu2><slip1>0.02</slip1><slip2>0.02</slip2></ode></friction></surface>
