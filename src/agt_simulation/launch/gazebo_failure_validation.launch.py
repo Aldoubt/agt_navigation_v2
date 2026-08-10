@@ -8,7 +8,6 @@ from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, Opaq
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
-from launch_ros.parameter_descriptions import ParameterValue
 
 
 FAULT_CASES = {
@@ -29,7 +28,15 @@ def launch_setup(context):
         )
 
     use_rviz = LaunchConfiguration("use_rviz").perform(context)
-    trigger_delay_s = LaunchConfiguration("trigger_delay_s").perform(context)
+    trigger_delay_text = LaunchConfiguration("trigger_delay_s").perform(context)
+    try:
+        trigger_delay_s = float(trigger_delay_text)
+    except ValueError as error:
+        raise RuntimeError(
+            f"trigger_delay_s must be a floating-point value, got {trigger_delay_text!r}"
+        ) from error
+    if trigger_delay_s <= 0.0:
+        raise RuntimeError("trigger_delay_s must be positive")
 
     route_file = share / "routes" / "v25_11c_map_route.yaml"
     planner_id = "GridBased"
@@ -84,9 +91,7 @@ def launch_setup(context):
                     {
                         "use_sim_time": True,
                         "fault_case": "localization_lost",
-                        "trigger_delay_s": ParameterValue(
-                            trigger_delay_s, value_type=float
-                        ),
+                        "trigger_delay_s": trigger_delay_s,
                         "service_timeout_s": 5.0,
                     }
                 ],
