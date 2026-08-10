@@ -22,6 +22,7 @@ file(MAKE_DIRECTORY "${AGT_SIMULATION_GENERATED_SCRIPT_DIR}")
 set(AGT_SIMULATION_ENTRYPOINTS
   gazebo_odom_adapter.py
   gazebo_sensor_adapter.py
+  keyboard_teleop.py
   v25_11a_baseline_acceptance.py
 )
 
