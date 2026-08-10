@@ -9,6 +9,7 @@ import time
 
 import rclpy
 from agt_interfaces.msg import LocalizationStatus
+from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus
 from geometry_msgs.msg import Twist
 from nav2_msgs.action import ComputePathToPose, FollowPath
 from nav_msgs.msg import Odometry
@@ -29,6 +30,8 @@ FAULT_CASES = {
     "localization_lost",
     "planner_invalid",
     "controller_invalid",
+    "lidar_dropout",
+    "imu_dropout",
 }
 
 EXPECTED_FAILURE_PREFIX = {
@@ -36,7 +39,11 @@ EXPECTED_FAILURE_PREFIX = {
     "localization_lost": "LOCALIZATION_GUARD_FAILED:",
     "planner_invalid": "PLANNER_",
     "controller_invalid": "CONTROLLER_",
+    "lidar_dropout": "CONTROLLER_",
+    "imu_dropout": "CONTROLLER_",
 }
+
+SENSOR_DROPOUT_CASES = {"lidar_dropout", "imu_dropout"}
 
 
 class Acceptance(Node):
@@ -60,9 +67,17 @@ class Acceptance(Node):
         self.latest_truth: Odometry | None = None
         self.max_displacement_m = 0.0
         self.max_cmd_magnitude = 0.0
+        self.max_post_fault_cmd_magnitude = 0.0
         self.route_succeeded_seen = False
         self.route_running_seen = False
         self.canonical_lost_seen = False
+        self.fault_fired_seen = False
+        self.zero_cmd_after_fault_seen = False
+        self.sensor_summary_error_seen = False
+        self.sensor_stream_error_seen = False
+        self.safety_sensor_stop_seen = False
+        self.safety_navigation_not_ready_seen = False
+        self.latest_safety_reason = ""
 
         self.create_subscription(
             String,
@@ -83,6 +98,12 @@ class Acceptance(Node):
             Odometry, "/simulation/bunker/ground_truth", self._on_truth, 20
         )
         self.create_subscription(Twist, "/agt/safety/cmd_vel", self._on_cmd, 20)
+        self.create_subscription(
+            DiagnosticArray, "/diagnostics", self._on_sensor_diagnostics, 20
+        )
+        self.create_subscription(
+            DiagnosticArray, "/agt/safety/status", self._on_safety_status, 20
+        )
 
         self.planner_client = ActionClient(self, ComputePathToPose, "/compute_path_to_pose")
         self.controller_client = ActionClient(self, FollowPath, "/follow_path")
@@ -104,6 +125,11 @@ class Acceptance(Node):
 
     def _on_fault_state(self, msg: String) -> None:
         self.fault_state = self._decode_state(msg)
+        if (
+            self.fault_state.get("fault_case") == self.fault_case
+            and self.fault_state.get("state") == "FIRED"
+        ):
+            self.fault_fired_seen = True
 
     def _on_localization(self, msg: LocalizationStatus) -> None:
         self.localization = msg
@@ -122,10 +148,47 @@ class Acceptance(Node):
             self.max_displacement_m = max(self.max_displacement_m, displacement)
 
     def _on_cmd(self, msg: Twist) -> None:
-        self.max_cmd_magnitude = max(
-            self.max_cmd_magnitude,
-            math.hypot(float(msg.linear.x), float(msg.angular.z)),
+        magnitude = math.hypot(float(msg.linear.x), float(msg.angular.z))
+        self.max_cmd_magnitude = max(self.max_cmd_magnitude, magnitude)
+        if self.fault_fired_seen:
+            self.max_post_fault_cmd_magnitude = max(
+                self.max_post_fault_cmd_magnitude, magnitude
+            )
+            self.zero_cmd_after_fault_seen = (
+                self.zero_cmd_after_fault_seen or magnitude <= 0.01
+            )
+
+    def _on_sensor_diagnostics(self, msg: DiagnosticArray) -> None:
+        expected_stream = (
+            "agt_sensor_monitor/lidar"
+            if self.fault_case == "lidar_dropout"
+            else "agt_sensor_monitor/imu"
         )
+        for status in msg.status:
+            if (
+                status.name == "agt_sensor_monitor/summary"
+                and status.level >= DiagnosticStatus.ERROR
+            ):
+                self.sensor_summary_error_seen = True
+            if (
+                self.fault_case in SENSOR_DROPOUT_CASES
+                and status.name == expected_stream
+                and status.level >= DiagnosticStatus.ERROR
+            ):
+                self.sensor_stream_error_seen = True
+
+    def _on_safety_status(self, msg: DiagnosticArray) -> None:
+        for status in msg.status:
+            if status.name != "agt_safety/tracked_controller":
+                continue
+            self.latest_safety_reason = status.message
+            values = {item.key: item.value.strip().lower() for item in status.values}
+            if status.message == "sensor_input_unhealthy":
+                self.safety_sensor_stop_seen = True
+            if values.get("navigation_ready") == "false" and values.get(
+                "sensor_input_ready"
+            ) == "false":
+                self.safety_navigation_not_ready_seen = True
 
     def route_terminal(self) -> bool:
         return isinstance(self.route_state, dict) and self.route_state.get("state") in {
@@ -195,11 +258,7 @@ def main(args=None) -> None:
         )
 
         if node.fault_case == "localization_lost":
-            result["checks"]["fault_injection_fired"] = bool(
-                isinstance(node.fault_state, dict)
-                and node.fault_state.get("fault_case") == "localization_lost"
-                and node.fault_state.get("state") == "FIRED"
-            )
+            result["checks"]["fault_injection_fired"] = node.fault_fired_seen
             result["checks"]["canonical_lost_observed"] = node.canonical_lost_seen
             result["checks"]["route_started_before_fault"] = node.route_running_seen
             result["checks"]["navigation_command_seen_before_abort"] = (
@@ -207,6 +266,28 @@ def main(args=None) -> None:
             )
             result["checks"]["motion_bounded_after_abort"] = (
                 node.max_displacement_m <= 2.50
+            )
+        elif node.fault_case in SENSOR_DROPOUT_CASES:
+            result["checks"]["fault_injection_fired"] = node.fault_fired_seen
+            result["checks"]["route_started_before_fault"] = node.route_running_seen
+            result["checks"]["navigation_command_seen_before_abort"] = (
+                node.max_cmd_magnitude >= 0.05
+            )
+            result["checks"]["sensor_monitor_detected_dropout"] = (
+                node.sensor_summary_error_seen and node.sensor_stream_error_seen
+            )
+            result["checks"]["safety_sensor_gate_observed"] = (
+                node.safety_sensor_stop_seen
+                and node.safety_navigation_not_ready_seen
+            )
+            result["checks"]["safety_zero_output_after_fault"] = (
+                node.zero_cmd_after_fault_seen
+            )
+            result["checks"]["motion_bounded_after_abort"] = (
+                node.max_displacement_m <= 2.50
+            )
+            result["checks"]["localization_remained_non_lost"] = (
+                not node.canonical_lost_seen
             )
         else:
             result["checks"]["motion_blocked_before_execution"] = (
@@ -224,7 +305,20 @@ def main(args=None) -> None:
         result["metrics"]["fault_state"] = node.fault_state
         result["metrics"]["max_displacement_m"] = node.max_displacement_m
         result["metrics"]["max_cmd_magnitude"] = node.max_cmd_magnitude
+        result["metrics"]["max_post_fault_cmd_magnitude"] = (
+            node.max_post_fault_cmd_magnitude
+        )
         result["metrics"]["canonical_lost_seen"] = node.canonical_lost_seen
+        result["metrics"]["sensor_summary_error_seen"] = (
+            node.sensor_summary_error_seen
+        )
+        result["metrics"]["sensor_stream_error_seen"] = (
+            node.sensor_stream_error_seen
+        )
+        result["metrics"]["safety_sensor_stop_seen"] = (
+            node.safety_sensor_stop_seen
+        )
+        result["metrics"]["latest_safety_reason"] = node.latest_safety_reason
         if node.localization is not None:
             result["metrics"]["latest_localization"] = {
                 "state": int(node.localization.state),
