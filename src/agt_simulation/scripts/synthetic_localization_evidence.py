@@ -103,10 +103,8 @@ class SyntheticLocalizationEvidence(Node):
         self.start_wall_ns = self.get_clock().now().nanoseconds
         self.create_timer(0.10, self._maybe_submit_initial)
         self.get_logger().info(
-            "SOFTWARE_ONLY synthetic localization evidence ready: truth=%s evidence=%s map=%s",
-            self.truth_topic,
-            self.evidence_topic,
-            self.map_id,
+            "SOFTWARE_ONLY synthetic localization evidence ready: "
+            f"truth={self.truth_topic} evidence={self.evidence_topic} map={self.map_id}"
         )
 
     def _on_truth(self, message: Odometry) -> None:
