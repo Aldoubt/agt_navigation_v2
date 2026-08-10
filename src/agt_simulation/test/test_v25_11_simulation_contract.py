@@ -183,19 +183,25 @@ def test_v25_11b_launch_keeps_global_correction_manager_as_map_odom_authority():
     assert rviz["Visualization Manager"]["Global Options"]["Fixed Frame"] == "map"
 
 
-def test_v25_11b_acceptance_freezes_generation_on_reject_and_tests_reanchor():
+def test_v25_11b_acceptance_correlates_each_decision_with_its_status_event():
     acceptance = _read("scripts/v25_11b_localization_acceptance.py")
     for token in (
+        "decision_sequence",
+        "_wait_decision_after",
+        "_submit_and_wait",
         "tracking_small_correction_accepted",
         "TRANSLATION_JUMP_REJECTED",
         "rejected_generation_frozen",
         "recovering_envelope_accepted",
+        "FITNESS_REJECTED",
         "three_rejections_escalate_lost",
         "REANCHOR_ACCEPTED",
         "lost_reanchor_accepted",
         "/tmp/agt_v25_11b_localization_result.json",
     ):
         assert token in acceptance
+    assert 'decision.get("generation", -1)' in acceptance
+    assert 'bool(decision.get("accepted")) is accepted' in acceptance
 
 
 def test_simulation_package_declares_v25_11b_runtime_dependencies():
