@@ -7,6 +7,7 @@ install(DIRECTORY
   launch
   config
   models
+  routes
   worlds
   rviz
   DESTINATION share/${PROJECT_NAME}
@@ -26,6 +27,8 @@ set(AGT_SIMULATION_ENTRYPOINTS
   synthetic_localization_evidence.py
   v25_11a_baseline_acceptance.py
   v25_11b_localization_acceptance.py
+  v25_11c_route_runner.py
+  v25_11c_navigation_acceptance.py
 )
 
 foreach(_script IN LISTS AGT_SIMULATION_ENTRYPOINTS)
@@ -56,6 +59,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_v25_11_simulation_contract
     test/test_v25_11_simulation_contract.py
+  )
+  ament_add_pytest_test(
+    test_v25_11c_navigation_contract
+    test/test_v25_11c_navigation_contract.py
   )
 endif()
 
