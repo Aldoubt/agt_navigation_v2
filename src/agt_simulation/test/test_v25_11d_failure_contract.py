@@ -110,6 +110,7 @@ def test_failure_launch_supports_deterministic_six_case_matrix_without_second_lo
         "v25_11d_failure_acceptance.py",
         'trigger_delay_s = float(trigger_delay_text)',
         '"trigger_delay_s": trigger_delay_s',
+        "ROS simulation-time delay for active V25-11D fault injection",
     ):
         assert token in launch
     assert "amcl" not in launch.lower()
@@ -129,7 +130,7 @@ def test_gazebo_sensor_adapter_owns_only_faultable_forwarding_not_health_policy(
     assert "sensor_input_unhealthy" not in adapter
 
 
-def test_fault_injector_uses_existing_authority_and_sensor_adapter_services():
+def test_fault_injector_uses_existing_authority_and_ros_sim_time():
     injector = read("scripts/v25_11d_fault_injector.py")
     compile(injector, "v25_11d_fault_injector.py", "exec")
     for token in (
@@ -137,10 +138,16 @@ def test_fault_injector_uses_existing_authority_and_sensor_adapter_services():
         '"/agt/simulation/sensors/set_lidar_drop"',
         '"/agt/simulation/sensors/set_imu_drop"',
         '"/agt/simulation/fault/state"',
+        '"trigger_clock": "ros_sim_time"',
+        "self.get_clock().now().nanoseconds",
+        "self.started_ros_ns",
+        "self.trigger_delay_ns",
+        "ROS_TIME_ROLLBACK while waiting to inject fault",
         'self.state = "FIRED"',
         '"gate": "V25-11D"',
     ):
         assert token in injector
+    assert "self.started_at = time.monotonic()" not in injector
 
 
 def test_failure_acceptance_rejects_false_positive_success_and_sensor_fake_stops():
