@@ -94,6 +94,11 @@ def test_comparison_launch_reuses_v25_11d_failure_stack_without_topology_copy():
         'default_value="localization_lost"',
         "Path(artifact).unlink(missing_ok=True)",
         "v25_11d_result_path",
+        "RegisterEventHandler(",
+        "OnProcessExit(",
+        "target_action=comparison_acceptance",
+        "event=Shutdown(",
+        "V25-11E comparison acceptance completed",
     ):
         assert token in launch
     assert "gazebo_navigation_validation.launch.py" not in launch
