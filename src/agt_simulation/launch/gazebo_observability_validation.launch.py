@@ -59,12 +59,15 @@ def launch_setup(context):
         condition=IfCondition(use_rviz),
     )
 
-    # Observer starts before the nested navigation stack so volatile localization
-    # and early safety/sensor transitions are captured in the V25-11E timeline.
+    # Bring up Gazebo/navigation first so /clock and the bridge graph exist before
+    # this auxiliary use_sim_time observer starts. The synthetic initial correction
+    # is delayed by 2 s and the route runner by 0.5 s, so a 0.25 s observer delay
+    # still captures the complete V25-11E evidence sequence while avoiding the
+    # pre-clock bootstrap window seen in the first runtime attempt.
     return [
-        observer,
         navigation,
-        TimerAction(period=0.5, actions=[acceptance]),
+        TimerAction(period=0.25, actions=[observer]),
+        TimerAction(period=0.75, actions=[acceptance]),
         TimerAction(period=3.5, actions=[rviz]),
     ]
 
