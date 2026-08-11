@@ -30,6 +30,8 @@ V25-12B 完整分辨率不可变处理
 
 显示采样不会改变正式处理输入
 
+Contract anchor: `Display sampling never changes the formal processing input`
+
 完整源 PCD 始终直接传给 `process_pointcloud`
 
 ## 启动
