@@ -69,6 +69,27 @@ class PointCloudItem(QGraphicsItem):
         self._z_max = float(maximum)
         self.update()
 
+    def sample_count(self) -> int:
+        """Number of finite points currently held by the display sample."""
+        return int(self._z.size)
+
+    def visible_sample_count(self) -> int:
+        """Number of sampled points inside the active Z display window."""
+        if self._z.size == 0:
+            return 0
+        visible = (self._z >= self._z_min) & (self._z <= self._z_max)
+        return int(np.count_nonzero(visible))
+
+    def padded_bounding_rect(
+        self, *, ratio: float = 0.08, minimum_margin: float = 0.75
+    ) -> QRectF:
+        """Return a view/scene rectangle with authoring margin around cloud edges."""
+        if self._rect.isNull():
+            return QRectF(self._rect)
+        margin_x = max(float(minimum_margin), float(self._rect.width()) * float(ratio))
+        margin_y = max(float(minimum_margin), float(self._rect.height()) * float(ratio))
+        return self._rect.adjusted(-margin_x, -margin_y, margin_x, margin_y)
+
     def boundingRect(self) -> QRectF:  # noqa: N802 - Qt API
         return self._rect
 
@@ -111,6 +132,7 @@ class PointCloudView(QGraphicsView):
     def set_authoring_enabled(self, enabled: bool) -> None:
         self.authoring_enabled = bool(enabled)
         self.setDragMode(QGraphicsView.NoDrag if enabled else QGraphicsView.ScrollHandDrag)
+        self.setCursor(Qt.CrossCursor if enabled else Qt.ArrowCursor)
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 - Qt API
         if self.authoring_enabled and event.button() == Qt.LeftButton:
