@@ -71,7 +71,13 @@ operations:
 
 `frame_id` is the declared coordinate-frame identity of the PCD product; PCD itself does not encode a ROS frame
 
-`output_data` currently accepts `ascii` or uncompressed `binary`
+`output_data` accepts `ascii` or uncompressed `binary`
+
+Input PCD may use PCL `DATA ascii`, `DATA binary`, or `DATA binary_compressed`
+
+`binary_compressed input` is decoded according to the PCL v0.7 format: two little-endian 32-bit compressed/uncompressed byte counts, LZF payload, and the PCL structure-of-arrays field layout
+
+Formal V25-12B processing output is intentionally normalized to `ascii` or uncompressed `binary`; the pipeline does not emit `binary_compressed`
 
 ## 3. Supported operations
 
@@ -177,13 +183,32 @@ This is a deterministic near-horizontal plane baseline, not the final agricultur
 
 PMF, CSF, terrain models or future learned backends may be added later without changing the processing-run identity model
 
-## 4. Unsupported operations fail closed
+## 4. Input format and unsupported cases
 
 Unknown operation names are rejected
 
-`DATA binary_compressed` PCD is currently rejected rather than silently decompressed or converted
+PCD v0.7 input storage modes supported by the reader are
 
-If a source tool creates compressed PCD, convert it explicitly to `ascii` or uncompressed `binary` before formal V25-12B processing
+```text
+DATA ascii
+DATA binary
+DATA binary_compressed
+```
+
+For `binary_compressed`, malformed size headers, truncated LZF streams, invalid back references, decompressed-size mismatches, or field-plane layout mismatches fail closed
+
+The reader preserves declared PCD fields and restores the PCL field-major compressed representation before any processing operation runs
+
+Unsupported PCD field primitive types or invalid x/y/z definitions fail closed
+
+The writer remains deliberately limited to
+
+```text
+DATA ascii
+DATA binary
+```
+
+so formal processing outputs use one simple uncompressed representation
 
 ## 5. Processing run artifact
 
