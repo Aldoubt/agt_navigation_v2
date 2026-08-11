@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI for reproducible offline map, Route Asset, and Site Package preparation."""
+"""CLI for reproducible offline map, Route Asset, Site Package, and point-cloud preparation."""
 
 import argparse
 import json
@@ -12,10 +12,13 @@ from agt_offline_assets import (
     create_route_candidate_asset,
     create_site_package,
     ingest_mapping_session,
+    process_pointcloud,
+    read_pcd,
     refresh_map_manifest,
     refresh_site_package,
     sha256_path_bundle,
     validate_map_workspace,
+    validate_pointcloud_processing,
     validate_route_asset,
     validate_site_package,
 )
@@ -27,6 +30,24 @@ def _parser() -> argparse.ArgumentParser:
 
     hash_path = sub.add_parser("hash-path", help="hash one file or directory bundle deterministically")
     hash_path.add_argument("path")
+
+    inspect_pcd = sub.add_parser("inspect-pcd", help="read PCD schema and point count without modifying it")
+    inspect_pcd.add_argument("--input", required=True)
+
+    process_pcd = sub.add_parser(
+        "process-pointcloud",
+        help="execute an immutable reproducible point-cloud processing recipe",
+    )
+    process_pcd.add_argument("--input", required=True)
+    process_pcd.add_argument("--recipe", required=True)
+    process_pcd.add_argument("--output-dir", required=True)
+    process_pcd.add_argument("--output-name", default="processed.pcd")
+
+    validate_pcd = sub.add_parser(
+        "validate-pointcloud-processing",
+        help="read-only audit of one point-cloud processing run",
+    )
+    validate_pcd.add_argument("--run-dir", required=True)
 
     init_map = sub.add_parser("init-map", help="create a reproducible PROCESSING map workspace")
     init_map.add_argument("--maps-root", required=True)
@@ -117,6 +138,40 @@ def main(argv=None) -> int:
         if args.command == "hash-path":
             print(sha256_path_bundle(args.path))
             return 0
+        if args.command == "inspect-pcd":
+            cloud = read_pcd(args.input)
+            xyz = cloud.xyz()
+            bounds = None
+            if xyz.shape[0] and bool((xyz == xyz).all()):
+                bounds = {
+                    "min": [float(value) for value in xyz.min(axis=0)],
+                    "max": [float(value) for value in xyz.max(axis=0)],
+                }
+            print(json.dumps({
+                "path": args.input,
+                "sha256": sha256_path_bundle(args.input),
+                "point_count": int(cloud.points.shape[0]),
+                "data_mode": cloud.data_mode,
+                "fields": list(cloud.schema.fields),
+                "sizes": list(cloud.schema.sizes),
+                "types": list(cloud.schema.types),
+                "counts": list(cloud.schema.counts),
+                "bounds_xyz": bounds,
+            }, ensure_ascii=False))
+            return 0
+        if args.command == "process-pointcloud":
+            result = process_pointcloud(
+                args.input,
+                args.recipe,
+                args.output_dir,
+                output_name=args.output_name,
+            )
+            print(json.dumps(result.to_dict(), ensure_ascii=False))
+            return 0
+        if args.command == "validate-pointcloud-processing":
+            result = validate_pointcloud_processing(args.run_dir)
+            print(json.dumps(result.to_dict(), ensure_ascii=False))
+            return 0 if result.valid else 2
         if args.command == "init-map":
             workspace = create_map_workspace(
                 args.maps_root,
