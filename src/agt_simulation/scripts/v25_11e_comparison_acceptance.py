@@ -140,6 +140,9 @@ def main(args=None) -> None:
     try:
         metrics_ready = _wait_until(node, lambda: _metrics_ready(node), node.timeout_s)
         result["checks"]["fault_metrics_terminal_available"] = metrics_ready
+        result["checks"]["v25_11d_result_available"] = _wait_until(
+            node, node.v25_11d_result_path.is_file, 5.0
+        )
         _spin_for(node, node.settle_s)
 
         metrics_doc = _read_json(node.metrics_path) if node.metrics_path.is_file() else {}
