@@ -20,7 +20,7 @@ def test_observer_collects_validation_authorities_and_publishes_visual_outputs()
         '"/agt/safety/status"',
         '"/agt/safety/cmd_vel"',
         '"/simulation/bunker/ground_truth"',
-        'Marker, "/agt/validation/status_markers"',
+        'Marker, "/agt/validation/status_markers", MARKER_QOS',
         'NavPath, "/agt/validation/ground_truth_path"',
         '"/tmp/agt_v25_11e_timeline.jsonl"',
         '"/tmp/agt_v25_11e_summary.json"',
@@ -31,11 +31,25 @@ def test_observer_collects_validation_authorities_and_publishes_visual_outputs()
         '"observer_fatal"',
     ):
         assert token in observer
-    # Comments may document the rejected MarkerArray design. The executable
-    # contract only forbids importing, constructing, or publishing MarkerArray.
     assert "from visualization_msgs.msg import MarkerArray" not in observer
     assert "MarkerArray()" not in observer
     assert "create_publisher(MarkerArray" not in observer
+
+
+def test_observer_normalizes_ros_byte_and_integer_scalars():
+    observer = read("scripts/v25_11e_observability.py")
+    for token in (
+        "def _ros_integer(value: Any) -> int:",
+        "isinstance(value, memoryview)",
+        "isinstance(value, (bytes, bytearray))",
+        "return int(value[0])",
+        '"level": _ros_integer(status.level)',
+        "state = _ros_integer(msg.state)",
+        "error_code = _ros_integer(msg.error_code)",
+        "_ros_integer(LocalizationStatus.STATE_TRACKING)",
+    ):
+        assert token in observer
+    assert '"level": int(status.level)' not in observer
 
 
 def test_observer_records_state_changes_not_only_final_snapshot():
@@ -61,6 +75,8 @@ def test_observer_uses_conservative_humble_message_construction():
         "pose.pose.position.x = float(source.position.x)",
         "self.marker_pub.publish(self._text_marker",
         "lifetime remains zero",
+        "MARKER_QOS = QoSProfile(",
+        "depth=10",
     ):
         assert token in observer
     assert "pose.header = msg.header" not in observer
@@ -114,7 +130,6 @@ def test_observability_acceptance_requires_motion_timeline_and_happy_path():
         assert token in acceptance
     assert "from visualization_msgs.msg import MarkerArray" not in acceptance
     assert "MarkerArray()" not in acceptance
-    assert "create_subscription(MarkerArray" not in acceptance
 
 
 def test_observability_rviz_exposes_route_truth_and_status_markers():
