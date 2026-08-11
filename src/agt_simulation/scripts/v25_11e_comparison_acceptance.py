@@ -193,12 +193,16 @@ def main(args=None) -> None:
             and isinstance(route, dict)
             and route.get("state") == "FAILED"
         )
+        # Safety zeroing and route cancellation are independent consumers of the
+        # same fault. Require both to happen after the injected fault, but do not
+        # impose an artificial ordering between them.
         result["checks"]["timing_order_valid"] = bool(
             isinstance(first_motion_ns, int)
             and isinstance(fault_ns, int)
             and isinstance(zero_ns, int)
             and isinstance(terminal_ns, int)
-            and first_motion_ns < fault_ns <= zero_ns <= terminal_ns
+            and first_motion_ns < fault_ns <= zero_ns
+            and fault_ns <= terminal_ns
         )
         result["checks"]["response_metrics_available"] = all(
             isinstance(value, (int, float))
