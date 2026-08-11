@@ -240,7 +240,7 @@ class RouteRunner(Node):
                 )
             if require_safety and self._safety_sensor_guard_failed():
                 raise RuntimeError(
-                    "SAFETY_GUARD_FAILED: " + self._safety_failure_reason()
+                    "CONTROLLER_SAFETY_GUARD_FAILED: " + self._safety_failure_reason()
                 )
         if future.done():
             result = future.result()
@@ -308,7 +308,7 @@ class RouteRunner(Node):
             )
         if self._safety_sensor_guard_failed():
             raise RuntimeError(
-                "SAFETY_GUARD_FAILED: " + self._safety_failure_reason()
+                "CONTROLLER_SAFETY_GUARD_FAILED: " + self._safety_failure_reason()
             )
         goal = FollowPath.Goal()
         goal.path = path
