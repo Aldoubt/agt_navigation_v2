@@ -7,6 +7,7 @@ MODEL = PACKAGE / "agt_map_workbench/model.py"
 APP = PACKAGE / "agt_map_workbench/app.py"
 VIEW = PACKAGE / "agt_map_workbench/view.py"
 PACKAGE_XML = PACKAGE / "package.xml"
+CMAKE = PACKAGE / "CMakeLists.txt"
 README = PACKAGE / "README.md"
 
 
@@ -45,6 +46,16 @@ def test_display_sampling_is_separate_from_full_resolution_processing():
     assert "sample_limit" in view
     assert "process_pointcloud(self.input_path" in app
     assert "Display sampling never changes the formal processing input" in readme
+
+
+def test_ros2_run_launcher_is_installed_with_explicit_execute_permissions():
+    cmake = _read(CMAKE)
+    assert "AGT_MAP_WORKBENCH_CLI_DIR" in cmake
+    assert "FILE_PERMISSIONS" in cmake
+    assert "OWNER_EXECUTE" in cmake
+    assert "GROUP_EXECUTE" in cmake
+    assert "WORLD_EXECUTE" in cmake
+    assert 'DESTINATION lib/${PROJECT_NAME}' in cmake
 
 
 def test_workbench_does_not_add_runtime_ros_interfaces():
