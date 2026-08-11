@@ -40,10 +40,14 @@ def test_launch_reuses_global_correction_manager_path_without_amcl():
     compile(launch, "gazebo_navigation_validation.launch.py", "exec")
     assert "gazebo_localization_validation.launch.py" in launch
     assert '"run_acceptance": "false"' in launch
+    assert "GroupAction" in launch
+    assert "scoped=True" in launch
+    assert "forwarding=True" in launch
     assert 'package="nav2_map_server"' in launch
     assert 'package="nav2_planner"' in launch
     assert 'package="nav2_controller"' in launch
     assert '("cmd_vel", "/agt/safety/cmd_vel")' in launch
+    assert "condition=IfCondition(run_acceptance)" in launch
     assert "nav2_amcl" not in launch
     assert "SOFTWARE_ONLY" in launch
 
