@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI for reproducible offline map and Route Asset preparation."""
+"""CLI for reproducible offline map, Route Asset, and Site Package preparation."""
 
 import argparse
 import json
@@ -10,11 +10,14 @@ from agt_offline_assets import (
     apply_route_tuning,
     create_map_workspace,
     create_route_candidate_asset,
+    create_site_package,
     ingest_mapping_session,
     refresh_map_manifest,
+    refresh_site_package,
     sha256_path_bundle,
     validate_map_workspace,
     validate_route_asset,
+    validate_site_package,
 )
 
 
@@ -78,6 +81,33 @@ def _parser() -> argparse.ArgumentParser:
     tune.add_argument("--route-dir", required=True)
     tune.add_argument("--tuning", required=True)
     tune.add_argument("--new-revision", required=True, type=int)
+
+    create_site = sub.add_parser(
+        "create-site-package",
+        help="create a DRAFT Site Package binding one READY map and optional READY routes",
+    )
+    create_site.add_argument("--sites-root", required=True)
+    create_site.add_argument("--map-manifest", required=True)
+    create_site.add_argument("--platform-profile", required=True)
+    create_site.add_argument("--route-dir", action="append", default=[])
+    create_site.add_argument("--site-package-id")
+
+    refresh_site = sub.add_parser(
+        "refresh-site-package",
+        help="revalidate a DRAFT Site Package and optionally promote it one-way to READY",
+    )
+    refresh_site.add_argument("--manifest", required=True)
+    refresh_site.add_argument("--maps-root", required=True)
+    refresh_site.add_argument("--platform-profile", required=True)
+    refresh_site.add_argument("--state", choices=["DRAFT", "READY", "INVALID", "ARCHIVED"])
+
+    validate_site = sub.add_parser(
+        "validate-site-package",
+        help="read-only audit of Site Package identity and bound READY assets",
+    )
+    validate_site.add_argument("--manifest", required=True)
+    validate_site.add_argument("--maps-root", required=True)
+    validate_site.add_argument("--platform-profile", required=True)
     return parser
 
 
@@ -158,6 +188,39 @@ def main(argv=None) -> int:
             )
             print(new_dir)
             return 0
+        if args.command == "create-site-package":
+            manifest_path = create_site_package(
+                args.sites_root,
+                map_manifest_path=args.map_manifest,
+                platform_profile_path=args.platform_profile,
+                route_dirs=args.route_dir,
+                site_package_id=args.site_package_id,
+            )
+            print(manifest_path)
+            return 0
+        if args.command == "refresh-site-package":
+            manifest = refresh_site_package(
+                args.manifest,
+                maps_root=args.maps_root,
+                platform_profile_path=args.platform_profile,
+                requested_state=args.state,
+            )
+            print(json.dumps({
+                "site_id": manifest.get("site_id"),
+                "site_package_id": manifest.get("site_package_id"),
+                "state": manifest.get("state"),
+                "site_package_content_sha256": manifest.get("site_package_content_sha256"),
+                "route_count": len(manifest.get("routes") or []),
+            }, ensure_ascii=False))
+            return 0
+        if args.command == "validate-site-package":
+            result = validate_site_package(
+                args.manifest,
+                maps_root=args.maps_root,
+                platform_profile_path=args.platform_profile,
+            )
+            print(json.dumps(result.to_dict(), ensure_ascii=False))
+            return 0 if result.valid else 2
     except (AssetContractError, KeyError, OSError, TypeError, ValueError) as exc:
         code = getattr(exc, "code", "offline_asset_error")
         print(json.dumps({"status": "ERROR", "code": code, "message": str(exc)}, ensure_ascii=False), file=sys.stderr)
