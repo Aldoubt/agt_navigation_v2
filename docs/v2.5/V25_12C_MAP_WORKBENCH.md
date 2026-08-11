@@ -59,6 +59,7 @@ src/agt_map_workbench
 
 Capabilities
 
+- Chinese operator UI while keeping machine-facing recipe/action tokens unchanged
 - open ASCII, binary and PCL binary_compressed PCD through `agt_offline_assets`
 - deterministic sampled display for multi-million-point maps
 - XY zoom/pan
@@ -74,13 +75,37 @@ Capabilities
 
 Formal processing always uses the full source cloud; display sampling is never used as processing input
 
+The file chooser defaults to `<workspace>/runtime/maps` and does not hardcode a developer home directory
+
 ## Real greenhouse design decision
 
-The V25-12B profile of `greenhouse_aligned_full2.pcd` shows that a global Z crop cannot be justified safely from statistics alone
+The V25-12B compatibility/profile smoke previously used
+
+```text
+runtime/maps/greenhouse_ground/pcd/greenhouse_aligned_full2.pcd
+```
+
+That asset is an already-cropped map and remains valid historical V25-12B evidence only
+
+The current V25-12C full-scene validation and visual authoring baseline is
+
+```text
+runtime/maps/green house full.pcd
+```
+
+On the current development machine this resolves to
+
+```text
+/home/yangxuan/agt_navigation_v2/runtime/maps/green house full.pcd
+```
+
+Do not embed that absolute path in production code; use the workspace-relative identity above
+
+The earlier cropped-map profile showed that a global Z crop cannot be justified safely from statistics alone
 
 Therefore V25-12C focuses first on visually authored site/object boundaries rather than imposing one automatic height threshold
 
-The master/source PCD also retains CloudCompare analysis fields
+The master/source PCD should retain useful CloudCompare analysis fields
 
 Localization-product field normalization is a later derived-product decision, not a destructive Workbench edit
 
@@ -122,21 +147,24 @@ python3 -m pytest -q \
 Launch
 
 ```bash
-ros2 run agt_map_workbench agt_map_workbench.py
+ros2 run agt_map_workbench agt_map_workbench
 ```
 
 Real-data smoke
 
-1. open `runtime/maps/greenhouse_ground/pcd/greenhouse_aligned_full2.pcd`
-2. verify the 5.19M-point compressed PCD opens and the view remains interactive
-3. adjust the visible Z range and verify display filtering
-4. start a polygon and mark a visually obvious outside/temporary region
-5. choose delete or crop
-6. finish the polygon and verify an operation appears in the recipe list
-7. export YAML and confirm `polygon_xy`, `z_min`, `z_max` are in map coordinates
-8. run immutable processing into a new directory
-9. confirm V25-12B produces `processing.yaml`, `processing_report.json`, `processed.pcd`, `recipe.yaml`
-10. confirm the original PCD SHA remains unchanged
+1. open `runtime/maps/green house full.pcd`
+2. verify the full PCD opens and the deterministically sampled view remains interactive
+3. verify all operator-facing controls/dialogs/status text are Chinese
+4. adjust the visible Z range and verify display filtering
+5. start a polygon and mark a visually obvious outside/temporary region
+6. choose delete or crop
+7. finish the polygon and verify an operation appears in the recipe list
+8. export YAML and confirm `polygon_xy`, `z_min`, `z_max` remain machine-facing V25-12B fields in map coordinates
+9. run immutable processing into a new directory
+10. confirm V25-12B produces `processing.yaml`, `processing_report.json`, `processed.pcd`, `recipe.yaml`
+11. confirm the original full PCD SHA remains unchanged
+
+The previously cropped `greenhouse_aligned_full2.pcd` may still be used for quick regression but is not the primary full-scene authoring target
 
 ## Not yet frozen in this MVP
 
