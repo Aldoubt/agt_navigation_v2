@@ -49,6 +49,28 @@ def test_display_sampling_is_separate_from_full_resolution_processing():
     assert "Display sampling never changes the formal processing input" in readme
 
 
+def test_operator_ui_is_chinese_but_machine_contract_remains_stable():
+    app = _read(APP)
+    for token in (
+        "AGT 地图工作台",
+        "打开 PCD 点云",
+        "开始绘制多边形",
+        "完成多边形并加入处理流程",
+        "导出处理 Recipe YAML",
+        "执行完整分辨率不可变处理",
+        "点云适配窗口",
+    ):
+        assert token in app
+    for machine_token in ("delete_polygon", "crop_polygon", "process_pointcloud"):
+        assert machine_token in app
+
+
+def test_workbench_does_not_hardcode_user_workspace_path():
+    app = _read(APP)
+    assert "/home/yangxuan" not in app
+    assert 'Path.cwd() / "runtime" / "maps"' in app
+
+
 def test_ros2_run_launcher_is_executable_and_does_not_shadow_python_package():
     cmake = _read(CMAKE)
     launcher = _read(LAUNCHER)
