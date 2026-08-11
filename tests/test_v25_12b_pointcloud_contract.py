@@ -58,11 +58,16 @@ def test_v25_12b_is_non_destructive_and_not_a_quality_acceptance():
     assert "AGT Map Workbench" in doc
 
 
-def test_v25_12b_pcd_support_fails_closed_on_compressed_data():
+def test_v25_12b_accepts_pcl_compressed_input_but_normalizes_formal_output():
     pcd = _read(PCD_IO)
-    assert 'mode == "binary_compressed"' in pcd
-    assert "pcd_binary_compressed_unsupported" in pcd
-    assert 'mode not in {"ascii", "binary"}' in pcd
+    doc = _read(DOC)
+    assert '"binary_compressed"' in pcd
+    assert "_lzf_decompress" in pcd
+    assert "structure-of-arrays" in pcd
+    assert 'mode not in {"ascii", "binary", "binary_compressed"}' in pcd
+    assert 'mode not in {"ascii", "binary"}' in pcd  # writer remains normalized
+    assert "binary_compressed input" in doc
+    assert "output_data" in doc
 
 
 def test_v25_12b_does_not_add_runtime_ros_interfaces():
