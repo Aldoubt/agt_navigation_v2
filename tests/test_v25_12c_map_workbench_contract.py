@@ -8,6 +8,7 @@ APP = PACKAGE / "agt_map_workbench/app.py"
 VIEW = PACKAGE / "agt_map_workbench/view.py"
 PACKAGE_XML = PACKAGE / "package.xml"
 CMAKE = PACKAGE / "CMakeLists.txt"
+LAUNCHER = PACKAGE / "scripts/map_workbench_launcher.py"
 README = PACKAGE / "README.md"
 
 
@@ -48,14 +49,19 @@ def test_display_sampling_is_separate_from_full_resolution_processing():
     assert "Display sampling never changes the formal processing input" in readme
 
 
-def test_ros2_run_launcher_is_installed_with_explicit_execute_permissions():
+def test_ros2_run_launcher_is_executable_and_does_not_shadow_python_package():
     cmake = _read(CMAKE)
+    launcher = _read(LAUNCHER)
     assert "AGT_MAP_WORKBENCH_CLI_DIR" in cmake
     assert "FILE_PERMISSIONS" in cmake
     assert "OWNER_EXECUTE" in cmake
     assert "GROUP_EXECUTE" in cmake
     assert "WORLD_EXECUTE" in cmake
-    assert 'DESTINATION lib/${PROJECT_NAME}' in cmake
+    assert "map_workbench_launcher.py" in cmake
+    assert "RENAME agt_map_workbench" in cmake
+    assert LAUNCHER.name != "agt_map_workbench.py"
+    assert "from agt_map_workbench.app import main" in launcher
+    assert not (PACKAGE / "scripts/agt_map_workbench.py").exists()
 
 
 def test_workbench_does_not_add_runtime_ros_interfaces():
