@@ -36,6 +36,14 @@ from .site_package import (
     refresh_site_package,
     validate_site_package,
 )
+from .pcd_io import PcdCloud, PcdSchema, read_pcd, write_pcd
+from .pointcloud_processing import (
+    PointCloudProcessingCompliance,
+    PointCloudProcessingResult,
+    load_pointcloud_recipe,
+    process_pointcloud,
+    validate_pointcloud_processing,
+)
 
 __all__ = [
     "AssetContractError",
@@ -72,4 +80,13 @@ __all__ = [
     "generate_site_package_id",
     "refresh_site_package",
     "validate_site_package",
+    "PcdCloud",
+    "PcdSchema",
+    "read_pcd",
+    "write_pcd",
+    "PointCloudProcessingCompliance",
+    "PointCloudProcessingResult",
+    "load_pointcloud_recipe",
+    "process_pointcloud",
+    "validate_pointcloud_processing",
 ]
