@@ -60,20 +60,22 @@ def test_navigation_launch_exposes_runner_controls_and_real_safety_chain():
     assert '("cmd_vel", "/agt/safety/cmd_vel")' not in launch
 
 
-def test_v25_11b_smoke_spaces_corrections_using_ros_time():
+def test_v25_11b_smoke_spaces_corrections_using_evidence_source_ros_time():
     smoke = read("scripts/v25_11b_localization_acceptance.py")
     compile(smoke, "v25_11b_localization_acceptance.py", "exec")
     for token in (
         "CORRECTION_MIN_INTERVAL_S = 1.0",
-        "CORRECTION_INTERVAL_MARGIN_S = 0.10",
+        "CORRECTION_INTERVAL_MARGIN_S = 0.20",
         "_wait_ros_correction_interval",
         "last_accepted_status.global_pose.header.stamp",
-        "node.get_clock().now().nanoseconds",
-        "ROS_TIME_ROLLBACK",
+        '"/simulation/bunker/ground_truth"',
+        "latest_truth_stamp_ns",
+        "truth_time_rollback_seen",
+        "ROS_TIME_ROLLBACK on Gazebo ground-truth correction source",
         '"ros_time_correction_spacing"',
+        '"correction_min_interval_s"',
     ):
         assert token in smoke
-    assert "_spin_for" not in smoke
     assert "time.sleep(" not in smoke
 
 
