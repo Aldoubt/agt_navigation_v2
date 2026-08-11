@@ -32,6 +32,7 @@ if(BUILD_TESTING)
   )
   ament_add_pytest_test(test_alignment test/test_alignment.py)
   ament_add_pytest_test(test_cleaning test/test_cleaning.py)
+  ament_add_pytest_test(test_site_package test/test_site_package.py)
 endif()
 
 ament_package()
