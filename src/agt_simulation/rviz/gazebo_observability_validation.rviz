@@ -1,0 +1,75 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+      Cell Size: 1
+      Plane: XY
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Frame Timeout: 15
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Validation Map
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /map
+    - Class: rviz_default_plugins/LaserScan
+      Enabled: true
+      Name: Gazebo Lidar
+      Topic:
+        Depth: 10
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Best Effort
+        Value: /agt/sensors/lidar/scan
+      Size (m): 0.03
+      Style: Points
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: AGT Runtime Route
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/navigation/runtime_path
+      Line Style: Lines
+      Line Width: 0.05
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Ground Truth Trail
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/validation/ground_truth_path
+      Line Style: Lines
+      Line Width: 0.04
+    - Class: rviz_default_plugins/MarkerArray
+      Enabled: true
+      Name: Validation Status
+      Topic:
+        Depth: 1
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /agt/validation/status_markers
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: map
+    Frame Rate: 30
+  Name: root
+Window Geometry:
+  Height: 900
+  Width: 1440
