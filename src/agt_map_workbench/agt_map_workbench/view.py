@@ -19,13 +19,33 @@ class PointCloudItem(QGraphicsItem):
         self._z_max = np.inf
         self._rect = QRectF()
 
-    def set_points(self, xyz: np.ndarray, *, sample_limit: int = 120_000) -> None:
+    def set_cloud(self, cloud, *, sample_limit: int = 60_000) -> None:
+        """Sample structured PCD fields before expanding to an Nx3 float64 matrix."""
+        point_count = int(cloud.points.shape[0])
+        for field in ("x", "y", "z"):
+            if field not in cloud.schema.fields:
+                raise ValueError(f"point cloud is missing {field}")
+            field_index = cloud.schema.fields.index(field)
+            if int(cloud.schema.counts[field_index]) != 1:
+                raise ValueError(f"point cloud field {field} must be scalar")
+        if point_count > sample_limit:
+            indices = np.linspace(0, point_count - 1, sample_limit, dtype=np.int64)
+            points = cloud.points[indices]
+        else:
+            points = cloud.points
+        xyz = np.column_stack(
+            (
+                np.asarray(points["x"], dtype=np.float64),
+                np.asarray(points["y"], dtype=np.float64),
+                np.asarray(points["z"], dtype=np.float64),
+            )
+        )
+        self.set_points(xyz)
+
+    def set_points(self, xyz: np.ndarray) -> None:
         xyz = np.asarray(xyz, dtype=np.float64)
         finite = np.all(np.isfinite(xyz), axis=1)
         xyz = xyz[finite]
-        if xyz.shape[0] > sample_limit:
-            indices = np.linspace(0, xyz.shape[0] - 1, sample_limit, dtype=np.int64)
-            xyz = xyz[indices]
         self.prepareGeometryChange()
         self._xy = np.column_stack((xyz[:, 0], -xyz[:, 1])) if xyz.size else np.empty((0, 2))
         self._z = xyz[:, 2].copy() if xyz.size else np.empty(0)
