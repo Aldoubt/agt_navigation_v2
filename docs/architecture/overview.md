@@ -9,6 +9,9 @@ V25-12 freezes the new Site Workflow and BT-composable capability direction befo
 - V25-12 frozen requirements: [`V25_12_SITE_WORKFLOW_REQUIREMENTS.md`](../v2.5/V25_12_SITE_WORKFLOW_REQUIREMENTS.md)
 - System architecture and main Mermaid diagram: [`system_architecture.md`](system_architecture.md)
 - Offline Site Package production and benchmark workflow: [`offline_asset_pipeline.md`](offline_asset_pipeline.md)
+- Site Package root manifest contract: [`site_package_manifest.md`](../interfaces/site_package_manifest.md)
+- Existing Map Version manifest contract: [`map_manifest.md`](../interfaces/map_manifest.md)
+- Existing Route Asset contract: [`route_asset_contract.md`](../interfaces/route_asset_contract.md)
 - Mission and capability composition: [`navigation_task_orchestration.md`](navigation_task_orchestration.md)
 - BehaviorTree execution and replaceable-backend boundary: [`behavior_tree_execution.md`](behavior_tree_execution.md)
 - Runtime data flow: [`runtime_dataflow.md`](runtime_dataflow.md)
@@ -30,6 +33,8 @@ V25_12_SITE_WORKFLOW_REQUIREMENTS
 system_architecture
         ↓
 offline_asset_pipeline
+        ↓
+site_package_manifest
         ↓
 behavior_tree_execution
         ↓
