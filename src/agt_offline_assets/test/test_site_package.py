@@ -211,6 +211,8 @@ def _ready_route(map_root: Path, map_manifest_path: Path, *, route_id="inspectio
         route_root / "preview.geojson",
         json.dumps({"type": "FeatureCollection", "features": []}),
     )
+    semantic = map_manifest["assets"]["semantic_map"]
+    coverage = map_manifest["assets"]["semantic_coverage"]
     route = {
         "schema_version": 1,
         "route_id": route_id,
@@ -220,6 +222,12 @@ def _ready_route(map_root: Path, map_manifest_path: Path, *, route_id="inspectio
             "map_id": map_manifest["map_id"],
             "map_version_id": map_manifest["map_version_id"],
             "map_content_sha256": map_manifest["map_content_sha256"],
+        },
+        "semantic_binding": {
+            "path": "../../../semantic/semantic_map.geojson",
+            "sha256": semantic["sha256"],
+            "coverage_path": "../../../semantic/coverage.yaml",
+            "coverage_sha256": coverage["sha256"],
         },
         "vehicle_binding": {
             "platform_id": "bunker",
@@ -312,6 +320,25 @@ def test_site_package_rejects_route_from_other_vehicle(tmp_path):
     assert raised.value.code == "site_route_vehicle_hash_mismatch"
 
 
+def test_site_package_rejects_route_semantic_hash_mismatch(tmp_path):
+    _, map_root, map_manifest = _ready_map(tmp_path)
+    route_root = _ready_route(map_root, map_manifest)
+    route_path = route_root / "route.yaml"
+    route = yaml.safe_load(route_path.read_text(encoding="utf-8"))
+    route["semantic_binding"]["sha256"] = "sha256:" + "b" * 64
+    route_path.write_text(yaml.safe_dump(route, sort_keys=False), encoding="utf-8")
+
+    with pytest.raises(AssetContractError) as raised:
+        create_site_package(
+            tmp_path / "sites",
+            map_manifest_path=map_manifest,
+            platform_profile_path=PLATFORM,
+            route_dirs=[route_root],
+            site_package_id="sitepkg_20260811_120004_1234abcd",
+        )
+    assert raised.value.code == "site_route_semantic_hash_mismatch"
+
+
 def test_site_package_validation_detects_binding_tamper(tmp_path):
     maps_root, _, map_manifest = _ready_map(tmp_path)
     manifest_path = create_site_package(
@@ -341,8 +368,15 @@ def test_site_package_content_identity_excludes_lifecycle_metadata():
         "site_id": "greenhouse_test",
         "site_package_id": "sitepkg_20260811_120003_1234abcd",
         "frame_id": "map",
-        "map_binding": {"map_id": "a", "map_version_id": "b", "map_content_sha256": "sha256:" + "1" * 64},
-        "vehicle_binding": {"platform_id": "bunker", "platform_profile_sha256": "sha256:" + "2" * 64},
+        "map_binding": {
+            "map_id": "a",
+            "map_version_id": "b",
+            "map_content_sha256": "sha256:" + "1" * 64,
+        },
+        "vehicle_binding": {
+            "platform_id": "bunker",
+            "platform_profile_sha256": "sha256:" + "2" * 64,
+        },
         "routes": [],
         "benchmark_bindings": [],
         "state": "DRAFT",
