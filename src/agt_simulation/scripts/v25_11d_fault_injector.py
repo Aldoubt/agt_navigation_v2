@@ -26,6 +26,7 @@ ACTIVE_FAULT_CASES = {
 
 
 def spin_until(node: Node, predicate, timeout_s: float) -> bool:
+    """Bound service waits by wall time while continuing to process ROS callbacks."""
     deadline = time.monotonic() + timeout_s
     while rclpy.ok() and time.monotonic() < deadline:
         rclpy.spin_once(node, timeout_sec=0.05)
@@ -68,14 +69,17 @@ class FailureInjector(Node):
             self.service_name = "/agt/simulation/sensors/set_imu_drop"
             self.set_bool_client = self.create_client(SetBool, self.service_name)
 
-        self.started_at = time.monotonic()
+        self.trigger_delay_ns = int(self.trigger_delay_s * 1_000_000_000)
+        self.started_ros_ns: int | None = None
+        self.previous_ros_ns: int | None = None
         self.fired = False
         self.finished = False
         self.state = "ARMED"
-        self.message = f"waiting to inject {self.fault_case}"
+        self.message = f"waiting to inject {self.fault_case} on ROS simulation time"
         self._publish_state()
 
     def _publish_state(self) -> None:
+        current_ros_ns = int(self.get_clock().now().nanoseconds)
         msg = String()
         msg.data = json.dumps(
             {
@@ -83,6 +87,10 @@ class FailureInjector(Node):
                 "fault_case": self.fault_case,
                 "state": self.state,
                 "service": self.service_name,
+                "trigger_clock": "ros_sim_time",
+                "trigger_delay_s": self.trigger_delay_s,
+                "started_ros_ns": self.started_ros_ns,
+                "current_ros_ns": current_ros_ns,
                 "message": self.message,
             },
             separators=(",", ":"),
@@ -90,7 +98,37 @@ class FailureInjector(Node):
         self.publisher.publish(msg)
 
     def ready_to_fire(self) -> bool:
-        return not self.fired and time.monotonic() - self.started_at >= self.trigger_delay_s
+        if self.fired or self.finished:
+            return False
+
+        now_ros_ns = int(self.get_clock().now().nanoseconds)
+        # use_sim_time nodes report zero until the first /clock sample arrives.
+        if now_ros_ns <= 0:
+            return False
+
+        if self.started_ros_ns is None:
+            self.started_ros_ns = now_ros_ns
+            self.previous_ros_ns = now_ros_ns
+            self.message = (
+                f"armed {self.fault_case} at ROS time {now_ros_ns} ns; "
+                f"delay={self.trigger_delay_s:.2f}s"
+            )
+            self._publish_state()
+            return False
+
+        if self.previous_ros_ns is not None and now_ros_ns < self.previous_ros_ns:
+            self.state = "FAILED"
+            self.finished = True
+            self.message = (
+                "ROS_TIME_ROLLBACK while waiting to inject fault; "
+                f"previous_ns={self.previous_ros_ns} current_ns={now_ros_ns}"
+            )
+            self._publish_state()
+            self.get_logger().error(self.message)
+            return False
+
+        self.previous_ros_ns = now_ros_ns
+        return now_ros_ns - self.started_ros_ns >= self.trigger_delay_ns
 
     def fire(self) -> None:
         if self.fired:
@@ -142,7 +180,7 @@ class FailureInjector(Node):
         self.finished = True
         self._publish_state()
         self.get_logger().warning(
-            "V25-11D injected %s after %.2fs",
+            "V25-11D injected %s after %.2fs ROS simulation time",
             self.fault_case,
             self.trigger_delay_s,
         )
