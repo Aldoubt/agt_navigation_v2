@@ -100,19 +100,31 @@ def test_comparison_launch_reuses_v25_11d_failure_stack_without_topology_copy():
     assert "v25_11d_fault_injector.py" not in launch
 
 
-def test_matrix_reporter_requires_all_three_active_fault_reports():
+def test_matrix_reporter_requires_all_three_active_fault_reports_and_latency_gate():
     script = read("scripts/v25_11e_compare_reports.py")
     compile(script, "v25_11e_compare_reports.py", "exec")
     for token in (
         '"localization_lost"',
         '"lidar_dropout"',
         '"imu_dropout"',
-        '"agt_v25_11e_comparison_matrix/v1"',
+        '"agt_v25_11e_comparison_matrix/v2"',
+        '"safety_response_latency_gate"',
+        "MAX_FAULT_TO_SAFETY_ZERO_MS = 750.0",
+        "MAX_FAULT_TO_ROUTE_TERMINAL_MS = 1000.0",
+        "MAX_POST_FAULT_DISTANCE_M = 0.75",
         '"all_fault_reports_present"',
         '"all_fault_reports_passed"',
+        '"all_safety_zero_bounded"',
+        '"all_route_terminal_bounded"',
+        '"all_post_fault_distance_bounded"',
         '"fault_to_safety_zero_ms"',
         '"fault_to_route_terminal_ms"',
         '"max_post_fault_distance_m"',
         '"route_completion_ratio"',
+        '"response_checks"',
+        '"safety_zero_bounded"',
+        '"route_terminal_bounded"',
+        '"post_fault_distance_bounded"',
     ):
         assert token in script
+    assert '"agt_v25_11e_comparison_matrix/v1"' not in script
