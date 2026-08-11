@@ -36,6 +36,17 @@ def launch_setup(context):
     comparison_path = f"/tmp/agt_v25_11e_compare_{fault_case}.json"
     v25_11d_result_path = f"/tmp/agt_v25_11d_{fault_case}_result.json"
 
+    # This launch owns the complete comparison run. Remove stale artifacts before
+    # any child node starts so an older V25-11D PASS cannot satisfy the new run.
+    for artifact in (
+        timeline_path,
+        summary_path,
+        fault_metrics_path,
+        comparison_path,
+        v25_11d_result_path,
+    ):
+        Path(artifact).unlink(missing_ok=True)
+
     failure_stack = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             str(share / "launch" / "gazebo_failure_validation.launch.py")
