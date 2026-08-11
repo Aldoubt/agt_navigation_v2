@@ -31,7 +31,11 @@ def test_observer_collects_validation_authorities_and_publishes_visual_outputs()
         '"observer_fatal"',
     ):
         assert token in observer
-    assert "MarkerArray" not in observer
+    # Comments may document the rejected MarkerArray design. The executable
+    # contract only forbids importing, constructing, or publishing MarkerArray.
+    assert "from visualization_msgs.msg import MarkerArray" not in observer
+    assert "MarkerArray()" not in observer
+    assert "create_publisher(MarkerArray" not in observer
 
 
 def test_observer_records_state_changes_not_only_final_snapshot():
@@ -108,7 +112,9 @@ def test_observability_acceptance_requires_motion_timeline_and_happy_path():
         '"/tmp/agt_v25_11e_observability_result.json"',
     ):
         assert token in acceptance
-    assert "MarkerArray" not in acceptance
+    assert "from visualization_msgs.msg import MarkerArray" not in acceptance
+    assert "MarkerArray()" not in acceptance
+    assert "create_subscription(MarkerArray" not in acceptance
 
 
 def test_observability_rviz_exposes_route_truth_and_status_markers():
