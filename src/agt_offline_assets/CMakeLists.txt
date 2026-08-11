@@ -37,6 +37,7 @@ if(BUILD_TESTING)
     test_pointcloud_processing test/test_pointcloud_processing.py
   )
   ament_add_pytest_test(test_pcd_compressed test/test_pcd_compressed.py)
+  ament_add_pytest_test(test_pointcloud_profile test/test_pointcloud_profile.py)
 endif()
 
 ament_package()
