@@ -4,8 +4,17 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+    RegisterEventHandler,
+    TimerAction,
+)
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -106,6 +115,19 @@ def launch_setup(context):
         ],
     )
 
+    shutdown_on_acceptance_exit = RegisterEventHandler(
+        OnProcessExit(
+            target_action=comparison_acceptance,
+            on_exit=[
+                EmitEvent(
+                    event=Shutdown(
+                        reason=f"V25-11E comparison acceptance completed: {fault_case}"
+                    )
+                )
+            ],
+        )
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -119,8 +141,11 @@ def launch_setup(context):
     # Reuse the already accepted V25-11D failure stack. The two V25-11E observers
     # join shortly after startup but well before the default 9 s ROS-time fault,
     # so they measure the same runtime case without changing its control topology.
+    # Once comparison acceptance has persisted its report, shutdown the complete
+    # launch so repeated fault cases cannot leave duplicate Nav2/Gazebo processes.
     return [
         failure_stack,
+        shutdown_on_acceptance_exit,
         TimerAction(period=0.25, actions=[observer, fault_metrics]),
         TimerAction(period=0.75, actions=[comparison_acceptance]),
         TimerAction(period=3.5, actions=[rviz]),
