@@ -37,6 +37,7 @@ from .site_package import (
     validate_site_package,
 )
 from .pcd_io import PcdCloud, PcdSchema, read_pcd, write_pcd
+from .pointcloud_profile import DEFAULT_PERCENTILES, summarize_pointcloud
 from .pointcloud_processing import (
     PointCloudProcessingCompliance,
     PointCloudProcessingResult,
@@ -84,6 +85,8 @@ __all__ = [
     "PcdSchema",
     "read_pcd",
     "write_pcd",
+    "DEFAULT_PERCENTILES",
+    "summarize_pointcloud",
     "PointCloudProcessingCompliance",
     "PointCloudProcessingResult",
     "load_pointcloud_recipe",
