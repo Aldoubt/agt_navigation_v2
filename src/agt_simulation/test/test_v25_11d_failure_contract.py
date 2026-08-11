@@ -51,9 +51,43 @@ def test_navigation_launch_exposes_runner_controls_and_real_safety_chain():
         'package="agt_safety"',
         '("cmd_vel", "/agt/navigation/cmd_vel")',
         '"require_sensor_input_ready": True',
+        "SetLaunchConfiguration",
+        '"_v25_11c_use_rviz"',
+        '"_v25_11c_run_acceptance"',
+        "condition=IfCondition(stage_run_acceptance)",
     ):
         assert token in launch
     assert '("cmd_vel", "/agt/safety/cmd_vel")' not in launch
+
+
+def test_v25_11b_smoke_spaces_corrections_using_ros_time():
+    smoke = read("scripts/v25_11b_localization_acceptance.py")
+    compile(smoke, "v25_11b_localization_acceptance.py", "exec")
+    for token in (
+        "CORRECTION_MIN_INTERVAL_S = 1.0",
+        "CORRECTION_INTERVAL_MARGIN_S = 0.10",
+        "_wait_ros_correction_interval",
+        "last_accepted_status.global_pose.header.stamp",
+        "node.get_clock().now().nanoseconds",
+        "ROS_TIME_ROLLBACK",
+        '"ros_time_correction_spacing"',
+    ):
+        assert token in smoke
+    assert "_spin_for" not in smoke
+    assert "time.sleep(" not in smoke
+
+
+def test_localization_launch_snapshots_delayed_stage_flags():
+    launch = read("launch/gazebo_localization_validation.launch.py")
+    compile(launch, "gazebo_localization_validation.launch.py", "exec")
+    for token in (
+        "SetLaunchConfiguration",
+        '"_v25_11b_use_rviz"',
+        '"_v25_11b_run_acceptance"',
+        "condition=IfCondition(stage_run_acceptance)",
+        "condition=IfCondition(stage_use_rviz)",
+    ):
+        assert token in launch
 
 
 def test_failure_launch_supports_deterministic_six_case_matrix_without_second_localizer():
