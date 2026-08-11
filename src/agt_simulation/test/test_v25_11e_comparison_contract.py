@@ -26,6 +26,7 @@ def test_fault_metrics_observer_tracks_fault_zero_terminal_and_distance():
         '"max_post_fault_cmd_norm"',
         '"route_completion_ratio"',
         'data.get("current_ros_ns")',
+        "self.first_zero_cmd_after_fault_ros_ns = self.fault_fired_ros_ns",
     ):
         assert token in script
 
@@ -34,6 +35,8 @@ def test_comparison_acceptance_requires_original_11d_gate_and_response_metrics()
     script = read("scripts/v25_11e_comparison_acceptance.py")
     compile(script, "v25_11e_comparison_acceptance.py", "exec")
     for token in (
+        '"v25_11d_result_available"',
+        "node.v25_11d_result_path.is_file",
         '"v25_11d_gate_passed"',
         'v25_11d.get("status") == "PASS"',
         '"fault_metrics_schema_valid"',
@@ -70,6 +73,8 @@ def test_comparison_launch_reuses_v25_11d_failure_stack_without_topology_copy():
         "TimerAction(period=0.25, actions=[observer, fault_metrics])",
         "TimerAction(period=0.75, actions=[comparison_acceptance])",
         'default_value="localization_lost"',
+        "Path(artifact).unlink(missing_ok=True)",
+        "v25_11d_result_path",
     ):
         assert token in launch
     assert "gazebo_navigation_validation.launch.py" not in launch
