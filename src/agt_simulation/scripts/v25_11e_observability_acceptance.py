@@ -11,11 +11,11 @@ from nav_msgs.msg import Path as NavPath
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
-from visualization_msgs.msg import MarkerArray
+from visualization_msgs.msg import Marker
 
 
 TRANSIENT_QOS = QoSProfile(
-    depth=1,
+    depth=10,
     reliability=ReliabilityPolicy.RELIABLE,
     durability=DurabilityPolicy.TRANSIENT_LOCAL,
 )
@@ -47,7 +47,7 @@ class Acceptance(Node):
             )
         )
         self.route_state = None
-        self.marker_count = 0
+        self.marker_ids: set[int] = set()
         self.truth_pose_count = 0
         self.create_subscription(
             String,
@@ -56,9 +56,9 @@ class Acceptance(Node):
             TRANSIENT_QOS,
         )
         self.create_subscription(
-            MarkerArray,
+            Marker,
             "/agt/validation/status_markers",
-            self._on_markers,
+            self._on_marker,
             TRANSIENT_QOS,
         )
         self.create_subscription(
@@ -75,11 +75,16 @@ class Acceptance(Node):
             data = {"state": "INVALID", "message": msg.data}
         self.route_state = data if isinstance(data, dict) else {"state": "INVALID"}
 
-    def _on_markers(self, msg: MarkerArray) -> None:
-        self.marker_count = max(self.marker_count, len(msg.markers))
+    def _on_marker(self, msg: Marker) -> None:
+        if msg.ns == "v25_11e_status":
+            self.marker_ids.add(int(msg.id))
 
     def _on_truth_path(self, msg: NavPath) -> None:
         self.truth_pose_count = max(self.truth_pose_count, len(msg.poses))
+
+    @property
+    def marker_count(self) -> int:
+        return len(self.marker_ids)
 
     def route_terminal(self) -> bool:
         return isinstance(self.route_state, dict) and self.route_state.get("state") in {
@@ -153,6 +158,9 @@ def main(args=None) -> None:
             summary.get("schema") == "agt_v25_11e_summary/v1"
             and summary.get("gate") == "V25-11E"
         )
+        result["checks"]["observer_runtime_healthy"] = not bool(
+            summary.get("fatal_error")
+        ) and "observer_fatal" not in events
         result["checks"]["summary_route_succeeded"] = (
             isinstance(summary_route, dict)
             and summary_route.get("state") == "SUCCEEDED"
@@ -188,6 +196,7 @@ def main(args=None) -> None:
 
         result["metrics"] = {
             "marker_count": node.marker_count,
+            "marker_ids": sorted(node.marker_ids),
             "ground_truth_pose_count": node.truth_pose_count,
             "timeline_record_count": len(timeline_records),
             "summary": summary,
@@ -196,7 +205,7 @@ def main(args=None) -> None:
         result["status"] = "PASS" if passed else "FAIL"
         exit_code = 0 if passed else 1
     except Exception as error:  # noqa: BLE001
-        result["error"] = str(error)
+        result["error"] = f"{type(error).__name__}: {error}"
     finally:
         node.report_path.parent.mkdir(parents=True, exist_ok=True)
         node.report_path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
