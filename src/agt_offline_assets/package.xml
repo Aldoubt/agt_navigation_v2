@@ -2,12 +2,14 @@
 <package format="3">
   <name>agt_offline_assets</name>
   <version>0.1.0</version>
-  <description>Reproducible offline map and route asset preparation for AGT Navigation V2.5.</description>
+  <description>Reproducible offline map, point-cloud, route, and Site Package preparation for AGT Navigation V2.5.</description>
   <maintainer email="yangxuan@example.com">yangxuan</maintainer>
   <license>Apache-2.0</license>
   <buildtool_depend>ament_cmake</buildtool_depend>
   <buildtool_depend>ament_cmake_python</buildtool_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-scipy</exec_depend>
   <exec_depend>python3-shapely</exec_depend>
   <exec_depend>agt_ui_bridge</exec_depend>
   <exec_depend>agt_coverage_planning</exec_depend>
