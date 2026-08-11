@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
-import time
 from typing import Any
 
 import rclpy
@@ -125,6 +124,16 @@ class FaultMetrics(Node):
         self.fault_position_xy = self.latest_truth_xy
         self.fault_cmd_norm = self.latest_cmd_norm
         self.fault_ground_truth_speed_mps = self.latest_truth_speed_mps
+
+        # The fault service changes system state before the injector publishes
+        # FIRED. If Safety has already emitted zero by the time FIRED arrives,
+        # record a zero-latency upper bound instead of waiting for another sample.
+        if (
+            self.pre_fault_motion_seen
+            and self.latest_cmd_norm <= self.zero_cmd_threshold
+            and self.first_zero_cmd_after_fault_ros_ns is None
+        ):
+            self.first_zero_cmd_after_fault_ros_ns = self.fault_fired_ros_ns
         self._write_metrics()
 
     def _on_route_state(self, msg: String) -> None:
