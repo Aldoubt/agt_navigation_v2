@@ -31,6 +31,8 @@ set(AGT_SIMULATION_ENTRYPOINTS
   v25_11c_navigation_acceptance.py
   v25_11d_fault_injector.py
   v25_11d_failure_acceptance.py
+  v25_11e_observability.py
+  v25_11e_observability_acceptance.py
 )
 
 foreach(_script IN LISTS AGT_SIMULATION_ENTRYPOINTS)
@@ -69,6 +71,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_v25_11d_failure_contract
     test/test_v25_11d_failure_contract.py
+  )
+  ament_add_pytest_test(
+    test_v25_11e_observability_contract
+    test/test_v25_11e_observability_contract.py
   )
 endif()
 
