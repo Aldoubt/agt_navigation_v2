@@ -20,9 +20,11 @@ Supports
 - arbitrary scalar/vector field preservation
 - `DATA ascii`
 - uncompressed `DATA binary`
+- PCL `DATA binary_compressed` input through bounds-checked LZF decoding and field-major/SoA restoration
 - deterministic ASCII/BINARY writing
-- explicit rejection of `binary_compressed`
 - required scalar x/y/z geometry fields
+
+Formal processing output remains normalized to ASCII or uncompressed binary; V25-12B does not emit `binary_compressed`
 
 ### Recipe executor
 
@@ -141,6 +143,8 @@ python3 -m pytest -q \
 
 Use a real mapping PCD or small fixture
 
+PCL `binary_compressed` input is supported directly, so a CloudCompare/PCL-produced map does not need a manual conversion step before inspection
+
 ```bash
 ros2 run agt_offline_assets agt_offline_assets_cli.py inspect-pcd \
   --input <input.pcd>
@@ -151,6 +155,8 @@ Then copy and tune the example recipe rather than editing a READY map
 ```bash
 cp docs/interfaces/examples/pointcloud_processing/recipe.yaml /tmp/agt_pc_recipe.yaml
 ```
+
+Before processing, adjust `crop_box`, `height_range`, and other scene-dependent values according to the bounds reported by `inspect-pcd`
 
 ```bash
 ros2 run agt_offline_assets agt_offline_assets_cli.py process-pointcloud \
