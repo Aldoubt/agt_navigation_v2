@@ -20,6 +20,10 @@ from std_srvs.srv import Trigger
 from tf2_ros import Buffer, TransformListener
 
 
+CORRECTION_MIN_INTERVAL_S = 1.0
+CORRECTION_INTERVAL_MARGIN_S = 0.10
+
+
 class LocalizationAcceptance(Node):
     def __init__(self) -> None:
         super().__init__("agt_v25_11b_localization_acceptance")
@@ -74,7 +78,7 @@ class LocalizationAcceptance(Node):
 
 def _spin_until(node: Node, predicate, timeout_s: float) -> bool:
     deadline = time.monotonic() + timeout_s
-    while time.monotonic() < deadline:
+    while rclpy.ok() and time.monotonic() < deadline:
         rclpy.spin_once(node, timeout_sec=0.05)
         if predicate():
             return True
@@ -144,8 +148,8 @@ def _decision_matches(decision, code: str, generation: int, accepted: bool) -> b
     return (
         isinstance(decision, dict)
         and decision.get("code") == code
-        and decision.get("generation") == generation
-        and decision.get("accepted") is accepted
+        and decision.get("generation", -1) == generation
+        and bool(decision.get("accepted")) is accepted
     )
 
 
@@ -170,6 +174,76 @@ def _wait_decision_after(
             f"expected={(code, generation, accepted)}"
         )
     return node.latest_decision
+
+
+def _stamp_ns(stamp) -> int:
+    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
+
+
+def _wait_ros_correction_interval(
+    node: LocalizationAcceptance,
+    last_accepted_status: LocalizationStatus,
+    min_interval_s: float = CORRECTION_MIN_INTERVAL_S,
+    margin_s: float = CORRECTION_INTERVAL_MARGIN_S,
+    wall_timeout_s: float = 5.0,
+) -> None:
+    """Wait until ROS time is safely beyond the last accepted evidence stamp.
+
+    GlobalCorrectionCore rate-limits using observation.stamp_s, which comes from
+    the synthetic evidence global_pose stamp. Waiting against ROS time rather
+    than wall time keeps the smoke deterministic under use_sim_time.
+    """
+    accepted_stamp_ns = _stamp_ns(last_accepted_status.global_pose.header.stamp)
+    if accepted_stamp_ns <= 0:
+        raise RuntimeError("last accepted correction has invalid ROS timestamp")
+
+    interval_ns = int((min_interval_s + margin_s) * 1_000_000_000)
+    target_ns = accepted_stamp_ns + interval_ns
+    wall_deadline = time.monotonic() + wall_timeout_s
+    previous_ros_ns = node.get_clock().now().nanoseconds
+
+    while rclpy.ok() and time.monotonic() < wall_deadline:
+        rclpy.spin_once(node, timeout_sec=0.05)
+        now_ros_ns = node.get_clock().now().nanoseconds
+        if now_ros_ns < previous_ros_ns:
+            raise RuntimeError(
+                "ROS_TIME_ROLLBACK while waiting for correction minimum interval"
+            )
+        if now_ros_ns >= target_ns:
+            return
+        previous_ros_ns = now_ros_ns
+
+    now_ros_ns = node.get_clock().now().nanoseconds
+    raise RuntimeError(
+        "ROS time did not advance past correction minimum interval; "
+        f"now_ns={now_ros_ns} target_ns={target_ns}"
+    )
+
+
+def _submit_and_wait(
+    node: LocalizationAcceptance,
+    *,
+    last_accepted_status: LocalizationStatus,
+    status_predicate,
+    decision_code: str,
+    generation: int,
+    accepted: bool,
+    timeout_s: float = 5.0,
+):
+    _wait_ros_correction_interval(node, last_accepted_status)
+    status_sequence = node.status_sequence
+    decision_sequence = node.decision_sequence
+    _call_trigger(node, node.submit_client)
+    status = _wait_status_after(node, status_sequence, status_predicate, timeout_s)
+    decision = _wait_decision_after(
+        node,
+        decision_sequence,
+        decision_code,
+        generation,
+        accepted,
+        timeout_s,
+    )
+    return status, decision
 
 
 def _map_odom_xy(node: LocalizationAcceptance):
@@ -210,6 +284,7 @@ def main(args=None) -> None:
         _wait_decision_after(
             node, initial_decision_sequence, "CORRECTION_ACCEPTED", initial_generation, True
         )
+        last_accepted = initial
         result["events"].append(
             {"event": "initial_correction", "generation": initial_generation}
         )
@@ -222,19 +297,17 @@ def main(args=None) -> None:
 
         # TRACKING: +0.20 m is inside the 0.50 m envelope and must increment generation.
         _set_remote_parameters(node, {"translation_bias_x_m": 0.20})
-        sequence = node.status_sequence
-        decision_sequence = node.decision_sequence
-        _call_trigger(node, node.submit_client)
-        accepted_small = _wait_status_after(
+        accepted_small, _ = _submit_and_wait(
             node,
-            sequence,
-            lambda status: status.state == LocalizationStatus.STATE_TRACKING
+            last_accepted_status=last_accepted,
+            status_predicate=lambda status: status.state == LocalizationStatus.STATE_TRACKING
             and status.localization_accepted
             and status.correction_generation == initial_generation + 1,
+            decision_code="CORRECTION_ACCEPTED",
+            generation=initial_generation + 1,
+            accepted=True,
         )
-        _wait_decision_after(
-            node, decision_sequence, "CORRECTION_ACCEPTED", initial_generation + 1, True
-        )
+        last_accepted = accepted_small
         shifted_tf = _map_odom_xy(node)
         shift = math.hypot(
             shifted_tf[0] - initial_tf[0], shifted_tf[1] - initial_tf[1]
@@ -251,22 +324,15 @@ def main(args=None) -> None:
         # TRACKING: +1.00 m relative to baseline is outside the 0.50 m envelope.
         _set_remote_parameters(node, {"translation_bias_x_m": 1.00})
         generation_before_reject = int(accepted_small.correction_generation)
-        sequence = node.status_sequence
-        decision_sequence = node.decision_sequence
-        _call_trigger(node, node.submit_client)
-        rejected = _wait_status_after(
+        rejected, rejected_decision = _submit_and_wait(
             node,
-            sequence,
-            lambda status: status.state == LocalizationStatus.STATE_RECOVERING
+            last_accepted_status=last_accepted,
+            status_predicate=lambda status: status.state == LocalizationStatus.STATE_RECOVERING
             and not status.localization_accepted
             and status.correction_generation == generation_before_reject,
-        )
-        rejected_decision = _wait_decision_after(
-            node,
-            decision_sequence,
-            "TRANSLATION_JUMP_REJECTED",
-            generation_before_reject,
-            False,
+            decision_code="TRANSLATION_JUMP_REJECTED",
+            generation=generation_before_reject,
+            accepted=False,
         )
         decision_code = rejected_decision["code"]
         result["events"].append(
@@ -284,23 +350,17 @@ def main(args=None) -> None:
         )
 
         # The same jump is inside the RECOVERING 2.0 m envelope and must be accepted.
-        sequence = node.status_sequence
-        decision_sequence = node.decision_sequence
-        _call_trigger(node, node.submit_client)
-        recovered = _wait_status_after(
+        recovered, _ = _submit_and_wait(
             node,
-            sequence,
-            lambda status: status.state == LocalizationStatus.STATE_TRACKING
+            last_accepted_status=last_accepted,
+            status_predicate=lambda status: status.state == LocalizationStatus.STATE_TRACKING
             and status.localization_accepted
             and status.correction_generation == generation_before_reject + 1,
+            decision_code="CORRECTION_ACCEPTED",
+            generation=generation_before_reject + 1,
+            accepted=True,
         )
-        _wait_decision_after(
-            node,
-            decision_sequence,
-            "CORRECTION_ACCEPTED",
-            generation_before_reject + 1,
-            True,
-        )
+        last_accepted = recovered
         recovered_generation = int(recovered.correction_generation)
         result["events"].append(
             {"event": "recovering_correction_accepted", "generation": recovered_generation}
@@ -312,17 +372,14 @@ def main(args=None) -> None:
         _set_remote_parameters(node, {"fitness_score": 99.0})
         lost_status = None
         for attempt in range(1, 4):
-            sequence = node.status_sequence
-            decision_sequence = node.decision_sequence
-            _call_trigger(node, node.submit_client)
-            lost_status = _wait_status_after(
+            lost_status, _ = _submit_and_wait(
                 node,
-                sequence,
-                lambda status: not status.localization_accepted
+                last_accepted_status=last_accepted,
+                status_predicate=lambda status: not status.localization_accepted
                 and status.correction_generation == recovered_generation,
-            )
-            _wait_decision_after(
-                node, decision_sequence, "FITNESS_REJECTED", recovered_generation, False
+                decision_code="FITNESS_REJECTED",
+                generation=recovered_generation,
+                accepted=False,
             )
             result["events"].append(
                 {
@@ -343,22 +400,15 @@ def main(args=None) -> None:
             node,
             {"fitness_score": 0.01, "translation_bias_x_m": 5.0},
         )
-        sequence = node.status_sequence
-        decision_sequence = node.decision_sequence
-        _call_trigger(node, node.submit_client)
-        reanchored = _wait_status_after(
+        reanchored, reanchored_decision = _submit_and_wait(
             node,
-            sequence,
-            lambda status: status.state == LocalizationStatus.STATE_TRACKING
+            last_accepted_status=last_accepted,
+            status_predicate=lambda status: status.state == LocalizationStatus.STATE_TRACKING
             and status.localization_accepted
             and status.correction_generation == recovered_generation + 1,
-        )
-        reanchored_decision = _wait_decision_after(
-            node,
-            decision_sequence,
-            "REANCHOR_ACCEPTED",
-            recovered_generation + 1,
-            True,
+            decision_code="REANCHOR_ACCEPTED",
+            generation=recovered_generation + 1,
+            accepted=True,
         )
         decision_code = reanchored_decision["code"]
         result["events"].append(
@@ -371,6 +421,7 @@ def main(args=None) -> None:
         result["checks"]["lost_reanchor_accepted"] = (
             decision_code == "REANCHOR_ACCEPTED"
         )
+        result["checks"]["ros_time_correction_spacing"] = True
 
         _call_trigger(node, node.clear_client)
         passed = all(bool(value) for value in result["checks"].values())
