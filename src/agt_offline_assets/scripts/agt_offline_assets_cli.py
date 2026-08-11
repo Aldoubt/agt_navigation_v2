@@ -17,6 +17,7 @@ from agt_offline_assets import (
     refresh_map_manifest,
     refresh_site_package,
     sha256_path_bundle,
+    summarize_pointcloud,
     validate_map_workspace,
     validate_pointcloud_processing,
     validate_route_asset,
@@ -31,8 +32,22 @@ def _parser() -> argparse.ArgumentParser:
     hash_path = sub.add_parser("hash-path", help="hash one file or directory bundle deterministically")
     hash_path.add_argument("path")
 
-    inspect_pcd = sub.add_parser("inspect-pcd", help="read PCD schema and point count without modifying it")
+    inspect_pcd = sub.add_parser(
+        "inspect-pcd",
+        help="read PCD schema, geometry and optional deterministic field distributions",
+    )
     inspect_pcd.add_argument("--input", required=True)
+    inspect_pcd.add_argument(
+        "--profile",
+        action="store_true",
+        help="include deterministic sampled scalar-field percentiles",
+    )
+    inspect_pcd.add_argument(
+        "--sample-limit",
+        type=int,
+        default=200000,
+        help="maximum evenly spaced points used for percentile profiling",
+    )
 
     process_pcd = sub.add_parser(
         "process-pointcloud",
@@ -140,24 +155,17 @@ def main(argv=None) -> int:
             return 0
         if args.command == "inspect-pcd":
             cloud = read_pcd(args.input)
-            xyz = cloud.xyz()
-            bounds = None
-            if xyz.shape[0] and bool((xyz == xyz).all()):
-                bounds = {
-                    "min": [float(value) for value in xyz.min(axis=0)],
-                    "max": [float(value) for value in xyz.max(axis=0)],
-                }
-            print(json.dumps({
+            summary = summarize_pointcloud(
+                cloud,
+                include_profile=bool(args.profile),
+                sample_limit=int(args.sample_limit),
+            )
+            payload = {
                 "path": args.input,
                 "sha256": sha256_path_bundle(args.input),
-                "point_count": int(cloud.points.shape[0]),
-                "data_mode": cloud.data_mode,
-                "fields": list(cloud.schema.fields),
-                "sizes": list(cloud.schema.sizes),
-                "types": list(cloud.schema.types),
-                "counts": list(cloud.schema.counts),
-                "bounds_xyz": bounds,
-            }, ensure_ascii=False))
+                **summary,
+            }
+            print(json.dumps(payload, ensure_ascii=False))
             return 0
         if args.command == "process-pointcloud":
             result = process_pointcloud(
