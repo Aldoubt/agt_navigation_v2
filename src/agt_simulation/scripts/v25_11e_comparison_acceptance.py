@@ -23,6 +23,37 @@ def _read_json(path: Path) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _read_live_timeline_events(path: Path) -> tuple[set[str], int]:
+    """Read an append-only JSONL timeline without racing its writer.
+
+    The observability node remains alive while comparison acceptance reads the
+    timeline. A snapshot can therefore end with one partially written JSON line.
+    Ignore only that final malformed line; malformed complete records in the
+    middle of the file remain a hard error because they indicate artifact
+    corruption rather than a normal concurrent-write boundary.
+    """
+    events: set[str] = set()
+    skipped_tail_records = 0
+    if not path.is_file():
+        return events, skipped_tail_records
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    last_index = len(lines) - 1
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            if index == last_index:
+                skipped_tail_records += 1
+                continue
+            raise
+        if isinstance(record, dict):
+            events.add(str(record.get("event")))
+    return events, skipped_tail_records
+
+
 def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_suffix(path.suffix + ".tmp")
@@ -152,14 +183,6 @@ def main(args=None) -> None:
             if node.v25_11d_result_path.is_file()
             else {}
         )
-        timeline_events: set[str] = set()
-        if node.timeline_path.is_file():
-            for line in node.timeline_path.read_text(encoding="utf-8").splitlines():
-                if not line.strip():
-                    continue
-                record = json.loads(line)
-                if isinstance(record, dict):
-                    timeline_events.add(str(record.get("event")))
 
         checks = metrics_doc.get("checks", {}) if isinstance(metrics_doc, dict) else {}
         metrics = metrics_doc.get("metrics", {}) if isinstance(metrics_doc, dict) else {}
@@ -172,6 +195,38 @@ def main(args=None) -> None:
         fault_to_zero_ms = metrics.get("fault_to_safety_zero_ms")
         fault_to_terminal_ms = metrics.get("fault_to_route_terminal_ms")
         post_fault_distance_m = metrics.get("max_post_fault_distance_m")
+
+        # Populate the report metrics before reading the live timeline. Even if
+        # auxiliary observability evidence is malformed, the primary fault timing
+        # measurements remain visible instead of collapsing to an all-null row.
+        result["metrics"] = {
+            "fault_to_safety_zero_ms": fault_to_zero_ms,
+            "fault_to_route_terminal_ms": fault_to_terminal_ms,
+            "safety_zero_to_route_terminal_ms": metrics.get(
+                "safety_zero_to_route_terminal_ms"
+            ),
+            "fault_cmd_norm": metrics.get("fault_cmd_norm"),
+            "fault_ground_truth_speed_mps": metrics.get(
+                "fault_ground_truth_speed_mps"
+            ),
+            "max_post_fault_cmd_norm": metrics.get("max_post_fault_cmd_norm"),
+            "max_post_fault_ground_truth_speed_mps": metrics.get(
+                "max_post_fault_ground_truth_speed_mps"
+            ),
+            "max_post_fault_distance_m": post_fault_distance_m,
+            "route_completion_ratio": metrics.get("route_completion_ratio"),
+        }
+        result["sources"] = {
+            "fault_metrics": metrics_doc,
+            "v25_11d_result": v25_11d,
+        }
+
+        timeline_events, skipped_timeline_tail_records = _read_live_timeline_events(
+            node.timeline_path
+        )
+        result["metrics"]["skipped_timeline_tail_records"] = (
+            skipped_timeline_tail_records
+        )
 
         result["checks"]["v25_11d_gate_passed"] = bool(
             v25_11d.get("gate") == "V25-11D"
@@ -236,28 +291,6 @@ def main(args=None) -> None:
             "safety",
             "safety_cmd_motion",
         }.issubset(timeline_events)
-
-        result["metrics"] = {
-            "fault_to_safety_zero_ms": fault_to_zero_ms,
-            "fault_to_route_terminal_ms": fault_to_terminal_ms,
-            "safety_zero_to_route_terminal_ms": metrics.get(
-                "safety_zero_to_route_terminal_ms"
-            ),
-            "fault_cmd_norm": metrics.get("fault_cmd_norm"),
-            "fault_ground_truth_speed_mps": metrics.get(
-                "fault_ground_truth_speed_mps"
-            ),
-            "max_post_fault_cmd_norm": metrics.get("max_post_fault_cmd_norm"),
-            "max_post_fault_ground_truth_speed_mps": metrics.get(
-                "max_post_fault_ground_truth_speed_mps"
-            ),
-            "max_post_fault_distance_m": post_fault_distance_m,
-            "route_completion_ratio": metrics.get("route_completion_ratio"),
-        }
-        result["sources"] = {
-            "fault_metrics": metrics_doc,
-            "v25_11d_result": v25_11d,
-        }
 
         passed = all(bool(value) for value in result["checks"].values())
         result["status"] = "PASS" if passed else "FAIL"
