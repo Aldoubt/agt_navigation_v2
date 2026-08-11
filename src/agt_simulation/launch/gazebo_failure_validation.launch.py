@@ -123,7 +123,7 @@ def generate_launch_description():
             DeclareLaunchArgument(
                 "trigger_delay_s",
                 default_value="9.0",
-                description="wall-clock delay for active V25-11D fault injection",
+                description="ROS simulation-time delay for active V25-11D fault injection",
             ),
             OpaqueFunction(function=launch_setup),
         ]
