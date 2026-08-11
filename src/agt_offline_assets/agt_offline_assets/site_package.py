@@ -51,11 +51,7 @@ def generate_site_package_id() -> str:
 
 
 def compute_site_package_content_sha256(manifest: Mapping[str, Any]) -> str:
-    stable = {
-        key: manifest[key]
-        for key in _SITE_CONTENT_KEYS
-        if key in manifest
-    }
+    stable = {key: manifest[key] for key in _SITE_CONTENT_KEYS if key in manifest}
     payload = json.dumps(
         stable,
         sort_keys=True,
@@ -109,7 +105,9 @@ def _required_map_asset(manifest: Mapping[str, Any], asset_id: str) -> Mapping[s
     return record
 
 
-def _optional_map_asset(manifest: Mapping[str, Any], asset_id: str) -> Mapping[str, Any] | None:
+def _optional_map_asset(
+    manifest: Mapping[str, Any], asset_id: str
+) -> Mapping[str, Any] | None:
     assets = manifest.get("assets")
     if not isinstance(assets, Mapping):
         return None
@@ -131,7 +129,9 @@ def _canonical_map_manifest(maps_root: str | Path, binding: Mapping[str, Any]) -
     try:
         candidate.relative_to(root)
     except ValueError as exc:
-        raise AssetContractError("site_map_path_escape", "resolved map manifest escapes maps root") from exc
+        raise AssetContractError(
+            "site_map_path_escape", "resolved map manifest escapes maps root"
+        ) from exc
     return candidate
 
 
@@ -146,8 +146,81 @@ def _canonical_route_manifest(map_root: Path, route_id: str, revision: int) -> P
     try:
         candidate.relative_to(root)
     except ValueError as exc:
-        raise AssetContractError("site_route_path_escape", "resolved route manifest escapes map root") from exc
+        raise AssetContractError(
+            "site_route_path_escape", "resolved route manifest escapes map root"
+        ) from exc
     return candidate
+
+
+def _resolve_bound_map_asset(map_root: Path, record: Mapping[str, Any], asset_id: str) -> Path:
+    relative = Path(str(record.get("path", "")))
+    if not relative.parts or relative.is_absolute() or ".." in relative.parts:
+        raise AssetContractError(
+            "site_map_asset_path_invalid", f"map asset path is invalid: {asset_id}"
+        )
+    candidate = (map_root / relative).resolve()
+    try:
+        candidate.relative_to(map_root.resolve())
+    except ValueError as exc:
+        raise AssetContractError(
+            "site_map_asset_path_escape", f"map asset escapes map root: {asset_id}"
+        ) from exc
+    return candidate
+
+
+def _validate_route_semantic_binding(
+    route_root: Path,
+    map_root: Path,
+    route: Mapping[str, Any],
+    map_manifest: Mapping[str, Any],
+) -> None:
+    map_semantic = _optional_map_asset(map_manifest, "semantic_map")
+    map_coverage = _optional_map_asset(map_manifest, "semantic_coverage")
+    route_semantic = route.get("semantic_binding")
+
+    if map_semantic is None:
+        if route_semantic:
+            raise AssetContractError(
+                "site_route_semantic_unexpected",
+                "route declares semantic binding but selected map has no frozen semantic product",
+            )
+        return
+    if map_coverage is None:
+        raise AssetContractError(
+            "site_route_coverage_missing", "selected map lacks frozen semantic coverage"
+        )
+    if not isinstance(route_semantic, Mapping):
+        raise AssetContractError(
+            "site_route_semantic_binding_missing", "READY route semantic_binding is required"
+        )
+
+    for asset_id, path_key, hash_key, record in (
+        ("semantic_map", "path", "sha256", map_semantic),
+        ("semantic_coverage", "coverage_path", "coverage_sha256", map_coverage),
+    ):
+        relative = Path(str(route_semantic.get(path_key, "")))
+        if not relative.parts or relative.is_absolute():
+            raise AssetContractError(
+                "site_route_semantic_path_invalid",
+                f"route semantic path is invalid: {path_key}",
+            )
+        selected = (route_root / relative).resolve()
+        expected = _resolve_bound_map_asset(map_root, record, asset_id)
+        if selected != expected:
+            raise AssetContractError(
+                "site_route_semantic_path_mismatch",
+                f"route {asset_id} path differs from selected READY map",
+            )
+        expected_hash = str(record.get("sha256", ""))
+        if (
+            not selected.is_file()
+            or sha256_file(selected) != expected_hash
+            or str(route_semantic.get(hash_key, "")) != expected_hash
+        ):
+            raise AssetContractError(
+                "site_route_semantic_hash_mismatch",
+                f"route {asset_id} hash differs from selected READY map",
+            )
 
 
 def _validate_ready_route(
@@ -199,6 +272,9 @@ def _validate_ready_route(
         )
 
     route_root = route_manifest_path.parent
+    map_root = route_manifest_path.parents[3]
+    _validate_route_semantic_binding(route_root, map_root, route, map_manifest)
+
     child_hashes = (
         ("route.csv", route.get("route_csv_sha256"), "site_route_csv_hash_mismatch"),
         (
@@ -221,11 +297,15 @@ def _validate_ready_route(
         try:
             child.relative_to(route_root.resolve())
         except ValueError as exc:
-            raise AssetContractError("site_route_child_path_escape", "route child escapes route root") from exc
+            raise AssetContractError(
+                "site_route_child_path_escape", "route child escapes route root"
+            ) from exc
         if not child.is_file() or not expected_hash or sha256_file(child) != str(expected_hash):
             raise AssetContractError(code, f"READY route child hash mismatch: {relative}")
 
-    feasibility = json.loads((route_root / "feasibility_report.json").read_text(encoding="utf-8"))
+    feasibility = json.loads(
+        (route_root / "feasibility_report.json").read_text(encoding="utf-8")
+    )
     if str(feasibility.get("status", "")).upper() != "PASS":
         raise AssetContractError(
             "site_route_feasibility_not_pass", "READY route feasibility report must be PASS"
@@ -295,12 +375,7 @@ def create_site_package(
             "site_package_id_invalid", "site_package_id must use sitepkg_YYYYMMDD_HHMMSS_<8 hex>"
         )
 
-    package_root = (
-        Path(sites_root).expanduser().resolve()
-        / site_id
-        / "packages"
-        / package_id
-    )
+    package_root = Path(sites_root).expanduser().resolve() / site_id / "packages" / package_id
     if package_root.exists():
         raise AssetContractError(
             "site_package_exists", f"Site Package already exists: {package_root}"
@@ -476,10 +551,38 @@ def validate_site_package(
         if not checks["map_ready_and_compliant"]:
             errors.append("site_map_not_ready")
         map_manifest = load_yaml_mapping(map_manifest_path)
-        _check_equal(checks, errors, "map_site_matches", str(map_manifest.get("site_id", "")), site_id, "site_map_site_mismatch")
-        _check_equal(checks, errors, "map_id_matches", str(map_manifest.get("map_id", "")), str(map_binding.get("map_id", "")), "site_map_id_mismatch")
-        _check_equal(checks, errors, "map_version_matches", str(map_manifest.get("map_version_id", "")), str(map_binding.get("map_version_id", "")), "site_map_version_mismatch")
-        _check_equal(checks, errors, "map_content_matches", str(map_manifest.get("map_content_sha256", "")), str(map_binding.get("map_content_sha256", "")), "site_map_hash_mismatch")
+        _check_equal(
+            checks,
+            errors,
+            "map_site_matches",
+            str(map_manifest.get("site_id", "")),
+            site_id,
+            "site_map_site_mismatch",
+        )
+        _check_equal(
+            checks,
+            errors,
+            "map_id_matches",
+            str(map_manifest.get("map_id", "")),
+            str(map_binding.get("map_id", "")),
+            "site_map_id_mismatch",
+        )
+        _check_equal(
+            checks,
+            errors,
+            "map_version_matches",
+            str(map_manifest.get("map_version_id", "")),
+            str(map_binding.get("map_version_id", "")),
+            "site_map_version_mismatch",
+        )
+        _check_equal(
+            checks,
+            errors,
+            "map_content_matches",
+            str(map_manifest.get("map_content_sha256", "")),
+            str(map_binding.get("map_content_sha256", "")),
+            "site_map_hash_mismatch",
+        )
     except (AssetContractError, OSError, ValueError, yaml.YAMLError) as exc:
         checks["map_ready_and_compliant"] = False
         errors.append(getattr(exc, "code", "site_map_validation_error"))
@@ -488,9 +591,25 @@ def validate_site_package(
         platform_id, platform_hash = _platform_identity(platform_profile_path)
         vehicle = manifest.get("vehicle_binding")
         if not isinstance(vehicle, Mapping):
-            raise AssetContractError("site_vehicle_binding_missing", "vehicle_binding mapping is required")
-        _check_equal(checks, errors, "vehicle_id_matches", platform_id, str(vehicle.get("platform_id", "")), "site_vehicle_id_mismatch")
-        _check_equal(checks, errors, "vehicle_hash_matches", platform_hash, str(vehicle.get("platform_profile_sha256", "")), "site_vehicle_hash_mismatch")
+            raise AssetContractError(
+                "site_vehicle_binding_missing", "vehicle_binding mapping is required"
+            )
+        _check_equal(
+            checks,
+            errors,
+            "vehicle_id_matches",
+            platform_id,
+            str(vehicle.get("platform_id", "")),
+            "site_vehicle_id_mismatch",
+        )
+        _check_equal(
+            checks,
+            errors,
+            "vehicle_hash_matches",
+            platform_hash,
+            str(vehicle.get("platform_profile_sha256", "")),
+            "site_vehicle_hash_mismatch",
+        )
     except (AssetContractError, OSError, ValueError, yaml.YAMLError) as exc:
         platform_id, platform_hash = "", ""
         checks["vehicle_hash_matches"] = False
@@ -500,20 +619,62 @@ def validate_site_package(
         try:
             calibration = map_manifest.get("calibration") or {}
             package_calibration = manifest.get("calibration_binding") or {}
-            _check_equal(checks, errors, "calibration_id_matches", str(package_calibration.get("calibration_id", "")), str(calibration.get("calibration_id", "")), "site_calibration_id_mismatch")
-            _check_equal(checks, errors, "calibration_hash_matches", str(package_calibration.get("sha256", "")), str(calibration.get("sha256", "")), "site_calibration_hash_mismatch")
+            _check_equal(
+                checks,
+                errors,
+                "calibration_id_matches",
+                str(package_calibration.get("calibration_id", "")),
+                str(calibration.get("calibration_id", "")),
+                "site_calibration_id_mismatch",
+            )
+            _check_equal(
+                checks,
+                errors,
+                "calibration_hash_matches",
+                str(package_calibration.get("sha256", "")),
+                str(calibration.get("sha256", "")),
+                "site_calibration_hash_mismatch",
+            )
 
             localization = manifest.get("localization_binding") or {}
             loc_pcd = _required_map_asset(map_manifest, "localization_pcd")
             loc_processing = _required_map_asset(map_manifest, "processing_record")
-            _check_equal(checks, errors, "localization_map_matches", str(localization.get("map_sha256", "")), str(loc_pcd.get("sha256", "")), "site_localization_map_hash_mismatch")
-            _check_equal(checks, errors, "localization_processing_matches", str(localization.get("processing_sha256", "")), str(loc_processing.get("sha256", "")), "site_localization_processing_hash_mismatch")
+            _check_equal(
+                checks,
+                errors,
+                "localization_map_matches",
+                str(localization.get("map_sha256", "")),
+                str(loc_pcd.get("sha256", "")),
+                "site_localization_map_hash_mismatch",
+            )
+            _check_equal(
+                checks,
+                errors,
+                "localization_processing_matches",
+                str(localization.get("processing_sha256", "")),
+                str(loc_processing.get("sha256", "")),
+                "site_localization_processing_hash_mismatch",
+            )
 
             navigation = manifest.get("navigation_binding") or {}
             nav_yaml = _required_map_asset(map_manifest, "navigation_yaml")
             nav_pgm = _required_map_asset(map_manifest, "navigation_pgm")
-            _check_equal(checks, errors, "navigation_yaml_matches", str(navigation.get("yaml_sha256", "")), str(nav_yaml.get("sha256", "")), "site_navigation_yaml_hash_mismatch")
-            _check_equal(checks, errors, "navigation_pgm_matches", str(navigation.get("pgm_sha256", "")), str(nav_pgm.get("sha256", "")), "site_navigation_pgm_hash_mismatch")
+            _check_equal(
+                checks,
+                errors,
+                "navigation_yaml_matches",
+                str(navigation.get("yaml_sha256", "")),
+                str(nav_yaml.get("sha256", "")),
+                "site_navigation_yaml_hash_mismatch",
+            )
+            _check_equal(
+                checks,
+                errors,
+                "navigation_pgm_matches",
+                str(navigation.get("pgm_sha256", "")),
+                str(nav_pgm.get("sha256", "")),
+                "site_navigation_pgm_hash_mismatch",
+            )
 
             package_semantic = manifest.get("semantic_binding")
             map_semantic = _optional_map_asset(map_manifest, "semantic_map")
@@ -523,18 +684,19 @@ def validate_site_package(
                 if package_semantic is not None:
                     errors.append("site_semantic_unexpected")
                 warnings.append("site_package_has_no_semantic_product")
+            elif not isinstance(package_semantic, Mapping) or map_coverage is None:
+                checks["semantic_binding_matches"] = False
+                errors.append("site_semantic_binding_missing")
             else:
-                if not isinstance(package_semantic, Mapping) or map_coverage is None:
-                    checks["semantic_binding_matches"] = False
-                    errors.append("site_semantic_binding_missing")
-                else:
-                    semantic_ok = (
-                        str(package_semantic.get("map_sha256", "")) == str(map_semantic.get("sha256", ""))
-                        and str(package_semantic.get("coverage_sha256", "")) == str(map_coverage.get("sha256", ""))
-                    )
-                    checks["semantic_binding_matches"] = semantic_ok
-                    if not semantic_ok:
-                        errors.append("site_semantic_hash_mismatch")
+                semantic_ok = (
+                    str(package_semantic.get("map_sha256", ""))
+                    == str(map_semantic.get("sha256", ""))
+                    and str(package_semantic.get("coverage_sha256", ""))
+                    == str(map_coverage.get("sha256", ""))
+                )
+                checks["semantic_binding_matches"] = semantic_ok
+                if not semantic_ok:
+                    errors.append("site_semantic_hash_mismatch")
         except AssetContractError as exc:
             errors.append(exc.code)
 
@@ -550,14 +712,24 @@ def validate_site_package(
             for binding in routes:
                 try:
                     if not isinstance(binding, Mapping):
-                        raise AssetContractError("site_route_binding_invalid", "route binding must be a mapping")
-                    route_id = _require_safe_id(binding.get("route_id"), field="routes[].route_id", code="site_route_id_invalid")
+                        raise AssetContractError(
+                            "site_route_binding_invalid", "route binding must be a mapping"
+                        )
+                    route_id = _require_safe_id(
+                        binding.get("route_id"),
+                        field="routes[].route_id",
+                        code="site_route_id_invalid",
+                    )
                     revision = int(binding.get("revision", 0))
                     key = (route_id, revision)
                     if key in seen:
-                        raise AssetContractError("site_route_duplicate", f"duplicate route binding: {key}")
+                        raise AssetContractError(
+                            "site_route_duplicate", f"duplicate route binding: {key}"
+                        )
                     seen.add(key)
-                    route_manifest_path = _canonical_route_manifest(map_manifest_path.parent, route_id, revision)
+                    route_manifest_path = _canonical_route_manifest(
+                        map_manifest_path.parent, route_id, revision
+                    )
                     actual_binding = _validate_ready_route(
                         route_manifest_path,
                         map_manifest=map_manifest,
@@ -565,8 +737,16 @@ def validate_site_package(
                         platform_hash=platform_hash,
                     )
                     if actual_binding != dict(binding):
-                        raise AssetContractError("site_route_hash_mismatch", f"route binding changed: {key}")
-                except (AssetContractError, OSError, ValueError, yaml.YAMLError, json.JSONDecodeError) as exc:
+                        raise AssetContractError(
+                            "site_route_hash_mismatch", f"route binding changed: {key}"
+                        )
+                except (
+                    AssetContractError,
+                    OSError,
+                    ValueError,
+                    yaml.YAMLError,
+                    json.JSONDecodeError,
+                ) as exc:
                     routes_valid = False
                     errors.append(getattr(exc, "code", "site_route_validation_error"))
         elif routes:
