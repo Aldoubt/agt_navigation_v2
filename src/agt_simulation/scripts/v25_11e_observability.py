@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import math
 from pathlib import Path
+import traceback
 from typing import Any
 
 import rclpy
@@ -15,7 +16,7 @@ from nav_msgs.msg import Odometry, Path as NavPath
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
-from visualization_msgs.msg import Marker, MarkerArray
+from visualization_msgs.msg import Marker
 
 
 TRANSIENT_QOS = QoSProfile(
@@ -67,6 +68,7 @@ class Observability(Node):
 
         self.timeline_path.parent.mkdir(parents=True, exist_ok=True)
         self.timeline = self.timeline_path.open("w", encoding="utf-8", buffering=1)
+        self.closed = False
 
         self.localization: LocalizationStatus | None = None
         self.route_state: dict[str, Any] | None = None
@@ -88,9 +90,13 @@ class Observability(Node):
         self.route_running_ros_ns: int | None = None
         self.first_nonzero_cmd_ros_ns: int | None = None
         self.route_terminal_ros_ns: int | None = None
+        self.fatal_error: str | None = None
 
+        # Five status rows are published as individual Marker messages instead of a
+        # MarkerArray. This keeps the RViz contract simple and avoids the Humble
+        # Python MarkerArray conversion path that failed during the first 11E run.
         self.marker_pub = self.create_publisher(
-            MarkerArray, "/agt/validation/status_markers", TRANSIENT_QOS
+            Marker, "/agt/validation/status_markers", TRANSIENT_QOS
         )
         self.truth_path_pub = self.create_publisher(
             NavPath, "/agt/validation/ground_truth_path", TRANSIENT_QOS
@@ -251,6 +257,22 @@ class Observability(Node):
         if moving and self.first_nonzero_cmd_ros_ns is None:
             self.first_nonzero_cmd_ros_ns = self._ros_ns()
 
+    @staticmethod
+    def _pose_from_odom(msg: Odometry) -> PoseStamped:
+        pose = PoseStamped()
+        pose.header.stamp.sec = int(msg.header.stamp.sec)
+        pose.header.stamp.nanosec = int(msg.header.stamp.nanosec)
+        pose.header.frame_id = str(msg.header.frame_id or "odom")
+        source = msg.pose.pose
+        pose.pose.position.x = float(source.position.x)
+        pose.pose.position.y = float(source.position.y)
+        pose.pose.position.z = float(source.position.z)
+        pose.pose.orientation.x = float(source.orientation.x)
+        pose.pose.orientation.y = float(source.orientation.y)
+        pose.pose.orientation.z = float(source.orientation.z)
+        pose.pose.orientation.w = float(source.orientation.w)
+        return pose
+
     def _on_truth(self, msg: Odometry) -> None:
         self.latest_truth = msg
         if self.first_truth is None:
@@ -269,17 +291,14 @@ class Observability(Node):
             displacement = math.hypot(float(point.x - origin.x), float(point.y - origin.y))
             self.max_displacement_m = max(self.max_displacement_m, displacement)
 
-        pose = PoseStamped()
-        pose.header = msg.header
-        if not pose.header.frame_id:
-            pose.header.frame_id = "odom"
-        pose.pose = msg.pose.pose
+        pose = self._pose_from_odom(msg)
         if not self.truth_path.header.frame_id:
             self.truth_path.header.frame_id = pose.header.frame_id
-        self.truth_path.header.stamp = msg.header.stamp
+        self.truth_path.header.stamp.sec = int(msg.header.stamp.sec)
+        self.truth_path.header.stamp.nanosec = int(msg.header.stamp.nanosec)
         self.truth_path.poses.append(pose)
         if len(self.truth_path.poses) > self.max_ground_truth_poses:
-            self.truth_path.poses = self.truth_path.poses[-self.max_ground_truth_poses :]
+            del self.truth_path.poses[: len(self.truth_path.poses) - self.max_ground_truth_poses]
         self.truth_path_pub.publish(self.truth_path)
 
     @staticmethod
@@ -292,25 +311,26 @@ class Observability(Node):
 
     def _text_marker(self, marker_id: int, z: float, text: str, level: str) -> Marker:
         marker = Marker()
+        now = self.get_clock().now().to_msg()
         marker.header.frame_id = self.marker_frame
-        marker.header.stamp = self.get_clock().now().to_msg()
+        marker.header.stamp.sec = int(now.sec)
+        marker.header.stamp.nanosec = int(now.nanosec)
         marker.ns = "v25_11e_status"
-        marker.id = marker_id
+        marker.id = int(marker_id)
         marker.type = Marker.TEXT_VIEW_FACING
         marker.action = Marker.ADD
         marker.pose.position.x = 0.0
         marker.pose.position.y = 0.0
-        marker.pose.position.z = z
+        marker.pose.position.z = float(z)
         marker.pose.orientation.w = 1.0
         marker.scale.z = 0.18
         red, green, blue = self._marker_color(level)
-        marker.color.r = red
-        marker.color.g = green
-        marker.color.b = blue
+        marker.color.r = float(red)
+        marker.color.g = float(green)
+        marker.color.b = float(blue)
         marker.color.a = 1.0
-        marker.text = text
-        marker.lifetime.sec = 0
-        marker.lifetime.nanosec = 400_000_000
+        marker.text = str(text)
+        # lifetime remains zero: RViz keeps each id until the next update.
         return marker
 
     def _publish_markers(self) -> None:
@@ -369,15 +389,15 @@ class Observability(Node):
             f"distance={self.total_distance_m:.2f}m"
         )
 
-        markers = MarkerArray()
-        markers.markers = [
-            self._text_marker(0, 1.20, localization_text, localization_level),
-            self._text_marker(1, 1.42, route_text, route_level),
-            self._text_marker(2, 1.64, sensor_text, sensor_level),
-            self._text_marker(3, 1.86, safety_text, safety_level),
-            self._text_marker(4, 2.08, motion_text, motion_level),
-        ]
-        self.marker_pub.publish(markers)
+        marker_specs = (
+            (0, 1.20, localization_text, localization_level),
+            (1, 1.42, route_text, route_level),
+            (2, 1.64, sensor_text, sensor_level),
+            (3, 1.86, safety_text, safety_level),
+            (4, 2.08, motion_text, motion_level),
+        )
+        for marker_id, z, text, level in marker_specs:
+            self.marker_pub.publish(self._text_marker(marker_id, z, text, level))
 
     def _summary(self) -> dict[str, Any]:
         localization = None
@@ -402,6 +422,7 @@ class Observability(Node):
             "localization": localization,
             "sensor_health": self.sensor_summary,
             "safety": self.safety_status,
+            "fatal_error": self.fatal_error,
             "metrics": {
                 "ground_truth_pose_count": len(self.truth_path.poses),
                 "total_distance_m": self.total_distance_m,
@@ -423,7 +444,21 @@ class Observability(Node):
     def _write_summary(self) -> None:
         _atomic_write_json(self.summary_path, self._summary())
 
+    def record_fatal(self, error: BaseException) -> None:
+        self.fatal_error = f"{type(error).__name__}: {error}"
+        self._record_event(
+            "observer_fatal",
+            {
+                "error": self.fatal_error,
+                "traceback": traceback.format_exc(),
+            },
+        )
+        self._write_summary()
+
     def close(self) -> None:
+        if self.closed:
+            return
+        self.closed = True
         self._record_event("observer_stopped", {})
         self._write_summary()
         self.timeline.close()
@@ -432,15 +467,23 @@ class Observability(Node):
 def main(args=None) -> None:
     rclpy.init(args=args)
     node = Observability()
+    exit_code = 0
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
+    except Exception as error:  # noqa: BLE001 - persist runtime diagnostics
+        exit_code = 1
+        node.record_fatal(error)
+        node.get_logger().error(node.fatal_error or "observer fatal error")
+        traceback.print_exc()
     finally:
         node.close()
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
+
+    raise SystemExit(exit_code)
 
 
 if __name__ == "__main__":
