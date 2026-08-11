@@ -1,4 +1,5 @@
 from pathlib import Path
+import struct
 
 import numpy as np
 import pytest
@@ -31,6 +32,46 @@ def _cloud(points):
         data[index]["z"] = point[2]
         data[index]["intensity"] = point[3] if len(point) > 3 else index
     return PcdCloud(schema, data, "ascii")
+
+
+def _lzf_literal_encode(data: bytes) -> bytes:
+    """Emit a valid LZF stream using literal runs only for deterministic fixtures."""
+    output = bytearray()
+    for start in range(0, len(data), 32):
+        chunk = data[start : start + 32]
+        output.append(len(chunk) - 1)
+        output.extend(chunk)
+    return bytes(output)
+
+
+def _write_binary_compressed(path: Path, cloud: PcdCloud) -> Path:
+    point_count = int(cloud.points.shape[0])
+    planes = []
+    for field in cloud.schema.fields:
+        planes.append(np.ascontiguousarray(cloud.points[field]).tobytes(order="C"))
+    unpacked = b"".join(planes)
+    compressed = _lzf_literal_encode(unpacked)
+    viewpoint = " ".join(str(value) for value in cloud.schema.viewpoint)
+    header = "\n".join(
+        [
+            "# .PCD v0.7 - Point Cloud Data file format",
+            "VERSION 0.7",
+            "FIELDS " + " ".join(cloud.schema.fields),
+            "SIZE " + " ".join(str(value) for value in cloud.schema.sizes),
+            "TYPE " + " ".join(cloud.schema.types),
+            "COUNT " + " ".join(str(value) for value in cloud.schema.counts),
+            f"WIDTH {point_count}",
+            "HEIGHT 1",
+            f"VIEWPOINT {viewpoint}",
+            f"POINTS {point_count}",
+            "DATA binary_compressed",
+            "",
+        ]
+    ).encode("ascii")
+    path.write_bytes(
+        header + struct.pack("<II", len(compressed), len(unpacked)) + compressed
+    )
+    return path
 
 
 def _recipe(path: Path, operations, *, output_data="binary", seed=7):
@@ -70,6 +111,39 @@ def test_pcd_ascii_to_binary_roundtrip_preserves_schema_and_values(tmp_path):
     assert binary_loaded.data_mode == "binary"
     np.testing.assert_allclose(binary_loaded.xyz(), loaded.xyz())
     np.testing.assert_allclose(binary_loaded.points["intensity"], loaded.points["intensity"])
+
+
+def test_pcd_binary_compressed_restores_pcl_soa_field_layout(tmp_path):
+    original = _cloud(
+        [
+            (1.25, -2.0, 0.5, 11.0),
+            (3.5, 4.25, -0.75, 22.0),
+            (-8.0, 1.0, 2.25, 33.0),
+        ]
+    )
+    source = _write_binary_compressed(tmp_path / "compressed.pcd", original)
+    loaded = read_pcd(source)
+    assert loaded.data_mode == "binary_compressed"
+    assert loaded.schema == original.schema
+    np.testing.assert_allclose(loaded.xyz(), original.xyz())
+    np.testing.assert_allclose(loaded.points["intensity"], original.points["intensity"])
+
+
+def test_processing_accepts_binary_compressed_input_but_normalizes_output(tmp_path):
+    source = _write_binary_compressed(
+        tmp_path / "compressed.pcd",
+        _cloud([(0.0, 0.0, 0.1, 1.0), (1.0, 0.0, 0.2, 2.0)]),
+    )
+    recipe = _recipe(
+        tmp_path / "recipe.yaml",
+        [{"type": "height_range", "parameters": {"min_z": 0.0, "max_z": 1.0}}],
+        output_data="binary",
+    )
+    result = process_pointcloud(source, recipe, tmp_path / "run")
+    assert result.input_points == 2
+    output = read_pcd(result.output_path)
+    assert output.data_mode == "binary"
+    assert validate_pointcloud_processing(result.run_dir).valid
 
 
 def test_processing_is_immutable_and_deterministic_for_same_input_recipe(tmp_path):
