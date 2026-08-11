@@ -11,6 +11,7 @@ import time
 
 import rclpy
 from agt_interfaces.msg import LocalizationStatus
+from nav_msgs.msg import Odometry
 from rcl_interfaces.srv import SetParameters
 from rclpy.node import Node
 from rclpy.parameter import Parameter
@@ -21,7 +22,11 @@ from tf2_ros import Buffer, TransformListener
 
 
 CORRECTION_MIN_INTERVAL_S = 1.0
-CORRECTION_INTERVAL_MARGIN_S = 0.10
+CORRECTION_INTERVAL_MARGIN_S = 0.20
+
+
+def _stamp_ns(stamp) -> int:
+    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
 
 
 class LocalizationAcceptance(Node):
@@ -38,6 +43,8 @@ class LocalizationAcceptance(Node):
         self.status_sequence = 0
         self.latest_decision = None
         self.decision_sequence = 0
+        self.latest_truth_stamp_ns = 0
+        self.truth_time_rollback_seen = False
         self.create_subscription(
             LocalizationStatus,
             "/agt/localization/status",
@@ -48,6 +55,12 @@ class LocalizationAcceptance(Node):
             String,
             "/agt/localization/global_correction_status",
             self._on_decision,
+            20,
+        )
+        self.create_subscription(
+            Odometry,
+            "/simulation/bunker/ground_truth",
+            self._on_truth,
             20,
         )
         self.tf = Buffer()
@@ -74,6 +87,16 @@ class LocalizationAcceptance(Node):
         except json.JSONDecodeError:
             self.latest_decision = {"raw": message.data}
         self.decision_sequence += 1
+
+    def _on_truth(self, message: Odometry) -> None:
+        stamp_ns = _stamp_ns(message.header.stamp)
+        if (
+            stamp_ns > 0
+            and self.latest_truth_stamp_ns > 0
+            and stamp_ns < self.latest_truth_stamp_ns
+        ):
+            self.truth_time_rollback_seen = True
+        self.latest_truth_stamp_ns = stamp_ns
 
 
 def _spin_until(node: Node, predicate, timeout_s: float) -> bool:
@@ -176,10 +199,6 @@ def _wait_decision_after(
     return node.latest_decision
 
 
-def _stamp_ns(stamp) -> int:
-    return int(stamp.sec) * 1_000_000_000 + int(stamp.nanosec)
-
-
 def _wait_ros_correction_interval(
     node: LocalizationAcceptance,
     last_accepted_status: LocalizationStatus,
@@ -187,36 +206,34 @@ def _wait_ros_correction_interval(
     margin_s: float = CORRECTION_INTERVAL_MARGIN_S,
     wall_timeout_s: float = 5.0,
 ) -> None:
-    """Wait until ROS time is safely beyond the last accepted evidence stamp.
+    """Wait for the actual synthetic-evidence source timestamp to advance.
 
-    GlobalCorrectionCore rate-limits using observation.stamp_s, which comes from
-    the synthetic evidence global_pose stamp. Waiting against ROS time rather
-    than wall time keeps the smoke deterministic under use_sim_time.
+    SyntheticLocalizationEvidence copies /simulation/bunker/ground_truth.header.stamp
+    into global_pose.header.stamp, and GlobalCorrectionCore rate-limits that exact
+    observation stamp. Therefore /clock itself is not a sufficient guard when the
+    bridged ground-truth stream lags simulation time.
     """
     accepted_stamp_ns = _stamp_ns(last_accepted_status.global_pose.header.stamp)
     if accepted_stamp_ns <= 0:
-        raise RuntimeError("last accepted correction has invalid ROS timestamp")
+        raise RuntimeError("last accepted correction has invalid source timestamp")
 
     interval_ns = int((min_interval_s + margin_s) * 1_000_000_000)
     target_ns = accepted_stamp_ns + interval_ns
     wall_deadline = time.monotonic() + wall_timeout_s
-    previous_ros_ns = node.get_clock().now().nanoseconds
 
     while rclpy.ok() and time.monotonic() < wall_deadline:
         rclpy.spin_once(node, timeout_sec=0.05)
-        now_ros_ns = node.get_clock().now().nanoseconds
-        if now_ros_ns < previous_ros_ns:
+        if node.truth_time_rollback_seen:
             raise RuntimeError(
-                "ROS_TIME_ROLLBACK while waiting for correction minimum interval"
+                "ROS_TIME_ROLLBACK on Gazebo ground-truth correction source"
             )
-        if now_ros_ns >= target_ns:
+        if node.latest_truth_stamp_ns >= target_ns:
             return
-        previous_ros_ns = now_ros_ns
 
-    now_ros_ns = node.get_clock().now().nanoseconds
     raise RuntimeError(
-        "ROS time did not advance past correction minimum interval; "
-        f"now_ns={now_ros_ns} target_ns={target_ns}"
+        "Gazebo ground-truth stamp did not advance past correction minimum interval; "
+        f"source_ns={node.latest_truth_stamp_ns} target_ns={target_ns} "
+        f"clock_ns={node.get_clock().now().nanoseconds}"
     )
 
 
@@ -268,8 +285,6 @@ def main(args=None) -> None:
     exit_code = 1
 
     try:
-        # The launch starts this smoke before the synthetic node's delayed initial
-        # correction, so the first canonical TRACKING status must be generation 1+.
         initial_decision_sequence = node.decision_sequence
         initial = _wait_status_after(
             node,
@@ -295,7 +310,6 @@ def main(args=None) -> None:
         initial_tf = _map_odom_xy(node)
         result["checks"]["map_odom_available"] = initial_tf is not None
 
-        # TRACKING: +0.20 m is inside the 0.50 m envelope and must increment generation.
         _set_remote_parameters(node, {"translation_bias_x_m": 0.20})
         accepted_small, _ = _submit_and_wait(
             node,
@@ -321,7 +335,6 @@ def main(args=None) -> None:
         )
         result["checks"]["tracking_small_correction_accepted"] = 0.12 <= shift <= 0.30
 
-        # TRACKING: +1.00 m relative to baseline is outside the 0.50 m envelope.
         _set_remote_parameters(node, {"translation_bias_x_m": 1.00})
         generation_before_reject = int(accepted_small.correction_generation)
         rejected, rejected_decision = _submit_and_wait(
@@ -349,7 +362,6 @@ def main(args=None) -> None:
             int(rejected.correction_generation) == generation_before_reject
         )
 
-        # The same jump is inside the RECOVERING 2.0 m envelope and must be accepted.
         recovered, _ = _submit_and_wait(
             node,
             last_accepted_status=last_accepted,
@@ -367,8 +379,6 @@ def main(args=None) -> None:
         )
         result["checks"]["recovering_envelope_accepted"] = True
 
-        # Quality rejection is state-independent. Three consecutive failures must
-        # escalate canonical localization to LOST without changing generation.
         _set_remote_parameters(node, {"fitness_score": 99.0})
         lost_status = None
         for attempt in range(1, 4):
@@ -395,7 +405,6 @@ def main(args=None) -> None:
             and int(lost_status.correction_generation) == recovered_generation
         )
 
-        # LOST may reanchor across a large displacement when quality is restored.
         _set_remote_parameters(
             node,
             {"fitness_score": 0.01, "translation_bias_x_m": 5.0},
@@ -422,6 +431,11 @@ def main(args=None) -> None:
             decision_code == "REANCHOR_ACCEPTED"
         )
         result["checks"]["ros_time_correction_spacing"] = True
+        result["metrics"] = {
+            "correction_min_interval_s": CORRECTION_MIN_INTERVAL_S,
+            "correction_interval_margin_s": CORRECTION_INTERVAL_MARGIN_S,
+            "latest_ground_truth_stamp_ns": node.latest_truth_stamp_ns,
+        }
 
         _call_trigger(node, node.clear_client)
         passed = all(bool(value) for value in result["checks"].values())
