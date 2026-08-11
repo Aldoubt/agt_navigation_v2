@@ -83,6 +83,10 @@ if(BUILD_TESTING)
     test_v25_11e_comparison_contract
     test/test_v25_11e_comparison_contract.py
   )
+  ament_add_pytest_test(
+    test_v25_11e_latency_contract
+    test/test_v25_11e_latency_contract.py
+  )
 endif()
 
 ament_package()
