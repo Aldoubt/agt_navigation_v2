@@ -10,9 +10,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from PyQt5.QtCore import QObject, QThread, pyqtSignal
+import numpy as np
+from PyQt5.QtCore import QObject, QPointF, QThread, Qt, pyqtSignal
 from PyQt5.QtGui import QPen, QPolygonF
-from PyQt5.QtCore import QPointF, Qt
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
@@ -21,6 +21,7 @@ from PyQt5.QtWidgets import (
     QGraphicsPolygonItem,
     QGraphicsScene,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QMainWindow,
@@ -31,7 +32,7 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
-from agt_offline_assets import process_pointcloud, read_pcd, summarize_pointcloud
+from agt_offline_assets import process_pointcloud, read_pcd
 
 from .model import WorkbenchRecipeModel
 from .view import PointCloudItem, PointCloudView
@@ -159,24 +160,25 @@ class MapWorkbenchWindow(QMainWindow):
             return
         try:
             cloud = read_pcd(filename)
-            summary = summarize_pointcloud(cloud)
+            z_values = np.asarray(cloud.points["z"], dtype=np.float64)
+            finite_z = z_values[np.isfinite(z_values)]
+            if finite_z.size == 0:
+                raise ValueError("PCD has no finite z values")
         except Exception as exc:
             QMessageBox.critical(self, "Open failed", str(exc))
             return
         self._source_path = Path(filename).resolve()
         self._cloud = cloud
-        self._cloud_item.set_points(cloud.xyz())
-        bounds = summary.get("bounds_xyz")
-        if bounds:
-            minimum = float(bounds["min"][2])
-            maximum = float(bounds["max"][2])
-            self._z_min.blockSignals(True)
-            self._z_max.blockSignals(True)
-            self._z_min.setValue(minimum)
-            self._z_max.setValue(maximum)
-            self._z_min.blockSignals(False)
-            self._z_max.blockSignals(False)
-            self._cloud_item.set_z_window(minimum, maximum)
+        self._cloud_item.set_cloud(cloud)
+        minimum = float(np.min(finite_z))
+        maximum = float(np.max(finite_z))
+        self._z_min.blockSignals(True)
+        self._z_max.blockSignals(True)
+        self._z_min.setValue(minimum)
+        self._z_max.setValue(maximum)
+        self._z_min.blockSignals(False)
+        self._z_max.blockSignals(False)
+        self._cloud_item.set_z_window(minimum, maximum)
         self._recipe = WorkbenchRecipeModel(
             recipe_id=f"{self._source_path.stem}_workbench_draft",
             frame_id="map",
@@ -184,7 +186,7 @@ class MapWorkbenchWindow(QMainWindow):
         self._refresh_operations()
         self._clear_polygon()
         self._source_label.setText(
-            f"{self._source_path}\n{summary['point_count']:,} points | {summary['data_mode']}"
+            f"{self._source_path}\n{int(cloud.points.shape[0]):,} points | {cloud.data_mode}"
         )
         self._fit_cloud()
         self.statusBar().showMessage("PCD loaded; display is deterministically sampled")
@@ -264,7 +266,10 @@ class MapWorkbenchWindow(QMainWindow):
         for index, operation in enumerate(self._recipe.operations):
             params = operation.parameters
             if operation.type in {"crop_polygon", "delete_polygon"}:
-                detail = f"{len(params.get('polygon_xy', []))} vertices, z=[{params.get('z_min'):.2f}, {params.get('z_max'):.2f}]"
+                detail = (
+                    f"{len(params.get('polygon_xy', []))} vertices, "
+                    f"z=[{params.get('z_min'):.2f}, {params.get('z_max'):.2f}]"
+                )
             else:
                 detail = str(params)
             self._operations.addItem(f"{index + 1}. {operation.type} — {detail}")
@@ -304,18 +309,21 @@ class MapWorkbenchWindow(QMainWindow):
         if not self._recipe.operations:
             QMessageBox.information(self, "Empty recipe", "Add at least one operation first")
             return
-        output_dir = QFileDialog.getExistingDirectory(self, "Choose parent directory for new processing run")
-        if not output_dir:
-            return
-        run_name, ok = QFileDialog.getSaveFileName(
-            self,
-            "Choose new processing run directory name",
-            str(Path(output_dir) / "agt_workbench_run"),
-            "Directory name (*)",
+        parent = QFileDialog.getExistingDirectory(
+            self, "Choose parent directory for new immutable processing run"
         )
-        if not ok or not run_name:
+        if not parent:
             return
-        destination = Path(run_name)
+        run_name, accepted = QInputDialog.getText(
+            self, "Processing run", "New run directory name:", text="agt_workbench_run"
+        )
+        run_name = run_name.strip()
+        if not accepted or not run_name:
+            return
+        if Path(run_name).name != run_name or run_name in {".", ".."}:
+            QMessageBox.warning(self, "Invalid name", "Run name must be one directory name")
+            return
+        destination = Path(parent) / run_name
         if destination.exists():
             QMessageBox.warning(self, "Immutable output", "Selected processing run already exists")
             return
@@ -351,7 +359,7 @@ class MapWorkbenchWindow(QMainWindow):
             try:
                 cloud = read_pcd(result.output_path)
                 self._cloud = cloud
-                self._cloud_item.set_points(cloud.xyz())
+                self._cloud_item.set_cloud(cloud)
                 self._fit_cloud()
             except Exception as exc:
                 QMessageBox.warning(self, "Review load failed", str(exc))
