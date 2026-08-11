@@ -11,6 +11,7 @@ from typing import Any
 import rclpy
 from action_msgs.msg import GoalStatus
 from agt_interfaces.msg import LocalizationStatus
+from diagnostic_msgs.msg import DiagnosticArray
 from geometry_msgs.msg import PoseStamped
 from nav2_msgs.action import ComputePathToPose, FollowPath
 from nav_msgs.msg import Path as NavPath
@@ -27,6 +28,9 @@ TRANSIENT_QOS = QoSProfile(
     reliability=ReliabilityPolicy.RELIABLE,
     durability=DurabilityPolicy.TRANSIENT_LOCAL,
 )
+
+SAFETY_STATUS_NAME = "agt_safety/tracked_controller"
+SAFETY_SENSOR_FAILURE = "sensor_input_unhealthy"
 
 
 def spin_until(node: Node, predicate, timeout_s: float) -> bool:
@@ -65,6 +69,7 @@ class RouteRunner(Node):
         self.points = list(self.route["points"])
 
         self.latest_localization: LocalizationStatus | None = None
+        self.latest_safety_reason = ""
         self.running = False
         self.start_requested = False
         self.state = "IDLE"
@@ -79,6 +84,9 @@ class RouteRunner(Node):
         )
         self.create_subscription(
             LocalizationStatus, "/agt/localization/status", self._on_localization, 20
+        )
+        self.create_subscription(
+            DiagnosticArray, "/agt/safety/status", self._on_safety_status, 20
         )
         self.create_service(
             Trigger,
@@ -117,6 +125,12 @@ class RouteRunner(Node):
     def _on_localization(self, msg: LocalizationStatus) -> None:
         self.latest_localization = msg
 
+    def _on_safety_status(self, msg: DiagnosticArray) -> None:
+        for status in msg.status:
+            if status.name == SAFETY_STATUS_NAME:
+                self.latest_safety_reason = str(status.message)
+                return
+
     def _localization_ready(self) -> bool:
         status = self.latest_localization
         return bool(
@@ -147,6 +161,12 @@ class RouteRunner(Node):
         if status.map_hash != self.map_hash:
             reasons.append(f"map_hash={status.map_hash!r} expected={self.map_hash!r}")
         return "; ".join(reasons) if reasons else "canonical localization guard failed"
+
+    def _safety_sensor_guard_failed(self) -> bool:
+        return self.latest_safety_reason == SAFETY_SENSOR_FAILURE
+
+    def _safety_failure_reason(self) -> str:
+        return self.latest_safety_reason or "no tracked safety status received"
 
     def _pose(self, point: dict[str, Any]) -> PoseStamped:
         pose = PoseStamped()
@@ -204,6 +224,7 @@ class RouteRunner(Node):
         label: str,
         *,
         require_localization: bool = False,
+        require_safety: bool = False,
     ):
         deadline = time.monotonic() + timeout_s
         while rclpy.ok() and time.monotonic() < deadline:
@@ -216,6 +237,10 @@ class RouteRunner(Node):
             if require_localization and not self._localization_ready():
                 raise RuntimeError(
                     "LOCALIZATION_GUARD_FAILED: " + self._localization_failure_reason()
+                )
+            if require_safety and self._safety_sensor_guard_failed():
+                raise RuntimeError(
+                    "SAFETY_GUARD_FAILED: " + self._safety_failure_reason()
                 )
         if future.done():
             result = future.result()
@@ -231,13 +256,21 @@ class RouteRunner(Node):
         except Exception as error:  # noqa: BLE001
             self.get_logger().warning(f"failed to cancel {label}: {error}")
 
-    def _wait_goal_result(self, handle, timeout_s: float, label: str):
+    def _wait_goal_result(
+        self,
+        handle,
+        timeout_s: float,
+        label: str,
+        *,
+        require_safety: bool = False,
+    ):
         try:
             return self._wait_future(
                 handle.get_result_async(),
                 timeout_s,
                 label,
                 require_localization=True,
+                require_safety=require_safety,
             )
         except Exception:
             self._cancel_goal(handle, label)
@@ -273,6 +306,10 @@ class RouteRunner(Node):
             raise RuntimeError(
                 "LOCALIZATION_GUARD_FAILED: " + self._localization_failure_reason()
             )
+        if self._safety_sensor_guard_failed():
+            raise RuntimeError(
+                "SAFETY_GUARD_FAILED: " + self._safety_failure_reason()
+            )
         goal = FollowPath.Goal()
         goal.path = path
         goal.controller_id = self.controller_id
@@ -282,10 +319,16 @@ class RouteRunner(Node):
             self.server_timeout_s,
             "controller goal response",
             require_localization=True,
+            require_safety=True,
         )
         if not handle.accepted:
             raise RuntimeError("CONTROLLER_GOAL_REJECTED")
-        result = self._wait_goal_result(handle, self.segment_timeout_s, "controller result")
+        result = self._wait_goal_result(
+            handle,
+            self.segment_timeout_s,
+            "controller result",
+            require_safety=True,
+        )
         if result.status != GoalStatus.STATUS_SUCCEEDED:
             raise RuntimeError(f"CONTROLLER_RESULT_FAILED: status={result.status}")
 
