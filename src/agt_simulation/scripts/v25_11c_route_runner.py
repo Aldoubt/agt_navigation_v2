@@ -129,6 +129,22 @@ class RouteRunner(Node):
             and status.map_hash == self.map_hash
         )
 
+    def _localization_snapshot(self) -> dict[str, Any] | None:
+        status = self.latest_localization
+        if status is None:
+            return None
+        return {
+            "state": int(status.state),
+            "tracking_constant": int(LocalizationStatus.STATE_TRACKING),
+            "localization_accepted": bool(status.localization_accepted),
+            "pose_valid": bool(status.pose_valid),
+            "correction_generation": int(status.correction_generation),
+            "map_id": str(status.map_id),
+            "map_hash": str(status.map_hash),
+            "error_code": int(status.error_code),
+            "message": str(status.message),
+        }
+
     def _pose(self, point: dict[str, Any]) -> PoseStamped:
         pose = PoseStamped()
         pose.header.frame_id = self.frame_id
@@ -163,6 +179,7 @@ class RouteRunner(Node):
                 "reached_segments": self.reached_segments,
                 "total_segments": len(self.points) - 1,
                 "message": self.last_message,
+                "localization": self._localization_snapshot(),
             },
             separators=(",", ":"),
         )
@@ -236,11 +253,10 @@ class RouteRunner(Node):
         self._publish_state()
         try:
             if not spin_until(self, self._localization_ready, self.server_timeout_s):
-                status = self.latest_localization
-                identity = None if status is None else (status.map_id, status.map_hash)
                 raise RuntimeError(
                     "canonical localization is not TRACKING on route map; "
-                    f"expected=({self.map_id}, {self.map_hash}) latest={identity}"
+                    f"expected=({self.map_id}, {self.map_hash}) "
+                    f"latest={json.dumps(self._localization_snapshot(), sort_keys=True)}"
                 )
             if not self.planner_client.wait_for_server(timeout_sec=self.server_timeout_s):
                 raise RuntimeError("/compute_path_to_pose unavailable")
