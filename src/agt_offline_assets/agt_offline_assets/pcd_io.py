@@ -1,14 +1,18 @@
 """Minimal deterministic PCD I/O used by the offline processing pipeline.
 
-The runtime mapping stack may emit ASCII or uncompressed binary PCD files.  This
-module deliberately supports those two representations and fails closed on
-``binary_compressed`` rather than silently changing unsupported data.
+The reader accepts the three PCD v0.7 storage modes used by PCL: ASCII,
+uncompressed binary, and ``binary_compressed``.  Compressed input is decoded
+according to PCL's LZF + structure-of-arrays representation, then normalized
+into the same structured NumPy array used by the other modes.  The writer
+intentionally emits only ASCII or uncompressed binary so processing artifacts
+have one simple deterministic output representation.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import struct
 from typing import Any
 
 import numpy as np
@@ -41,6 +45,10 @@ class PcdSchema:
     @property
     def scalar_count(self) -> int:
         return sum(self.counts)
+
+    @property
+    def packed_point_size(self) -> int:
+        return sum(size * count for size, count in zip(self.sizes, self.counts))
 
     @property
     def dtype(self) -> np.dtype:
@@ -99,6 +107,132 @@ def _tokens(mapping: dict[str, list[str]], key: str, *, required: bool = True) -
     return values or []
 
 
+def _lzf_decompress(payload: bytes, expected_size: int) -> bytes:
+    """Decode the LZF stream used by PCL binary_compressed PCD bodies.
+
+    This is a small bounds-checked implementation of the public LZF format.  It
+    supports overlapping back references, which are required by valid LZF
+    streams, and fails closed on malformed or truncated input.
+    """
+    if expected_size < 0:
+        raise AssetContractError("pcd_compressed_size_invalid", "negative LZF output size")
+    if expected_size == 0:
+        if payload:
+            raise AssetContractError(
+                "pcd_compressed_size_mismatch", "empty compressed cloud contains payload bytes"
+            )
+        return b""
+
+    source = memoryview(payload)
+    output = bytearray(expected_size)
+    ip = 0
+    op = 0
+    while ip < len(source):
+        ctrl = int(source[ip])
+        ip += 1
+        if ctrl < 32:
+            length = ctrl + 1
+            if ip + length > len(source) or op + length > expected_size:
+                raise AssetContractError(
+                    "pcd_lzf_invalid", "LZF literal run exceeds input or output bounds"
+                )
+            output[op : op + length] = source[ip : ip + length]
+            ip += length
+            op += length
+            continue
+
+        length = ctrl >> 5
+        reference = op - ((ctrl & 0x1F) << 8) - 1
+        if length == 7:
+            if ip >= len(source):
+                raise AssetContractError("pcd_lzf_invalid", "LZF length extension is truncated")
+            length += int(source[ip])
+            ip += 1
+        if ip >= len(source):
+            raise AssetContractError("pcd_lzf_invalid", "LZF back reference is truncated")
+        reference -= int(source[ip])
+        ip += 1
+        length += 2
+        if reference < 0 or op + length > expected_size:
+            raise AssetContractError(
+                "pcd_lzf_invalid", "LZF back reference exceeds output bounds"
+            )
+        # Copy byte-by-byte so overlapping references behave like the LZF C
+        # decoder rather than Python slice assignment with a temporary copy.
+        for _ in range(length):
+            output[op] = output[reference]
+            op += 1
+            reference += 1
+
+    if op != expected_size:
+        raise AssetContractError(
+            "pcd_lzf_size_mismatch",
+            f"LZF decompressed {op} bytes, expected {expected_size}",
+        )
+    return bytes(output)
+
+
+def _read_binary_compressed(
+    payload: bytes, schema: PcdSchema, point_count: int
+) -> np.ndarray:
+    if len(payload) < 8:
+        raise AssetContractError(
+            "pcd_compressed_truncated", "binary_compressed PCD body needs an 8-byte size header"
+        )
+    compressed_size, uncompressed_size = struct.unpack_from("<II", payload, 0)
+    if len(payload) < 8 + compressed_size:
+        raise AssetContractError(
+            "pcd_compressed_truncated",
+            f"compressed PCD payload is truncated: expected {compressed_size} bytes, "
+            f"got {max(0, len(payload) - 8)}",
+        )
+    expected_uncompressed = point_count * schema.packed_point_size
+    if uncompressed_size != expected_uncompressed:
+        raise AssetContractError(
+            "pcd_compressed_uncompressed_size_mismatch",
+            f"binary_compressed PCD declares {uncompressed_size} uncompressed bytes, "
+            f"expected {expected_uncompressed} from POINTS/FIELDS",
+        )
+    compressed = payload[8 : 8 + compressed_size]
+    unpacked = _lzf_decompress(compressed, uncompressed_size)
+
+    # PCL reorders AoS point records to one contiguous plane per field before
+    # LZF compression: xyzxyz -> xxxyyyzzz.  Restore each field independently.
+    points = np.empty(point_count, dtype=schema.dtype)
+    offset = 0
+    for field, size, type_code, count in zip(
+        schema.fields, schema.sizes, schema.types, schema.counts
+    ):
+        base = _TYPE_TO_DTYPE.get((type_code, size))
+        if base is None:
+            raise AssetContractError(
+                "pcd_field_type_unsupported",
+                f"unsupported PCD field type: {field} TYPE={type_code} SIZE={size}",
+            )
+        field_bytes = point_count * size * count
+        end = offset + field_bytes
+        if end > len(unpacked):
+            raise AssetContractError(
+                "pcd_compressed_layout_invalid", f"field plane is truncated: {field}"
+            )
+        values = np.frombuffer(unpacked[offset:end], dtype=base)
+        expected_values = point_count * count
+        if values.size != expected_values:
+            raise AssetContractError(
+                "pcd_compressed_layout_invalid", f"field plane has wrong size: {field}"
+            )
+        if count == 1:
+            points[field] = values
+        else:
+            points[field] = values.reshape(point_count, count)
+        offset = end
+    if offset != len(unpacked):
+        raise AssetContractError(
+            "pcd_compressed_layout_invalid", "compressed PCD contains unclaimed field bytes"
+        )
+    return points
+
+
 def read_pcd(path: str | Path) -> PcdCloud:
     path = Path(path).expanduser().resolve()
     if not path.is_file():
@@ -118,7 +252,6 @@ def read_pcd(path: str | Path) -> PcdCloud:
                 ) from exc
             header_lines.append(line)
             if line.upper().startswith("DATA "):
-                data_offset = stream.tell()
                 break
         payload = stream.read()
 
@@ -169,12 +302,7 @@ def read_pcd(path: str | Path) -> PcdCloud:
     if len(data_values) != 1:
         raise AssetContractError("pcd_data_invalid", "PCD DATA line is invalid")
     mode = data_values[0].lower()
-    if mode == "binary_compressed":
-        raise AssetContractError(
-            "pcd_binary_compressed_unsupported",
-            "binary_compressed PCD is not supported by the V25-12B MVP; convert to binary or ascii first",
-        )
-    if mode not in {"ascii", "binary"}:
+    if mode not in {"ascii", "binary", "binary_compressed"}:
         raise AssetContractError("pcd_data_unsupported", f"unsupported PCD DATA mode: {mode}")
 
     schema = PcdSchema(fields, sizes, types, counts, viewpoint)
@@ -187,6 +315,8 @@ def read_pcd(path: str | Path) -> PcdCloud:
                 f"binary PCD payload is truncated: expected {expected} bytes, got {len(payload)}",
             )
         points = np.frombuffer(payload[:expected], dtype=dtype, count=point_count).copy()
+    elif mode == "binary_compressed":
+        points = _read_binary_compressed(payload, schema, point_count)
     else:
         if point_count == 0:
             points = np.empty(0, dtype=dtype)
