@@ -59,8 +59,16 @@ def test_observability_launch_keeps_navigation_acceptance_and_single_rviz_owner(
         "gazebo_observability_validation.rviz",
         'DeclareLaunchArgument("run_navigation_acceptance"',
         'DeclareLaunchArgument("run_observability_acceptance"',
+        "TimerAction(period=0.25, actions=[observer])",
+        "TimerAction(period=0.75, actions=[acceptance])",
     ):
         assert token in launch
+    assert launch.index("navigation,") < launch.index(
+        "TimerAction(period=0.25, actions=[observer])"
+    )
+    assert launch.index("TimerAction(period=0.25, actions=[observer])") < launch.index(
+        "TimerAction(period=0.75, actions=[acceptance])"
+    )
 
 
 def test_observability_acceptance_requires_motion_timeline_and_happy_path():
