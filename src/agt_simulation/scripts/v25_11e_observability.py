@@ -25,6 +25,12 @@ TRANSIENT_QOS = QoSProfile(
     durability=DurabilityPolicy.TRANSIENT_LOCAL,
 )
 
+MARKER_QOS = QoSProfile(
+    depth=10,
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
+
 SENSOR_SUMMARY_NAME = "agt_sensor_monitor/summary"
 SAFETY_STATUS_NAME = "agt_safety/tracked_controller"
 
@@ -38,6 +44,23 @@ def _atomic_write_json(path: Path, payload: dict[str, Any]) -> None:
 
 def _diagnostic_values(status) -> dict[str, str]:
     return {item.key: item.value for item in status.values}
+
+
+def _ros_integer(value: Any) -> int:
+    """Normalize ROS integer-like scalar fields across Humble Python bindings.
+
+    ROS IDL `byte` fields such as diagnostic_msgs/DiagnosticStatus.level are
+    exposed as one-byte `bytes` values by Humble, while uint8/uint16/etc. are
+    normally exposed as Python integers. Keep observability serialization
+    independent of that binding detail.
+    """
+    if isinstance(value, memoryview):
+        value = value.tobytes()
+    if isinstance(value, (bytes, bytearray)):
+        if len(value) != 1:
+            raise ValueError(f"expected one-byte ROS scalar, got {value!r}")
+        return int(value[0])
+    return int(value)
 
 
 class Observability(Node):
@@ -92,11 +115,11 @@ class Observability(Node):
         self.route_terminal_ros_ns: int | None = None
         self.fatal_error: str | None = None
 
-        # Five status rows are published as individual Marker messages instead of a
-        # MarkerArray. This keeps the RViz contract simple and avoids the Humble
-        # Python MarkerArray conversion path that failed during the first 11E run.
+        # Five status rows are published as individual Marker messages. A depth-10
+        # transient queue preserves all five ids for late-joining RViz/acceptance
+        # subscribers instead of allowing a depth-1 queue to retain only the last.
         self.marker_pub = self.create_publisher(
-            Marker, "/agt/validation/status_markers", TRANSIENT_QOS
+            Marker, "/agt/validation/status_markers", MARKER_QOS
         )
         self.truth_path_pub = self.create_publisher(
             NavPath, "/agt/validation/ground_truth_path", TRANSIENT_QOS
@@ -143,22 +166,25 @@ class Observability(Node):
 
     def _on_localization(self, msg: LocalizationStatus) -> None:
         self.localization = msg
+        state = _ros_integer(msg.state)
+        generation = _ros_integer(msg.correction_generation)
+        error_code = _ros_integer(msg.error_code)
         value = (
-            int(msg.state),
+            state,
             bool(msg.localization_accepted),
             bool(msg.pose_valid),
-            int(msg.correction_generation),
-            int(msg.error_code),
+            generation,
+            error_code,
         )
         self._record_change(
             "localization",
             value,
             {
-                "state": int(msg.state),
+                "state": state,
                 "localization_accepted": bool(msg.localization_accepted),
                 "pose_valid": bool(msg.pose_valid),
-                "correction_generation": int(msg.correction_generation),
-                "error_code": int(msg.error_code),
+                "correction_generation": generation,
+                "error_code": error_code,
                 "map_id": str(msg.map_id),
                 "map_hash": str(msg.map_hash),
                 "message": str(msg.message),
@@ -166,7 +192,7 @@ class Observability(Node):
         )
         if (
             self.first_localization_tracking_ros_ns is None
-            and msg.state == LocalizationStatus.STATE_TRACKING
+            and state == _ros_integer(LocalizationStatus.STATE_TRACKING)
             and msg.localization_accepted
             and msg.pose_valid
         ):
@@ -196,7 +222,7 @@ class Observability(Node):
             values = _diagnostic_values(status)
             ready = values.get("required_streams_healthy", "false").strip().lower() == "true"
             data = {
-                "level": int(status.level),
+                "level": _ros_integer(status.level),
                 "message": str(status.message),
                 "required_streams_healthy": ready,
             }
@@ -213,7 +239,7 @@ class Observability(Node):
                 continue
             values = _diagnostic_values(status)
             data = {
-                "level": int(status.level),
+                "level": _ros_integer(status.level),
                 "reason": str(status.message),
                 "navigation_ready": values.get("navigation_ready", "false").strip().lower()
                 == "true",
@@ -337,15 +363,16 @@ class Observability(Node):
         localization_text = "LOC: waiting"
         localization_level = "warn"
         if self.localization is not None:
+            state = _ros_integer(self.localization.state)
             tracking = (
-                self.localization.state == LocalizationStatus.STATE_TRACKING
+                state == _ros_integer(LocalizationStatus.STATE_TRACKING)
                 and self.localization.localization_accepted
                 and self.localization.pose_valid
             )
             localization_level = "ok" if tracking else "error"
             localization_text = (
-                f"LOC: state={int(self.localization.state)} "
-                f"gen={int(self.localization.correction_generation)} "
+                f"LOC: state={state} "
+                f"gen={_ros_integer(self.localization.correction_generation)} "
                 f"accepted={bool(self.localization.localization_accepted)}"
             )
 
@@ -403,14 +430,16 @@ class Observability(Node):
         localization = None
         if self.localization is not None:
             localization = {
-                "state": int(self.localization.state),
-                "tracking_constant": int(LocalizationStatus.STATE_TRACKING),
+                "state": _ros_integer(self.localization.state),
+                "tracking_constant": _ros_integer(LocalizationStatus.STATE_TRACKING),
                 "localization_accepted": bool(self.localization.localization_accepted),
                 "pose_valid": bool(self.localization.pose_valid),
-                "correction_generation": int(self.localization.correction_generation),
+                "correction_generation": _ros_integer(
+                    self.localization.correction_generation
+                ),
                 "map_id": str(self.localization.map_id),
                 "map_hash": str(self.localization.map_hash),
-                "error_code": int(self.localization.error_code),
+                "error_code": _ros_integer(self.localization.error_code),
                 "message": str(self.localization.message),
             }
 
