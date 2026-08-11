@@ -1,6 +1,6 @@
 # V25-12B Point Cloud Processing CLI
 
-Status: IMPLEMENTED, LOCAL ACCEPTANCE PENDING
+Status: IMPLEMENTED, REAL PCD SMOKE PASS, UPDATED LOCAL ACCEPTANCE PENDING
 
 ## Goal
 
@@ -25,6 +25,31 @@ Supports
 - required scalar x/y/z geometry fields
 
 Formal processing output remains normalized to ASCII or uncompressed binary; V25-12B does not emit `binary_compressed`
+
+### Read-only profiling
+
+`inspect-pcd` provides exact finite-XYZ counts and bounds
+
+Optional profiling
+
+```bash
+ros2 run agt_offline_assets agt_offline_assets_cli.py inspect-pcd \
+  --input <input.pcd> \
+  --profile \
+  --sample-limit 200000
+```
+
+adds deterministic evenly spaced scalar-field sampling and reports
+
+```text
+p1 / p5 / p25 / p50 / p75 / p95 / p99
+```
+
+for each scalar PCD field
+
+The profile is diagnostic only and does not modify the source or become a formal map-quality result
+
+Exact bounds use all finite XYZ points; sampled percentiles are explicitly labeled sampled so they are not confused with exact extrema
 
 ### Recipe executor
 
@@ -103,6 +128,40 @@ It is intentionally a baseline only
 
 The agricultural production pipeline may later add PMF, CSF, terrain-adaptive or learned ground backends behind the same operation/evidence boundary
 
+## Real greenhouse smoke evidence
+
+The real source
+
+```text
+runtime/maps/greenhouse_ground/pcd/greenhouse_aligned_full2.pcd
+```
+
+was successfully consumed after `binary_compressed` support was added
+
+Observed source identity and scale
+
+```text
+sha256:619d51351ad0da8762d455af3b7135db55725e99b35efbefbb5ba8d9834660ed
+points: 5,192,062
+DATA: binary_compressed
+```
+
+The minimal `remove_nonfinite` processing smoke retained all 5,192,062 points, emitted canonical binary PCD
+
+```text
+sha256:709478134cb38ee3f9c0f5e6542412fb0870d3764b80df1e28ba9f7759d348d1
+```
+
+and `validate-pointcloud-processing` returned `valid=true` with all integrity checks true
+
+The exact experiment record is
+
+```text
+docs/experiments/v25_12b_greenhouse_pcd_smoke_20260811.md
+```
+
+This proves real-format processing compatibility, not localization-map quality
+
 ## V25-12B Acceptance Gate
 
 ### Build
@@ -119,6 +178,8 @@ If numpy/scipy are missing, resolve package dependencies first with the project 
 
 ```bash
 python3 -m pytest -q \
+  src/agt_offline_assets/test/test_pcd_compressed.py \
+  src/agt_offline_assets/test/test_pointcloud_profile.py \
   src/agt_offline_assets/test/test_pointcloud_processing.py
 ```
 
@@ -139,35 +200,35 @@ python3 -m pytest -q \
   tests/test_navigation_architecture_contract.py
 ```
 
-### CLI smoke
-
-Use a real mapping PCD or small fixture
-
-PCL `binary_compressed` input is supported directly, so a CloudCompare/PCL-produced map does not need a manual conversion step before inspection
+### CLI profile on real data
 
 ```bash
 ros2 run agt_offline_assets agt_offline_assets_cli.py inspect-pcd \
-  --input <input.pcd>
+  --input runtime/maps/greenhouse_ground/pcd/greenhouse_aligned_full2.pcd \
+  --profile \
+  --sample-limit 200000
 ```
 
-Then copy and tune the example recipe rather than editing a READY map
+Use the resulting distributions, especially x/y/z percentiles, before choosing scene-specific crop and height gates
 
-```bash
-cp docs/interfaces/examples/pointcloud_processing/recipe.yaml /tmp/agt_pc_recipe.yaml
-```
+### Processing smoke
 
-Before processing, adjust `crop_box`, `height_range`, and other scene-dependent values according to the bounds reported by `inspect-pcd`
+The 2026-08-11 real greenhouse compressed-input smoke is already PASS and does not need to be repeated unless PCD I/O or processing identity semantics change
+
+For a new source dataset, run
 
 ```bash
 ros2 run agt_offline_assets agt_offline_assets_cli.py process-pointcloud \
   --input <input.pcd> \
-  --recipe /tmp/agt_pc_recipe.yaml \
-  --output-dir /tmp/agt_pc_run
+  --recipe <recipe.yaml> \
+  --output-dir <new_run_dir>
 ```
+
+followed by
 
 ```bash
 ros2 run agt_offline_assets agt_offline_assets_cli.py validate-pointcloud-processing \
-  --run-dir /tmp/agt_pc_run
+  --run-dir <new_run_dir>
 ```
 
 Required
