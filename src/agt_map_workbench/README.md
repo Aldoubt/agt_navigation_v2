@@ -37,8 +37,10 @@ The full-resolution source PCD is always passed to `process_pointcloud`
 ```bash
 source /opt/ros/humble/setup.bash
 source install/setup.bash
-ros2 run agt_map_workbench agt_map_workbench.py
+ros2 run agt_map_workbench agt_map_workbench
 ```
+
+The installed executable is intentionally named `agt_map_workbench` while its build-tree launcher is `map_workbench_launcher.py`; the launcher filename must differ from the Python package name to avoid Python import shadowing under `--symlink-install`
 
 ## Current tools
 
