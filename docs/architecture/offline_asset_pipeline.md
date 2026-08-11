@@ -92,7 +92,7 @@ flowchart TD
 ## 核心 lineage
 
 ```text
-Raw Dataset
+Bag/Experiment / Raw Dataset
 + Calibration
 + Vehicle/Sensor Profile
 + Derivation Recipe
@@ -115,6 +115,8 @@ Map Version
             ↓
        READY Site Package
 ```
+
+这里的 `Bag/Experiment` 保留 V25-09A 已冻结的 provenance 术语；V25-12 将其统一视为 Site Acquisition 产生并受 Dataset Binding 管理的原始实验/采集证据，而不是引入第二套数据身份
 
 每个正式箭头必须通过 ID + version + hash 可追溯
 
