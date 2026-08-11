@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, TimerAction
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -82,14 +82,24 @@ def generate_launch_description():
     route_file = LaunchConfiguration("route_file")
     nav2_params = LaunchConfiguration("nav2_params")
 
-    localization_stack = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            str(share / "launch" / "gazebo_localization_validation.launch.py")
-        ),
-        launch_arguments={
-            "use_rviz": use_rviz,
-            "run_acceptance": "false",
-        }.items(),
+    # Keep child launch arguments scoped. In ROS 2 Humble IncludeLaunchDescription
+    # materializes launch_arguments as SetLaunchConfiguration actions, so an
+    # unscoped child run_acceptance=false would overwrite this launch file's
+    # run_acceptance:=true before the delayed acceptance node condition runs.
+    localization_stack = GroupAction(
+        scoped=True,
+        forwarding=True,
+        actions=[
+            IncludeLaunchDescription(
+                PythonLaunchDescriptionSource(
+                    str(share / "launch" / "gazebo_localization_validation.launch.py")
+                ),
+                launch_arguments={
+                    "use_rviz": use_rviz,
+                    "run_acceptance": "false",
+                }.items(),
+            )
+        ],
     )
 
     route_runner = Node(
