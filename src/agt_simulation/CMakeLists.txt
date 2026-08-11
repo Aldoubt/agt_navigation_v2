@@ -33,6 +33,9 @@ set(AGT_SIMULATION_ENTRYPOINTS
   v25_11d_failure_acceptance.py
   v25_11e_observability.py
   v25_11e_observability_acceptance.py
+  v25_11e_fault_metrics.py
+  v25_11e_comparison_acceptance.py
+  v25_11e_compare_reports.py
 )
 
 foreach(_script IN LISTS AGT_SIMULATION_ENTRYPOINTS)
@@ -75,6 +78,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_v25_11e_observability_contract
     test/test_v25_11e_observability_contract.py
+  )
+  ament_add_pytest_test(
+    test_v25_11e_comparison_contract
+    test/test_v25_11e_comparison_contract.py
   )
 endif()
 
