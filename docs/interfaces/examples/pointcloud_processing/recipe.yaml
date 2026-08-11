@@ -1,0 +1,32 @@
+schema: agt_pointcloud_processing_recipe/v1
+recipe_id: greenhouse_localization_clean_v1
+frame_id: map
+output_data: binary
+random_seed: 42
+operations:
+  - type: remove_nonfinite
+  - type: crop_box
+    parameters:
+      min: [-10.0, -8.0, -1.0]
+      max: [35.0, 12.0, 4.0]
+      keep_inside: true
+  - type: delete_polygon
+    parameters:
+      polygon_xy:
+        - [4.0, 1.0]
+        - [7.0, 1.0]
+        - [7.0, 3.0]
+        - [4.0, 3.0]
+      z_min: -0.5
+      z_max: 3.0
+  - type: height_range
+    parameters:
+      min_z: -0.2
+      max_z: 2.5
+  - type: voxel_downsample
+    parameters:
+      leaf_size_m: 0.05
+  - type: sor
+    parameters:
+      mean_k: 20
+      stddev_mul: 1.0
