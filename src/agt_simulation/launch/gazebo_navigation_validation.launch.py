@@ -4,7 +4,12 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetLaunchConfiguration,
+    TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -82,24 +87,20 @@ def generate_launch_description():
     route_file = LaunchConfiguration("route_file")
     nav2_params = LaunchConfiguration("nav2_params")
 
-    # Keep child launch arguments scoped. In ROS 2 Humble IncludeLaunchDescription
-    # materializes launch_arguments as SetLaunchConfiguration actions, so an
-    # unscoped child run_acceptance=false would overwrite this launch file's
-    # run_acceptance:=true before the delayed acceptance node condition runs.
-    localization_stack = GroupAction(
-        scoped=True,
-        forwarding=True,
-        actions=[
-            IncludeLaunchDescription(
-                PythonLaunchDescriptionSource(
-                    str(share / "launch" / "gazebo_localization_validation.launch.py")
-                ),
-                launch_arguments={
-                    "use_rviz": use_rviz,
-                    "run_acceptance": "false",
-                }.items(),
-            )
-        ],
+    # Snapshot V25-11C public flags before the nested V25-11B validation launch
+    # writes same-named launch configurations. Delayed TimerAction conditions must
+    # use these stable stage-local names.
+    stage_use_rviz = LaunchConfiguration("_v25_11c_use_rviz")
+    stage_run_acceptance = LaunchConfiguration("_v25_11c_run_acceptance")
+
+    localization_stack = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            str(share / "launch" / "gazebo_localization_validation.launch.py")
+        ),
+        launch_arguments={
+            "use_rviz": stage_use_rviz,
+            "run_acceptance": "false",
+        }.items(),
     )
 
     route_runner = Node(
@@ -123,7 +124,7 @@ def generate_launch_description():
         name="agt_v25_11c_navigation_acceptance",
         output="screen",
         parameters=[{"use_sim_time": True, "timeout_s": 80.0}],
-        condition=IfCondition(run_acceptance),
+        condition=IfCondition(stage_run_acceptance),
     )
 
     map_server = Node(
@@ -170,6 +171,8 @@ def generate_launch_description():
             DeclareLaunchArgument("map_yaml", default_value=default_map_yaml),
             DeclareLaunchArgument("route_file", default_value=str(default_route)),
             DeclareLaunchArgument("nav2_params", default_value=str(default_nav2_params)),
+            SetLaunchConfiguration("_v25_11c_use_rviz", use_rviz),
+            SetLaunchConfiguration("_v25_11c_run_acceptance", run_acceptance),
             localization_stack,
             # /agt/localization/status is volatile and the initial correction is one-shot.
             # Subscribe before that event, then delay actual route execution.
