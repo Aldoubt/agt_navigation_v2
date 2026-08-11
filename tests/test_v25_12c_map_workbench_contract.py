@@ -49,6 +49,25 @@ def test_display_sampling_is_separate_from_full_resolution_processing():
     assert "Display sampling never changes the formal processing input" in readme
 
 
+def test_authoring_feedback_is_explicit_and_zoom_stable():
+    app = _read(APP)
+    view = _read(VIEW)
+    for token in (
+        "当前可见采样点",
+        "当前多边形顶点顺序",
+        "执行顺序",
+        "黄色编号",
+        "ItemIgnoresTransformations",
+        "padded_bounding_rect",
+    ):
+        assert token in app or token in view
+    assert "visible_sample_count" in view
+    assert "sample_count" in view
+    assert "Qt.CrossCursor" in view
+    assert "ratio=0.10" in app
+    assert "minimum_margin=1.0" in app
+
+
 def test_operator_ui_is_chinese_but_machine_contract_remains_stable():
     app = _read(APP)
     for token in (
