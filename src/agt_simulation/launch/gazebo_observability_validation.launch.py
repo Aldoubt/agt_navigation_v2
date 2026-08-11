@@ -4,8 +4,17 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    EmitEvent,
+    IncludeLaunchDescription,
+    OpaqueFunction,
+    RegisterEventHandler,
+    TimerAction,
+)
 from launch.conditions import IfCondition
+from launch.event_handlers import OnProcessExit
+from launch.events import Shutdown
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -49,6 +58,20 @@ def launch_setup(context):
         condition=IfCondition(run_observability_acceptance),
     )
 
+    shutdown_on_acceptance_exit = RegisterEventHandler(
+        OnProcessExit(
+            target_action=acceptance,
+            on_exit=[
+                EmitEvent(
+                    event=Shutdown(
+                        reason="V25-11E observability acceptance completed"
+                    )
+                )
+            ],
+        ),
+        condition=IfCondition(run_observability_acceptance),
+    )
+
     rviz = Node(
         package="rviz2",
         executable="rviz2",
@@ -64,8 +87,12 @@ def launch_setup(context):
     # is delayed by 2 s and the route runner by 0.5 s, so a 0.25 s observer delay
     # still captures the complete V25-11E evidence sequence while avoiding the
     # pre-clock bootstrap window seen in the first runtime attempt.
+    #
+    # Validation runs are self-terminating when acceptance completes. This prevents
+    # stale Nav2/Gazebo/lifecycle processes from contaminating the next repeated run.
     return [
         navigation,
+        shutdown_on_acceptance_exit,
         TimerAction(period=0.25, actions=[observer]),
         TimerAction(period=0.75, actions=[acceptance]),
         TimerAction(period=3.5, actions=[rviz]),
