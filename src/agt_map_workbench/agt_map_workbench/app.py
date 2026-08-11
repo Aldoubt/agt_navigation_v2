@@ -12,14 +12,17 @@ from pathlib import Path
 
 import numpy as np
 from PyQt5.QtCore import QObject, QPointF, QThread, Qt, pyqtSignal
-from PyQt5.QtGui import QPen, QPolygonF
+from PyQt5.QtGui import QBrush, QColor, QPen, QPolygonF
 from PyQt5.QtWidgets import (
     QApplication,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
+    QGraphicsEllipseItem,
+    QGraphicsItem,
     QGraphicsPolygonItem,
     QGraphicsScene,
+    QGraphicsSimpleTextItem,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -81,6 +84,7 @@ class MapWorkbenchWindow(QMainWindow):
         self._recipe = WorkbenchRecipeModel()
         self._vertices: list[tuple[float, float]] = []
         self._polygon_item: QGraphicsPolygonItem | None = None
+        self._vertex_items: list[QGraphicsItem] = []
         self._thread: QThread | None = None
         self._worker: _ProcessingWorker | None = None
 
@@ -95,12 +99,16 @@ class MapWorkbenchWindow(QMainWindow):
         splitter.addWidget(self._view)
         splitter.addWidget(controls)
         splitter.setStretchFactor(0, 1)
-        splitter.setSizes([1050, 350])
+        splitter.setSizes([990, 410])
         self.setCentralWidget(splitter)
         self.statusBar().showMessage("请打开一个 PCD 点云文件")
+        self._refresh_operations()
+        self._refresh_vertex_list()
+        self._refresh_z_status()
 
     def _build_controls(self) -> QWidget:
         panel = QWidget()
+        panel.setMinimumWidth(390)
         layout = QVBoxLayout(panel)
 
         open_button = QPushButton("打开 PCD 点云")
@@ -126,6 +134,10 @@ class MapWorkbenchWindow(QMainWindow):
         z_row.addWidget(self._z_max)
         layout.addLayout(z_row)
 
+        self._z_status = QLabel("当前可见采样点：未加载")
+        self._z_status.setWordWrap(True)
+        layout.addWidget(self._z_status)
+
         layout.addWidget(QLabel("多边形操作模式"))
         self._mode = QComboBox()
         self._mode.addItem("删除选中三维区域", "delete")
@@ -144,7 +156,15 @@ class MapWorkbenchWindow(QMainWindow):
         layout.addLayout(author_row)
         layout.addWidget(undo_vertex)
 
-        layout.addWidget(QLabel("处理流程 / Recipe 操作历史"))
+        self._selection_status = QLabel("当前未绘制多边形")
+        self._selection_status.setWordWrap(True)
+        layout.addWidget(self._selection_status)
+        layout.addWidget(QLabel("当前多边形顶点顺序"))
+        self._vertex_list = QListWidget()
+        self._vertex_list.setMaximumHeight(145)
+        layout.addWidget(self._vertex_list)
+
+        layout.addWidget(QLabel("处理流程 / Recipe 执行顺序"))
         self._operations = QListWidget()
         layout.addWidget(self._operations, 1)
 
@@ -165,7 +185,7 @@ class MapWorkbenchWindow(QMainWindow):
         process_button.clicked.connect(self._run_processing)
         layout.addWidget(process_button)
 
-        fit_button = QPushButton("点云适配窗口")
+        fit_button = QPushButton("点云适配窗口（保留编辑边距）")
         fit_button.clicked.connect(self._fit_cloud)
         layout.addWidget(fit_button)
         return panel
@@ -215,57 +235,127 @@ class MapWorkbenchWindow(QMainWindow):
             f"当前点云：{self._source_path}\n"
             f"点数：{int(cloud.points.shape[0]):,} | PCD 数据模式：{cloud.data_mode}"
         )
+        self._refresh_z_status()
         self._fit_cloud()
         self.statusBar().showMessage("点云加载完成；界面显示使用确定性采样，正式处理仍使用完整点云")
 
     def _fit_cloud(self) -> None:
-        rect = self._cloud_item.boundingRect()
+        rect = self._cloud_item.padded_bounding_rect(ratio=0.10, minimum_margin=1.0)
         if not rect.isNull():
+            self._scene.setSceneRect(rect)
             self._view.fitInView(rect, Qt.KeepAspectRatio)
+            self.statusBar().showMessage("已适配点云，并在四周保留 10% / 至少 1 m 的编辑边距")
+
+    def _refresh_z_status(self) -> None:
+        total = self._cloud_item.sample_count()
+        if total == 0:
+            self._z_status.setText("当前可见采样点：未加载")
+            return
+        visible = self._cloud_item.visible_sample_count()
+        ratio = 100.0 * float(visible) / float(total)
+        self._z_status.setText(
+            f"当前可见采样点：{visible:,} / {total:,}（{ratio:.1f}%）\n"
+            f"当前 Z=[{self._z_min.value():.3f}, {self._z_max.value():.3f}] m"
+        )
 
     def _update_z_window(self) -> None:
         minimum = self._z_min.value()
         maximum = self._z_max.value()
-        if maximum >= minimum:
-            self._cloud_item.set_z_window(minimum, maximum)
+        if maximum < minimum:
+            self._z_status.setText("Z 范围无效：最大 Z 必须大于或等于最小 Z")
+            self.statusBar().showMessage("Z 范围无效，点云显示保持上一次有效范围")
+            return
+        self._cloud_item.set_z_window(minimum, maximum)
+        self._refresh_z_status()
+        self.statusBar().showMessage(
+            f"Z 显示范围已更新：[{minimum:.3f}, {maximum:.3f}] m，"
+            f"当前可见采样点 {self._cloud_item.visible_sample_count():,}"
+        )
 
     def _start_polygon(self) -> None:
         if self._cloud is None:
             QMessageBox.information(self, "尚未加载点云", "请先打开一个 PCD 点云文件")
             return
         self._vertices.clear()
-        self._update_polygon_item()
         self._view.set_authoring_enabled(True)
-        self.statusBar().showMessage("多边形绘制模式：鼠标左键依次添加顶点，完成后点击“完成多边形并加入处理流程”")
+        self._update_polygon_item()
+        self.statusBar().showMessage("多边形绘制模式：十字光标左键依次添加顶点，黄色编号表示点击顺序")
 
     def _append_vertex(self, x: float, y: float) -> None:
         self._vertices.append((x, y))
         self._update_polygon_item()
+        self.statusBar().showMessage(
+            f"已添加顶点 {len(self._vertices)}：X={x:.3f} m，Y={y:.3f} m"
+        )
 
     def _undo_vertex(self) -> None:
         if self._vertices:
             self._vertices.pop()
             self._update_polygon_item()
+            self.statusBar().showMessage(f"已撤销顶点，当前剩余 {len(self._vertices)} 个顶点")
+
+    def _clear_vertex_graphics(self) -> None:
+        for item in self._vertex_items:
+            if item.scene() is self._scene:
+                self._scene.removeItem(item)
+        self._vertex_items.clear()
 
     def _clear_polygon(self) -> None:
         self._vertices.clear()
         if self._polygon_item is not None:
             self._scene.removeItem(self._polygon_item)
             self._polygon_item = None
+        self._clear_vertex_graphics()
         self._view.set_authoring_enabled(False)
+        self._refresh_vertex_list()
+
+    def _refresh_vertex_list(self) -> None:
+        self._vertex_list.clear()
+        for index, (x, y) in enumerate(self._vertices, start=1):
+            self._vertex_list.addItem(f"顶点 {index:02d} | X={x:.3f} m | Y={y:.3f} m")
+        if self._view.authoring_enabled:
+            if self._vertices:
+                self._selection_status.setText(
+                    f"正在绘制：已选择 {len(self._vertices)} 个顶点；黄色编号与下方顺序一致"
+                )
+            else:
+                self._selection_status.setText("正在绘制：请在左侧点云中用鼠标左键选择第 1 个顶点")
+        else:
+            self._selection_status.setText("当前未绘制多边形")
 
     def _update_polygon_item(self) -> None:
         if self._polygon_item is not None:
             self._scene.removeItem(self._polygon_item)
             self._polygon_item = None
-        if not self._vertices:
-            return
+        self._clear_vertex_graphics()
+
         scene_points = [QPointF(x, -y) for x, y in self._vertices]
-        polygon = QPolygonF(scene_points)
-        self._polygon_item = QGraphicsPolygonItem(polygon)
-        self._polygon_item.setPen(QPen(Qt.white, 0))
-        self._polygon_item.setZValue(10.0)
-        self._scene.addItem(self._polygon_item)
+        if len(scene_points) >= 2:
+            polygon = QPolygonF(scene_points)
+            self._polygon_item = QGraphicsPolygonItem(polygon)
+            polygon_pen = QPen(QColor(255, 235, 59))
+            polygon_pen.setWidth(2)
+            polygon_pen.setCosmetic(True)
+            self._polygon_item.setPen(polygon_pen)
+            self._polygon_item.setBrush(QBrush(QColor(255, 235, 59, 45)))
+            self._polygon_item.setZValue(10.0)
+            self._scene.addItem(self._polygon_item)
+
+        for index, (x, y) in enumerate(self._vertices, start=1):
+            marker = QGraphicsEllipseItem(-5.0, -5.0, 10.0, 10.0)
+            marker.setPos(float(x), float(-y))
+            marker.setPen(QPen(QColor(20, 20, 20), 1))
+            marker.setBrush(QBrush(QColor(255, 235, 59)))
+            marker.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
+            marker.setZValue(20.0)
+            label = QGraphicsSimpleTextItem(str(index), marker)
+            label.setBrush(QBrush(QColor(255, 255, 255)))
+            label.setPos(7.0, -11.0)
+            label.setZValue(21.0)
+            self._scene.addItem(marker)
+            self._vertex_items.append(marker)
+
+        self._refresh_vertex_list()
 
     def _finish_polygon(self) -> None:
         if len(self._vertices) < 3:
@@ -286,22 +376,25 @@ class MapWorkbenchWindow(QMainWindow):
             return
         self._refresh_operations()
         self._clear_polygon()
-        self.statusBar().showMessage("操作已加入可重放的 V25-12B Recipe")
+        self.statusBar().showMessage("操作已加入 Recipe；右侧“执行顺序”已更新")
 
     def _refresh_operations(self) -> None:
         self._operations.clear()
-        for index, operation in enumerate(self._recipe.operations):
+        if not self._recipe.operations:
+            self._operations.addItem("（暂无已加入的处理操作）")
+            return
+        for index, operation in enumerate(self._recipe.operations, start=1):
             params = operation.parameters
             operation_name = _OPERATION_NAMES.get(operation.type, operation.type)
             if operation.type in {"crop_polygon", "delete_polygon"}:
                 detail = (
-                    f"{len(params.get('polygon_xy', []))} 个顶点，"
+                    f"{len(params.get('polygon_xy', []))} 个顶点 | "
                     f"Z=[{params.get('z_min'):.2f}, {params.get('z_max'):.2f}] m"
                 )
             else:
                 detail = str(params)
             self._operations.addItem(
-                f"{index + 1}. {operation_name}（{operation.type}）— {detail}"
+                f"执行顺序 {index:02d} | {operation_name}（{operation.type}） | {detail}"
             )
 
     def _undo_operation(self) -> None:
@@ -393,6 +486,7 @@ class MapWorkbenchWindow(QMainWindow):
                 cloud = read_pcd(result.output_path)
                 self._cloud = cloud
                 self._cloud_item.set_cloud(cloud)
+                self._refresh_z_status()
                 self._fit_cloud()
             except Exception as exc:
                 QMessageBox.warning(self, "处理结果加载失败", str(exc))
