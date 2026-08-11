@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DOC = ROOT / "docs/interfaces/pointcloud_processing_recipe.md"
 CLI = ROOT / "src/agt_offline_assets/scripts/agt_offline_assets_cli.py"
 PROCESSING = ROOT / "src/agt_offline_assets/agt_offline_assets/pointcloud_processing.py"
+PROFILE = ROOT / "src/agt_offline_assets/agt_offline_assets/pointcloud_profile.py"
 PCD_IO = ROOT / "src/agt_offline_assets/agt_offline_assets/pcd_io.py"
 
 
@@ -48,6 +49,22 @@ def test_v25_12b_cli_exposes_inspect_process_and_validate():
         "validate-pointcloud-processing",
     ):
         assert f'"{command}"' in cli
+    assert '"--profile"' in cli
+    assert '"--sample-limit"' in cli
+    assert "summarize_pointcloud" in cli
+
+
+def test_v25_12b_profile_is_read_only_deterministic_and_sample_bounded():
+    profile = _read(PROFILE)
+    for token in (
+        "deterministic_even_spacing",
+        "sample_limit",
+        "percentiles_sampled",
+        "finite_xyz_count",
+        "nonfinite_xyz_count",
+    ):
+        assert token in profile
+    assert "np.linspace" in profile
 
 
 def test_v25_12b_is_non_destructive_and_not_a_quality_acceptance():
