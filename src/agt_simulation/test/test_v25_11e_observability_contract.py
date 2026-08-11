@@ -99,6 +99,11 @@ def test_observability_launch_keeps_navigation_acceptance_and_single_rviz_owner(
         'DeclareLaunchArgument("run_observability_acceptance"',
         "TimerAction(period=0.25, actions=[observer])",
         "TimerAction(period=0.75, actions=[acceptance])",
+        "RegisterEventHandler(",
+        "OnProcessExit(",
+        "target_action=acceptance",
+        "event=Shutdown(",
+        "V25-11E observability acceptance completed",
     ):
         assert token in launch
     assert launch.index("navigation,") < launch.index(
