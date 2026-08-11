@@ -2,30 +2,35 @@
 
 ## Scope
 
-- Current stage: `AGT Navigation V2.5 Offline Asset & Route Preparation (V25-09A)`.
-- P0 first BehaviorTree Mission software integration is complete; vehicle acceptance remains a separate gate.
-- V25-08 architecture semantics are frozen. V25-09A now freezes and then implements the reproducible offline lineage from managed bag/calibration through map alignment, map products, semantic route derivation and vehicle-feasibility evidence before V25-09B Route runtime work.
-- Delivery line: `V25-09A Offline Asset & Route Preparation -> V25-09B Robust Route Navigation -> V25-10 Sparse Global Correction -> V25-11 Local Environment Mapping -> V25-12 Optional ESDF`, with GNSS/Wheel/GTSAM as the P1 state-estimation track and STD/Scan Context/seasonal maps as P2 research.
+- Current stage: `AGT Navigation V2.5 Site Workflow & BT Capability Architecture (V25-12)`.
+- P0 first BehaviorTree Mission software integration is complete; V25-11 SOFTWARE_ONLY Gazebo navigation/fault/safety/observability validation is PASS and CLOSED.
+- V25-09A offline asset/map/route lineage is an implemented foundation and must be extended rather than replaced by an incompatible second asset system.
+- V25-12 freezes and then implements a repeatable Site Workflow: acquisition -> map production/editing -> localization prior -> navigation/semantic/route assets -> benchmark/evaluation -> READY Site Package -> vehicle loading -> Mission/BT execution.
+- Navigation must evolve as a project Capability behind stable Actions/Services. BehaviorTree.CPP orchestrates semantic capabilities; estimator/planner/controller/map backends remain replaceable below that boundary.
+- Active delivery line: `V25-12A Site Manifest & Asset Lineage -> V25-12B Point Cloud Processing CLI -> V25-12C AGT Map Workbench MVP -> V25-12D Localization Prior -> V25-12E Semantic/Route Preview -> V25-12F Benchmark Evaluator -> V25-12G Vehicle Package Export -> V25-13 Real BUNKER/MID360/FAST-LIVO2 -> V25-14 Long-duration Figure-eight -> V25-15 GNSS/RTK -> V25-16 Large-map/Long-term Runtime`.
+- ESDF remains optional/derived and is no longer the definition of V25-12.
 - Historical migration/TASK records under `docs/archive/` are evidence only and are not current design instructions.
 
 ## Authoritative Documents
 
 Architecture/interface work must stay consistent with:
 
+- `docs/v2.5/V25_12_SITE_WORKFLOW_REQUIREMENTS.md` — frozen V25-12 end-to-end workflow, Site Package, benchmark and replaceable-backend requirements
+- `docs/architecture/system_architecture.md` — current target three-plane architecture and ownership graph
+- `docs/architecture/offline_asset_pipeline.md` — canonical offline Site Package production/evaluation lineage
+- `docs/architecture/behavior_tree_execution.md` — BT capability boundary and backend-replacement rules
 - `docs/architecture/navigation_semantics.md` — canonical navigation concepts and ownership semantics
-- `docs/architecture/system_architecture.md` — current runtime architecture and priority/status graph
-- `docs/architecture/offline_asset_pipeline.md` — canonical offline asset/evaluation lineage
 - `docs/architecture/runtime_dataflow.md` — implemented runtime chains; future target semantics must be labeled as not implemented
 - `docs/interfaces/topic_contract.md` — canonical cross-module topic names/types/frames/owners and TF boundary
 - `docs/interfaces/system_health.md` — health/readiness semantics
 - `docs/interfaces/calibration_dataset_contract.md` — calibration and immutable Dataset/Bag provenance
 - `docs/interfaces/map_derivation_contract.md` — reproducible map derivation, site alignment and quality evidence
-- `docs/interfaces/map_manifest.md` — versioned map bundle and lineage binding
+- `docs/interfaces/map_manifest.md` — existing versioned map bundle and lineage binding that V25-12 Site Package extends
 - `docs/interfaces/semantic_map_schema.md` — current semantic-map schema
 - `docs/interfaces/semantic_waypoints.md` — named semantic anchor contract
 - `docs/interfaces/route_asset_contract.md` — route rule, asset, tuning and footprint-feasibility contract
 - `docs/interfaces/vehicle_tracker_adapter.md` — route/runtime-path to vehicle-controller adapter boundary
-- `docs/workflows/bag_to_route_asset.md` — canonical bag-to-map-to-route workflow
+- `docs/workflows/bag_to_route_asset.md` — existing canonical bag-to-map-to-route workflow
 - `docs/roadmap/v2_5.md` — active V2.5 delivery line
 - directly affected package/interface documentation
 
@@ -35,31 +40,35 @@ Package-local debug or visualization topics may be documented by the owning pack
 
 - Change one module or one data chain at a time; prefer small reviewable commits/PRs.
 - Do not hardcode usernames, workspace paths, device paths, or runtime map paths.
-- Do not silently change validated datasets, calibration, map assets or experimental parameters.
+- Do not silently change validated datasets, calibration, map assets, Site Package assets or experimental parameters.
+- V25-12 must extend the existing `agt_offline_assets` / map-manifest / route-asset lineage; do not introduce a second incompatible map/site registry.
+- A Site Package is the deployment identity root. It binds existing READY map/route products, calibration, profiles, semantic assets, benchmark/truth references and hashes rather than duplicating their internal schemas.
 - A formal offline derivation must bind immutable Dataset/Bag identity, Calibration Set, Platform Profile, Derivation Recipe and repository/dependency snapshot.
-- Manual map cleaning, control-point alignment or route tuning that changes an accepted asset must be recorded as a reproducible patch/parameter artifact; unrecorded GUI edits cannot produce READY assets.
-- READY map versions and READY route revisions are immutable. Re-alignment, cleaning, semantic edits or route tuning create a new version/revision.
+- Manual map cleaning, control-point alignment, localization-prior editing or route tuning that changes an accepted asset must be recorded as a reproducible patch/parameter artifact; unrecorded GUI edits cannot produce READY assets.
+- READY map versions, READY route revisions and READY Site Packages are immutable. Re-alignment, cleaning, semantic edits, prior edits, route tuning or binding changes create a new version/revision/package identity.
+- Runtime must not modify READY map/prior/semantic/route assets in place to make a task continue.
 - Do not create multiple publishers for the same authoritative TF edge.
 - Do not bypass `agt_safety`, Collision Monitor, project Actions, or chassis watchdogs.
-- Qt5 and Web are replaceable clients. They do not own system mode, Mission state, active-map state, localization truth, bag processes, safety state, route truth, or chassis state.
+- Qt5/Web/Map Workbench are replaceable clients. They do not own Mission state, active-map/site truth, localization truth, bag processes, safety state, route truth or chassis state.
 - A process being alive or a topic being discoverable is not readiness. Motion remains fail-closed on structured health/readiness/localization/safety evidence.
 - `third_party/` provenance, pins, licenses, and patches must remain explicit; do not hide dependencies in an old sourced workspace.
 - Architecture/contract stages must not silently introduce ROS runtime interfaces or implementation code.
+- A future capability name in architecture/BT docs does not create a public ROS interface until separately reviewed, versioned and tested.
 
 ## Canonical Topic and TF Contract
 
 - `/agt/mapping/registered_points` is the only canonical registered-cloud topic and is in `odom`.
 - `registered_cloud`, `/agt/mapping/registered_points_lidar`, and `/agt/mapping/registered_cloud` are historical names and must not be reintroduced into runtime code/config.
 - `/agt/map/global_occupancy` is persistent global navigation geometry in `map`; dynamic/semantic layers must not be baked back into it.
-- `/agt/map/local_occupancy` is reserved for a transient rolling local-environment `OccupancyGrid` in `odom`; it is not versioned global-map truth and currently has no formal runtime publisher.
+- `/agt/map/local_occupancy` is reserved for a transient rolling local-environment `OccupancyGrid` in `odom`; it is not versioned global-map truth.
 - `/agt/map/waypoints` is a persistent SemanticWaypoint anchor library, not an execution sequence, Route, or Runtime Path.
-- `agt_mapping_fast_livo2_adapter` uniquely owns `odom -> base_footprint`.
+- the selected continuous-odometry project adapter uniquely owns `odom -> base_footprint`; current FAST-LIVO2 adapter remains the baseline owner until a reviewed backend replacement is selected.
 - authoritative `map -> odom` belongs to the localization subsystem and must have exactly one selected runtime publisher.
 - Current baseline: `agt_localization` package / `agt_relocalization` node publishes `map -> odom` with `publish_tf=true`.
 - Future fusion ownership is replacement, not addition: disable the baseline TF publisher before allowing `agt_localization_fusion` or another approved localization owner to publish the edge.
 - NDT/ICP, GTSAM/iSAM2, GNSS factors, loop closure and place recognition may provide correction evidence/factors/candidates but must not become parallel `map -> odom` publishers.
 - `robot_state_publisher` owns the robot/sensor description chain below `base_footprint`.
-- FAST-LIVO2 backend TF output and chassis odom TF must remain disabled when those edges are already owned by project adapters.
+- estimator backend TF output and chassis odom TF must remain disabled when those edges are already owned by project adapters.
 
 ## Calibration, Dataset and Experiment Contract
 
@@ -70,6 +79,8 @@ Package-local debug or visualization topics may be documented by the owning pack
 - `OPERATIONAL` datasets produce facility/agricultural map and route assets; they may have no GNSS.
 - Same-site different-season data keep the same `site_id` and stable site-frame definition while receiving new `epoch_id`, Dataset identity and map version.
 - Different sites reuse the recipe/schema/tooling but do not copy site-specific control points or frame transforms.
+- V25-12 benchmark metadata must distinguish independent truth, estimator inputs, manually annotated intervals and derived metrics.
+- Long-duration tests must record CPU/RSS and map/search/processing latency in addition to trajectory/localization results.
 
 ## MID360 and URDF Self-Filter Contract
 
@@ -92,7 +103,7 @@ Package-local debug or visualization topics may be documented by the owning pack
 - Do not reuse the inflated navigation footprint as the self-filter chassis geometry or silently add a second safety margin.
 - URDF collision is the runtime geometric representation used by the V2.5 self-filter; it must match the canonical physical dimensions rather than becoming a separate vehicle-dimension truth source.
 
-## Offline Map Derivation Contract
+## Offline Map Derivation and Site Package Contract
 
 - Mapping preserves raw bag evidence and produces bounded, versioned map products; READY map versions are immutable.
 - Every formal map derivation must save an explicit `derivation/recipe.yaml` or hash-bound equivalent containing all parameters that affect output.
@@ -101,9 +112,14 @@ Package-local debug or visualization topics may be documented by the owning pack
 - `EVALUATION` sites may use recorded ENU georeference; operational facilities should use stable site control points/reference structure when GNSS is unavailable.
 - Cross-season alignment should prioritize stable structures/control points rather than seasonal leaves, soft branches or temporary objects.
 - Raw PCD must not be overwritten by cleaning. Voxel/crop/outlier/ground/stable-structure processing and manual cleanup patches must be replayable.
-- Global Navigation Map, Localization Prior, Semantic Map and Local Environment Map are different products; do not use the generic word “map” to hide incompatible ownership or lifetime semantics.
+- Localization Map, Localization Prior, Global Navigation Map, Semantic Map, Route Asset and Local Environment Map are different products; do not use the generic word “map” to hide incompatible ownership or lifetime semantics.
+- Localization Prior is explicit metadata. PCD intensity is not treated as localization weight unless a selected backend contract explicitly consumes it.
+- Initial prior classes are coarse (`EXCLUDE`, `LOW`, `NORMAL`, `HIGH`, `LANDMARK`); do not expose arbitrary floating-point weights as the primary authoring UI without a reviewed reason.
 - A localization PCD is accepted only with its ready processing record and matching content identity/hash where required.
 - A formal derivation should emit `alignment_report.json` and `map_quality_report.json`; file/hash validity remains necessary but is not the only quality evidence.
+- `docs/interfaces/map_manifest.md` remains the canonical map-version contract. V25-12 Site Manifest binds accepted map versions and additional site-level products; it does not redefine map-version internals.
+- A READY Site Package must use explicit IDs/versions/hashes; “latest file in directory” selection is forbidden for formal runtime loading.
+- Future tile/submap storage must remain behind map/site package interfaces; do not make one fully resident global PCD a permanent API assumption.
 - Relocalization is exposed through the project `/agt/localization/relocalize` Action boundary; manual/automatic request paths must converge on the same internal quality checks.
 - Backend convergence alone does not mean localization acceptance; project quality gates remain authoritative.
 - Tracking validation may report quality degradation but must not introduce a second `map -> odom` publisher.
@@ -133,10 +149,13 @@ Package-local debug or visualization topics may be documented by the owning pack
 
 - BT nodes do not publish chassis/navigation velocity or TF.
 - BT nodes do not implement mapping, localization, perception, planning, route derivation or control algorithms.
-- BT Action nodes call project-owned Actions/Services, not Nav2 native Actions directly.
-- BT Conditions consume structured machine-readable state such as `TaskReadiness`, `SystemHealth`, localization status, and safety status; they do not inspect raw sensor streams.
+- BT Action nodes call project-owned Actions/Services, not Nav2 native Actions or backend-native APIs directly when a project capability boundary exists.
+- BT Conditions consume structured machine-readable state such as `TaskReadiness`, `SystemHealth`, `LocalizationStatus`, Site Package identity/readiness, NavigationSession status and Safety status; they do not inspect raw sensor streams.
 - Continuously running sensor/mapping/localization/perception/safety/chassis modules stay outside the tree.
 - Parent cancellation must propagate to active child Actions and wait for child cancellation semantics before finalizing.
+- Business-level trees must use semantic capabilities (`LoadSitePackage`, `EnsureLocalization`, `ExecuteRoute`, `NavigateToSemanticTarget`, `ExecuteCoverageTask`, `RecordBenchmark`, etc.) rather than backend package/plugin names.
+- Replacing FAST-LIVO2, relocalization backend, global planner, local controller or map storage must not require rewriting a business-level tree when semantic capability behavior is unchanged.
+- Groot2 is an editor/monitor/debug client; it is not Mission owner, map owner, Localization Authority, Safety controller or command source.
 
 ## Navigation Capability Contract
 
@@ -146,8 +165,21 @@ Package-local debug or visualization topics may be documented by the owning pack
 - Target modes are `MAP`, `ROUTE`, and `LOCAL`. ROUTE/LOCAL are not implemented merely because they appear in architecture docs.
 - Preserve `SemanticWaypoint != WaypointTask != Route != Runtime Path`.
 - `WaypointTask/TaskGroup` is ordered business/navigation intent; Route is a resolved navigation representation; Runtime Path is controller-consumable geometry.
-- V25-09B ROUTE runtime must consume only validated/compatible Route Asset revisions and normally track the active segment in `odom` using robust odometry.
-- V25-09A/V25-09B do not add `ExecuteRouteTask`, `ExecuteNavigationTask`, `navigation_mode` Mission fields, or new speed topics unless a separately reviewed versioned interface change is approved.
+- Runtime route execution must consume only validated/compatible Route Asset revisions and normally track the active segment using canonical localization/odometry evidence.
+- New semantic project capabilities such as `LoadSitePackage` or `ExecuteRoute` require separately reviewed interfaces; architecture names alone do not authorize adding them ad hoc.
+
+## Replaceable Backend Contract
+
+The following implementation domains must remain behind project-owned adapters/policies:
+
+- continuous odometry backend
+- global relocalization / correction / fusion backend
+- global planner backend
+- local controller / tracker backend
+- map storage backend
+- chassis adapter
+
+Stable project-level outputs/results must shield Mission/BT from backend-specific names, topics and error enums. Backend-native diagnostics may be attached as technical evidence but do not become business semantics.
 
 ## Vehicle Tracker Adapter Contract
 
@@ -160,16 +192,16 @@ Package-local debug or visualization topics may be documented by the owning pack
 
 ## Navigation, Safety, and Chassis Contract
 
-- Current MAP runtime motion chain remains `Nav2 controller -> /agt/navigation/cmd_vel_raw -> collision/safety -> /agt/navigation/cmd_vel -> /agt/safety/cmd_vel -> /agt/chassis/cmd_vel`.
-- Future ROUTE/LOCAL backends may reuse or replace internal planner/path-follower/controller components, but they must enter the same project safety/chassis boundary and must not create a second final command path.
-- Parent cancellation, safety loss, mode-specific readiness loss, map/task identity mismatch, route/profile mismatch, or backend abort are terminal failures unless a bounded explicit recovery contract says otherwise.
+- Preserve the current validated project command chain documented by `docs/interfaces/topic_contract.md` and runtime validation docs; do not create a second final command path.
+- Future ROUTE/LOCAL backends may reuse or replace internal planner/path-follower/controller components, but they must enter the same project Safety/chassis boundary.
+- Parent cancellation, safety loss, mode-specific readiness loss, map/task/site identity mismatch, route/profile mismatch, or backend abort are terminal failures unless a bounded explicit recovery contract says otherwise.
 - `start_chassis` defaults off for disconnected/offline testing. Monitor-only CAN mode must not create a command path.
 - Host CAN provisioning remains an administrator boundary; ROS/Web code does not run privileged network setup commands.
 
 ## Readiness Contract
 
-- Current `EvaluateTaskReadiness.srv` remains unchanged in the architecture baseline; current `TASK_EXECUTION` and `RELOCALIZATION` profiles mainly serve the MAP-oriented baseline.
-- Future mode-aware concepts are `MAP_START_READY`, `MAP_CONTINUE_READY`, `ROUTE_START_READY`, `ROUTE_CONTINUE_READY`, `GLOBAL_CORRECTION_READY`, and `LOCAL_READY`.
+- Current `EvaluateTaskReadiness.srv` remains unchanged in the architecture baseline; current profiles mainly serve the implemented MAP-oriented baseline.
+- Future mode-aware concepts may include `MAP_START_READY`, `MAP_CONTINUE_READY`, `ROUTE_START_READY`, `ROUTE_CONTINUE_READY`, `GLOBAL_CORRECTION_READY`, and `LOCAL_READY`.
 - `ROUTE_CONTINUE_READY` must prioritize odometry, local control, safety and required local perception; it must not require a recent global correction on every control cycle.
 - `GLOBAL_CORRECTION_READY` independently gates relocalization/sparse global correction.
 - `LOCAL_READY` must not require a Global Navigation Map.
@@ -187,35 +219,51 @@ Package-local debug or visualization topics may be documented by the owning pack
 
 ## Frontend Contract
 
-- Qt/Web call generated project interfaces and display machine-readable feedback/results.
+- Qt/Web/Map Workbench call project interfaces or offline libraries and display machine-readable feedback/results.
 - Frontends do not inspect manager internals, reconstruct runtime asset paths, or duplicate Mission/map/experiment ownership.
-- READY map assets and READY route revisions are read-only; edits create a new version/revision rather than mutating accepted evidence.
+- READY map assets, localization priors, semantic products, route revisions and Site Packages are read-only; edits create a new version/revision rather than mutating accepted evidence.
 - Offline route preview/tuning may visualize semantic layers, real vehicle footprint, clearance and invalid poses, but it does not start control or become a business-state owner.
 - Planner previews are advisory and must not start control, safety enablement, localization ownership, TF publishers, or chassis commands.
 
 ## Testing and Acceptance
 
-Every architecture/interface change must include the smallest relevant automated contract tests. V25-09A contract tests must at minimum protect:
+Every architecture/interface change must include the smallest relevant automated contract tests.
 
-- immutable Dataset/Bag + Calibration + Platform + Recipe lineage
-- `EVALUATION` versus `OPERATIONAL` purpose and RTK truth isolation
-- `site_id` / `epoch_id` semantics for cross-season reproducibility
-- one canonical site frame per map version and non-destructive map cleaning
-- map/semantic/vehicle/policy hash binding for Route Asset
+V25-12A Site Manifest tests must protect:
+
+- compatibility with the existing V25-09A `map_manifest` / Route Asset lineage rather than a second incompatible registry
+- explicit `site_id` and package/version identity
+- explicit selected map-version identity and stable content hash
+- calibration/profile/semantic/route/benchmark bindings by ID/path/hash as applicable
+- rejection of missing or path-escaping bindings
+- deterministic canonical Site Package content identity
+- READY immutability and read-only validation
+- no new runtime ROS interface in the schema/CLI-only stage
+
+V25-12B+ offline tests must continue to protect:
+
+- immutable raw Dataset/Bag evidence
+- replayable map processing parameters/patches
+- same-site cross-epoch frame identity
+- separate Localization Map / Prior / Navigation / Semantic / Route products
 - full-footprint and kinematic feasibility before Route READY
-- non-destructive route tuning with new revision/revalidation
-- Vehicle Tracker Adapter as an adapter, not a planning/TF/Mission owner
-- absence of new public `ExecuteRouteTask`/`ExecuteNavigationTask` interfaces unless separately reviewed
+- non-destructive route tuning and site/map revisions
 
-V25-08 architecture tests continue to protect:
+BT/capability tests must protect:
 
-- `MAP`, `ROUTE`, `LOCAL` mode names and their implemented/reserved boundary
-- `SemanticWaypoint != WaypointTask != Route != Runtime Path`
-- `/agt/map/local_occupancy` as an `odom`-frame transient rolling product
-- ESDF as optional/derived, not a default prerequisite
-- one selected authoritative `map -> odom` publisher at a time
-- unique `odom -> base_footprint` ownership
-- project Navigation Capability above Nav2 native interfaces
+- `agt_mission_manager` as the sole Mission owner
+- BT nodes calling project capabilities rather than Nav2/backend-native APIs
+- bounded cancellation propagation
+- no velocity/TF publication from BT nodes
+- backend replacement not leaking package/plugin names into business Mission schemas
+
+V25-11 regression remains the SOFTWARE_ONLY reference for:
+
+- happy-path navigation
+- localization and sensor fault injection
+- Safety fail-closed behavior
+- observability evidence
+- bounded fault response
 
 For the URDF self-filter specifically, keep tests for:
 
@@ -231,10 +279,10 @@ Before declaring the URDF self-filter DONE, compare the same raw bag in three mo
 2. `geometry_source:=profile`
 3. `geometry_source:=urdf`
 
-Record removal ratio, debug geometry/removed points, CPU/filter latency, FAST-LIVO2 trajectory, final PCD, self-return residue, false removals near the vehicle, and relocalization impact. Vehicle validation remains separate from code/build success.
+Record removal ratio, debug geometry/removed points, CPU/filter latency, estimator trajectory, final PCD, self-return residue, false removals near the vehicle, and relocalization impact. Vehicle validation remains separate from code/build success.
 
 ## Documentation and Archive Rule
 
-- Current architecture/interface statements belong under `docs/architecture`, `docs/interfaces`, `docs/roadmap`, and canonical `docs/workflows`.
+- Current architecture/interface statements belong under `docs/architecture`, `docs/interfaces`, `docs/roadmap`, canonical `docs/workflows`, and the active V25-12 requirements baseline.
 - Historical Phase/TASK/migration/experiment evidence belongs under `docs/archive` or dedicated experiment/calibration/testing records.
 - Archive text may preserve historical names and decisions; it must not be treated as current runtime truth.
