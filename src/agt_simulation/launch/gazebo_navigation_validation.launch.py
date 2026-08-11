@@ -4,7 +4,12 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    IncludeLaunchDescription,
+    SetLaunchConfiguration,
+    TimerAction,
+)
 from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
@@ -89,12 +94,17 @@ def generate_launch_description():
     runner_server_timeout_s = LaunchConfiguration("runner_server_timeout_s")
     runner_segment_timeout_s = LaunchConfiguration("runner_segment_timeout_s")
 
+    # Snapshot V25-11C public flags before nested validation launches mutate the
+    # same public names. Delayed TimerAction conditions must use stage-local flags.
+    stage_use_rviz = LaunchConfiguration("_v25_11c_use_rviz")
+    stage_run_acceptance = LaunchConfiguration("_v25_11c_run_acceptance")
+
     localization_stack = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             str(share / "launch" / "gazebo_localization_validation.launch.py")
         ),
         launch_arguments={
-            "use_rviz": use_rviz,
+            "use_rviz": stage_use_rviz,
             "run_acceptance": "false",
         }.items(),
     )
@@ -155,7 +165,7 @@ def generate_launch_description():
         name="agt_v25_11c_navigation_acceptance",
         output="screen",
         parameters=[{"use_sim_time": True, "timeout_s": 80.0}],
-        condition=IfCondition(run_acceptance),
+        condition=IfCondition(stage_run_acceptance),
     )
 
     map_server = Node(
@@ -206,6 +216,8 @@ def generate_launch_description():
             DeclareLaunchArgument("controller_id", default_value="FollowPath"),
             DeclareLaunchArgument("runner_server_timeout_s", default_value="20.0"),
             DeclareLaunchArgument("runner_segment_timeout_s", default_value="45.0"),
+            SetLaunchConfiguration("_v25_11c_use_rviz", use_rviz),
+            SetLaunchConfiguration("_v25_11c_run_acceptance", run_acceptance),
             localization_stack,
             sensor_monitor,
             safety_controller,
