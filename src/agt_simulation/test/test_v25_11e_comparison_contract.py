@@ -59,6 +59,25 @@ def test_comparison_acceptance_requires_original_11d_gate_and_response_metrics()
     assert "fault_ns <= terminal_ns" in script
 
 
+def test_comparison_acceptance_tolerates_only_live_jsonl_tail_and_preserves_metrics():
+    script = read("scripts/v25_11e_comparison_acceptance.py")
+    for token in (
+        "def _read_live_timeline_events",
+        "if index == last_index:",
+        "skipped_tail_records += 1",
+        'result["metrics"] = {',
+        '"skipped_timeline_tail_records"',
+        "timeline_events, skipped_timeline_tail_records = _read_live_timeline_events",
+    ):
+        assert token in script
+    # Do not silently swallow corruption in complete records.
+    assert "except json.JSONDecodeError:\n            if index == last_index:" in script
+    # Primary timing metrics must be populated before the live timeline is read.
+    assert script.index('result["metrics"] = {') < script.index(
+        "timeline_events, skipped_timeline_tail_records = _read_live_timeline_events"
+    )
+
+
 def test_comparison_launch_reuses_v25_11d_failure_stack_without_topology_copy():
     launch = read("launch/gazebo_observability_failure_comparison.launch.py")
     compile(launch, "gazebo_observability_failure_comparison.launch.py", "exec")
