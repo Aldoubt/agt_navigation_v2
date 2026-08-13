@@ -1,7 +1,7 @@
 """GUI-independent map-frame calibration primitives for AGT Map Workbench.
 
 A site-friendly ``map`` frame can be defined from physical structures without
-changing the source point cloud in place.  The calibration is exported as an
+changing the source point cloud in place. The calibration is exported as an
 auditable rigid transform and can later be paired with an independent
 ENU/UTM georeference.
 """
@@ -65,6 +65,7 @@ class AxisFit:
     point_count: int
     rms_residual_m: float
     linearity_ratio: float
+    selection: dict | None = None
 
 
 def fit_horizontal_axis_from_corridor(
@@ -123,7 +124,20 @@ def fit_horizontal_axis_from_corridor(
     second = float(singular_values[1]) if singular_values.size > 1 else 0.0
     linearity = float(singular_values[0] / max(second, _EPS))
     direction = np.array([direction_xy[0], direction_xy[1], 0.0], dtype=np.float64)
-    return AxisFit(_normalize(direction, name="X"), int(selected.shape[0]), rms, linearity)
+    selection = {
+        "method": "xy_corridor_pca",
+        "start_xy_m": start.tolist(),
+        "end_xy_m": end.tolist(),
+        "half_width_m": float(half_width_m),
+        "z_window_m": [float(z_min), float(z_max)],
+    }
+    return AxisFit(
+        _normalize(direction, name="X"),
+        int(selected.shape[0]),
+        rms,
+        linearity,
+        selection,
+    )
 
 
 def fit_vertical_axis_from_cylinder(
@@ -174,7 +188,13 @@ def fit_vertical_axis_from_cylinder(
     rms = float(np.sqrt(np.mean(np.sum(residual * residual, axis=1))))
     second = float(singular_values[1]) if singular_values.size > 1 else 0.0
     linearity = float(singular_values[0] / max(second, _EPS))
-    return AxisFit(direction, int(selected.shape[0]), rms, linearity)
+    selection = {
+        "method": "xy_cylinder_3d_pca",
+        "center_xy_m": [cx, cy],
+        "radius_m": float(radius_m),
+        "z_window_m": [float(z_min), float(z_max)],
+    }
+    return AxisFit(direction, int(selected.shape[0]), rms, linearity, selection)
 
 
 @dataclass(frozen=True)
@@ -249,11 +269,13 @@ class MapFrameCalibration:
                     "point_count": self.x_fit.point_count,
                     "rms_residual_m": self.x_fit.rms_residual_m,
                     "linearity_ratio": self.x_fit.linearity_ratio,
+                    "selection": self.x_fit.selection,
                 },
                 "z_reference": {
                     "point_count": self.z_fit.point_count,
                     "rms_residual_m": self.z_fit.rms_residual_m,
                     "linearity_ratio": self.z_fit.linearity_ratio,
+                    "selection": self.z_fit.selection,
                 },
                 "input_x_z_angle_deg": self.orthogonality_input_deg,
                 "output_right_handed": True,
@@ -316,7 +338,7 @@ def solve_map_frame(
     y_axis = _normalize(np.cross(z_axis, x_axis), name="Y")
     x_axis = _normalize(np.cross(y_axis, z_axis), name="X")
 
-    placeholder = AxisFit(np.zeros(3), 0, float("nan"), float("nan"))
+    placeholder = AxisFit(np.zeros(3), 0, float("nan"), float("nan"), None)
     return MapFrameCalibration(
         origin_source_m=origin,
         x_axis_in_source=x_axis,
