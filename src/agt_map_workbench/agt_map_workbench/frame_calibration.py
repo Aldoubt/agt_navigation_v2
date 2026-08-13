@@ -85,9 +85,10 @@ def fit_horizontal_axis_from_corridor(
     end = np.asarray(tuple(end_xy), dtype=np.float64).reshape(2)
     hint = end - start
     length = float(np.linalg.norm(hint))
+    width = float(half_width_m)
     if length <= _EPS:
         raise ValueError("X reference segment is too short")
-    if float(half_width_m) <= 0.0:
+    if width <= 0.0:
         raise ValueError("X corridor half width must be > 0")
     unit = hint / length
 
@@ -95,19 +96,31 @@ def fit_horizontal_axis_from_corridor(
     y = np.asarray(y)
     z = np.asarray(z)
     finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-    z_mask = (z >= float(z_min)) & (z <= float(z_max))
-    dx = x.astype(np.float64, copy=False) - start[0]
-    dy = y.astype(np.float64, copy=False) - start[1]
+    coarse = (
+        finite
+        & (z >= float(z_min))
+        & (z <= float(z_max))
+        & (x >= float(min(start[0], end[0]) - width))
+        & (x <= float(max(start[0], end[0]) + width))
+        & (y >= float(min(start[1], end[1]) - width))
+        & (y <= float(max(start[1], end[1]) + width))
+    )
+    indices = np.flatnonzero(coarse)
+    if indices.size == 0:
+        raise ValueError("X reference corridor contains no candidate points")
+
+    candidate_x = x[indices].astype(np.float64, copy=False)
+    candidate_y = y[indices].astype(np.float64, copy=False)
+    dx = candidate_x - start[0]
+    dy = candidate_y - start[1]
     along = dx * unit[0] + dy * unit[1]
     perpendicular = np.abs(dx * unit[1] - dy * unit[0])
-    mask = (
-        finite
-        & z_mask
-        & (along >= 0.0)
+    keep = (
+        (along >= 0.0)
         & (along <= length)
-        & (perpendicular <= float(half_width_m))
+        & (perpendicular <= width)
     )
-    selected = np.column_stack((x[mask], y[mask])).astype(np.float64, copy=False)
+    selected = np.column_stack((candidate_x[keep], candidate_y[keep]))
     if selected.shape[0] < int(minimum_points):
         raise ValueError(
             f"X reference corridor contains only {selected.shape[0]} points; "
@@ -128,7 +141,7 @@ def fit_horizontal_axis_from_corridor(
         "method": "xy_corridor_pca",
         "start_xy_m": start.tolist(),
         "end_xy_m": end.tolist(),
-        "half_width_m": float(half_width_m),
+        "half_width_m": width,
         "z_window_m": [float(z_min), float(z_max)],
     }
     return AxisFit(
@@ -153,23 +166,34 @@ def fit_vertical_axis_from_cylinder(
 ) -> AxisFit:
     """Fit a 3D principal line from a pillar-like cylindrical selection."""
     cx, cy = (float(value) for value in center_xy)
-    if float(radius_m) <= 0.0:
+    radius = float(radius_m)
+    if radius <= 0.0:
         raise ValueError("Z pillar radius must be > 0")
     x = np.asarray(x)
     y = np.asarray(y)
     z = np.asarray(z)
     finite = np.isfinite(x) & np.isfinite(y) & np.isfinite(z)
-    distance2 = (
-        (x.astype(np.float64, copy=False) - cx) ** 2
-        + (y.astype(np.float64, copy=False) - cy) ** 2
-    )
-    mask = (
+    coarse = (
         finite
         & (z >= float(z_min))
         & (z <= float(z_max))
-        & (distance2 <= float(radius_m) ** 2)
+        & (x >= cx - radius)
+        & (x <= cx + radius)
+        & (y >= cy - radius)
+        & (y <= cy + radius)
     )
-    selected = np.column_stack((x[mask], y[mask], z[mask])).astype(np.float64, copy=False)
+    indices = np.flatnonzero(coarse)
+    if indices.size == 0:
+        raise ValueError("Z reference cylinder contains no candidate points")
+
+    candidate_x = x[indices].astype(np.float64, copy=False)
+    candidate_y = y[indices].astype(np.float64, copy=False)
+    candidate_z = z[indices].astype(np.float64, copy=False)
+    distance2 = (candidate_x - cx) ** 2 + (candidate_y - cy) ** 2
+    keep = distance2 <= radius**2
+    selected = np.column_stack(
+        (candidate_x[keep], candidate_y[keep], candidate_z[keep])
+    )
     if selected.shape[0] < int(minimum_points):
         raise ValueError(
             f"Z reference cylinder contains only {selected.shape[0]} points; "
@@ -191,7 +215,7 @@ def fit_vertical_axis_from_cylinder(
     selection = {
         "method": "xy_cylinder_3d_pca",
         "center_xy_m": [cx, cy],
-        "radius_m": float(radius_m),
+        "radius_m": radius,
         "z_window_m": [float(z_min), float(z_max)],
     }
     return AxisFit(direction, int(selected.shape[0]), rms, linearity, selection)
