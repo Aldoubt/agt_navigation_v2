@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "src/agt_map_workbench"
 MODEL = PACKAGE / "agt_map_workbench/model.py"
+FRAME = PACKAGE / "agt_map_workbench/frame_calibration.py"
 APP = PACKAGE / "agt_map_workbench/app.py"
 VIEW = PACKAGE / "agt_map_workbench/view.py"
 PACKAGE_XML = PACKAGE / "package.xml"
@@ -68,6 +69,64 @@ def test_authoring_feedback_is_explicit_and_zoom_stable():
     assert "minimum_margin=1.0" in app
 
 
+def test_display_quality_controls_are_preview_only():
+    app = _read(APP)
+    view = _read(VIEW)
+    for token in (
+        "深色背景",
+        "浅色背景",
+        "按高度着色",
+        "按强度着色",
+        "显示 15 万点",
+        "显示 30 万点",
+        "显示 60 万点",
+        "点大小 4px",
+        "仅影响预览，不修改正式 PCD",
+    ):
+        assert token in app
+    assert 'set_background_mode("dark")' in view
+    assert '"height", "intensity", "mono"' in view
+    assert "setWidthF(self._point_size_px)" in view
+
+
+def test_map_frame_calibration_is_separate_from_georeference():
+    app = _read(APP)
+    frame = _read(FRAME)
+    for token in (
+        "agt_map_frame_calibration/v1",
+        "fit_horizontal_axis_from_corridor",
+        "fit_vertical_axis_from_cylinder",
+        "nearest_xyz_in_window",
+        "solve_map_frame",
+        "output_right_handed",
+        '"status": "UNBOUND"',
+        "ENU/UTM georeference is a separate calibration artifact",
+    ):
+        assert token in frame
+    for ui_token in (
+        "坐标系标定",
+        "选择地图原点",
+        "选择 X 参考墙两端",
+        "选择 Z 参考立柱中心",
+        "翻转 X 方向",
+        "翻转 Z 方向",
+        "导出 map_frame.yaml",
+        "输入 X/Z 夹角",
+    ):
+        assert ui_token in app
+    assert "process_pointcloud" not in frame
+    assert "rclpy" not in frame
+
+
+def test_map_frame_is_orthogonalized_by_cross_products_not_raw_mouse_axes():
+    frame = _read(FRAME)
+    assert "x_projected" in frame
+    assert "np.cross(z_axis, x_axis)" in frame
+    assert "np.cross(y_axis, z_axis)" in frame
+    assert "basis_source_from_map" in frame
+    assert "rotation_map_from_source" in frame
+
+
 def test_operator_ui_is_chinese_but_machine_contract_remains_stable():
     app = _read(APP)
     for token in (
@@ -104,6 +163,12 @@ def test_ros2_run_launcher_is_executable_and_does_not_shadow_python_package():
     assert LAUNCHER.name != "agt_map_workbench.py"
     assert "from agt_map_workbench.app import main" in launcher
     assert not (PACKAGE / "scripts/agt_map_workbench.py").exists()
+
+
+def test_frame_calibration_tests_are_registered():
+    cmake = _read(CMAKE)
+    assert "test_frame_calibration" in cmake
+    assert "test/test_frame_calibration.py" in cmake
 
 
 def test_workbench_does_not_add_runtime_ros_interfaces():
