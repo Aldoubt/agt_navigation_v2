@@ -38,6 +38,9 @@ if(BUILD_TESTING)
   )
   ament_add_pytest_test(test_pcd_compressed test/test_pcd_compressed.py)
   ament_add_pytest_test(test_pointcloud_profile test/test_pointcloud_profile.py)
+  ament_add_pytest_test(
+    test_navigation_map_derivation test/test_navigation_map_derivation.py
+  )
 endif()
 
 ament_package()
