@@ -45,6 +45,17 @@ from .pointcloud_processing import (
     process_pointcloud,
     validate_pointcloud_processing,
 )
+from .navigation_map_derivation import (
+    FREE,
+    OCCUPIED,
+    UNKNOWN,
+    NAVIGATION_DERIVATION_SCHEMA,
+    GroundRelativeNavigationConfig,
+    NavigationMapResult,
+    apply_navigation_overrides,
+    derive_ground_relative_navigation_map,
+    write_navigation_map_derivation,
+)
 
 __all__ = [
     "AssetContractError",
@@ -92,4 +103,13 @@ __all__ = [
     "load_pointcloud_recipe",
     "process_pointcloud",
     "validate_pointcloud_processing",
+    "FREE",
+    "OCCUPIED",
+    "UNKNOWN",
+    "NAVIGATION_DERIVATION_SCHEMA",
+    "GroundRelativeNavigationConfig",
+    "NavigationMapResult",
+    "apply_navigation_overrides",
+    "derive_ground_relative_navigation_map",
+    "write_navigation_map_derivation",
 ]
