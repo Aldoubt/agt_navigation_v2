@@ -3,12 +3,16 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = ROOT / "src/agt_map_workbench"
+OFFLINE = ROOT / "src/agt_offline_assets"
 MODEL = PACKAGE / "agt_map_workbench/model.py"
 FRAME = PACKAGE / "agt_map_workbench/frame_calibration.py"
+NAV_PREVIEW = PACKAGE / "agt_map_workbench/navigation_preview.py"
+NAV_DERIVATION = OFFLINE / "agt_offline_assets/navigation_map_derivation.py"
 APP = PACKAGE / "agt_map_workbench/app.py"
 VIEW = PACKAGE / "agt_map_workbench/view.py"
 PACKAGE_XML = PACKAGE / "package.xml"
 CMAKE = PACKAGE / "CMakeLists.txt"
+OFFLINE_CMAKE = OFFLINE / "CMakeLists.txt"
 LAUNCHER = PACKAGE / "scripts/map_workbench_launcher.py"
 README = PACKAGE / "README.md"
 
@@ -69,6 +73,15 @@ def test_authoring_feedback_is_explicit_and_zoom_stable():
     assert "minimum_margin=1.0" in app
 
 
+def test_fixed_marker_label_offsets_are_screen_local_not_scene_metres():
+    app = _read(APP)
+    assert "QGraphicsSimpleTextItem(text, marker)" in app
+    assert "label_offset_px" in app
+    assert "label.setPos(QPointF(*label_offset_px))" in app
+    assert 'origin_text = "O / +Z↑"' in app
+    assert 'self._add_fixed_marker(base, "O / +Z↑"' not in app
+
+
 def test_display_quality_controls_are_preview_only():
     app = _read(APP)
     view = _read(VIEW)
@@ -88,6 +101,23 @@ def test_display_quality_controls_are_preview_only():
     assert 'set_background_mode("dark")' in view
     assert '"height", "intensity", "mono"' in view
     assert "setWidthF(self._point_size_px)" in view
+
+
+def test_display_and_calibration_z_semantics_are_separated():
+    app = _read(APP)
+    for token in (
+        "显示 Z 范围（只控制点云可视化）",
+        "原点吸附 Z",
+        "X 墙拟合 Z",
+        "Z 柱拟合 Z",
+        "把当前显示 Z 复制到全部标定选取范围",
+        "标定 Z 和导航派生参数不随之改变",
+        "实际拟合 Z=",
+    ):
+        assert token in app
+    assert "self._origin_z_min.value()" in app
+    assert "self._x_fit_z_min.value()" in app
+    assert "self._z_fit_z_min.value()" in app
 
 
 def test_map_frame_calibration_is_separate_from_georeference():
@@ -126,6 +156,70 @@ def test_map_frame_is_orthogonalized_by_cross_products_not_raw_mouse_axes():
     assert "np.cross(y_axis, z_axis)" in frame
     assert "basis_source_from_map" in frame
     assert "rotation_map_from_source" in frame
+
+
+def test_ground_relative_navigation_derivation_is_not_absolute_z_slice():
+    nav = _read(NAV_DERIVATION)
+    for token in (
+        "agt_ground_relative_navigation_map/v1",
+        "ground_quantile",
+        "ground_height",
+        "relative_height",
+        "obstacle_min_height_m",
+        "obstacle_max_height_m",
+        "maximum_slope_deg",
+        "maximum_step_m",
+        "UNKNOWN",
+        "minimum_ground_support_points",
+    ):
+        assert token in nav
+    assert "height_range" not in nav
+    assert "point_cloud_min_z" not in nav
+
+
+def test_navigation_map_editor_previews_evidence_and_exports_nav2_assets():
+    app = _read(APP)
+    preview = _read(NAV_PREVIEW)
+    for token in (
+        "Ground-relative Navigation Map",
+        "生成 Ground-relative 导航图预览",
+        "最终 PGM 三态",
+        "局部地面高度",
+        "障碍点证据",
+        "坡度",
+        "台阶高度",
+        "导出 Navigation Map PGM / YAML / 证据",
+        "当前派生始终使用已加载 PCD 的坐标系",
+    ):
+        assert token in app
+    assert "NavigationPreviewItem" in app
+    assert "derive_ground_relative_navigation_map" in app
+    assert "write_navigation_map_derivation" in app
+    assert "navigation_layer_pixmap" in preview
+    assert "result.resolution_m" in preview
+
+
+def test_navigation_override_is_world_polygon_not_pixel_paint():
+    app = _read(APP)
+    nav = _read(NAV_DERIVATION)
+    for token in (
+        "强制可通行 FORCE_FREE",
+        "强制占据 FORCE_OCCUPIED",
+        "强制未知 UNKNOWN",
+        "禁行 NO_GO",
+        "workbench_manual_override",
+    ):
+        assert token in app
+    assert "polygon_xy" in nav
+    assert "force_free" in nav
+    assert "force_occupied" in nav
+    assert "no_go" in nav
+
+
+def test_navigation_derivation_unit_tests_are_registered():
+    cmake = _read(OFFLINE_CMAKE)
+    assert "test_navigation_map_derivation" in cmake
+    assert "test/test_navigation_map_derivation.py" in cmake
 
 
 def test_operator_ui_is_chinese_but_machine_contract_remains_stable():
