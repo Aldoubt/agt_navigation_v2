@@ -18,7 +18,7 @@ def test_nearest_xyz_respects_active_z_window():
     assert np.allclose(point, [0.02, 0.01, 0.1])
 
 
-def test_horizontal_corridor_fits_wall_direction():
+def test_horizontal_corridor_fits_wall_direction_and_records_selection():
     rng = np.random.default_rng(7)
     x = np.linspace(0.0, 8.0, 500)
     y = 2.0 + rng.normal(0.0, 0.015, x.size)
@@ -38,9 +38,13 @@ def test_horizontal_corridor_fits_wall_direction():
     assert abs(fit.direction[1]) < 0.03
     assert fit.rms_residual_m < 0.03
     assert fit.linearity_ratio > 50.0
+    assert fit.selection["method"] == "xy_corridor_pca"
+    assert fit.selection["start_xy_m"] == [0.0, 2.0]
+    assert fit.selection["end_xy_m"] == [8.0, 2.0]
+    assert fit.selection["half_width_m"] == pytest.approx(0.1)
 
 
-def test_vertical_cylinder_fits_pillar_direction():
+def test_vertical_cylinder_fits_pillar_direction_and_records_selection():
     rng = np.random.default_rng(9)
     z = np.linspace(-1.0, 3.0, 600)
     x = 4.0 + rng.normal(0.0, 0.01, z.size)
@@ -60,6 +64,9 @@ def test_vertical_cylinder_fits_pillar_direction():
     assert abs(fit.direction[1]) < 0.03
     assert fit.rms_residual_m < 0.03
     assert fit.linearity_ratio > 50.0
+    assert fit.selection["method"] == "xy_cylinder_3d_pca"
+    assert fit.selection["center_xy_m"] == [4.0, -2.0]
+    assert fit.selection["radius_m"] == pytest.approx(0.08)
 
 
 def test_solve_map_frame_is_orthonormal_right_handed_and_transforms_origin():
@@ -86,10 +93,33 @@ def test_flip_x_and_z_preserve_right_handed_frame():
 
 
 def test_map_frame_yaml_keeps_georeference_separate(tmp_path):
-    calibration = solve_map_frame([1, 2, 3], [1, 0, 0], [0, 0, 1])
+    xfit = fit_horizontal_axis_from_corridor(
+        np.linspace(0.0, 5.0, 100),
+        np.zeros(100),
+        np.zeros(100),
+        (0.0, 0.0),
+        (5.0, 0.0),
+        z_min=-0.5,
+        z_max=0.5,
+        half_width_m=0.1,
+    )
+    zfit = fit_vertical_axis_from_cylinder(
+        np.zeros(100),
+        np.zeros(100),
+        np.linspace(0.0, 3.0, 100),
+        (0.0, 0.0),
+        z_min=-0.1,
+        z_max=3.1,
+        radius_m=0.1,
+    )
+    calibration = solve_map_frame(
+        [1, 2, 3], xfit.direction, zfit.direction, x_fit=xfit, z_fit=zfit
+    )
     data = calibration.to_dict(source_asset="green house full.pcd")
     assert data["schema"] == MAP_FRAME_SCHEMA
     assert data["target_frame_id"] == "map"
+    assert data["fit_evidence"]["x_reference"]["selection"]["method"] == "xy_corridor_pca"
+    assert data["fit_evidence"]["z_reference"]["selection"]["method"] == "xy_cylinder_3d_pca"
     assert data["georeference"]["status"] == "UNBOUND"
     assert "ENU/UTM" in data["georeference"]["note"]
     path = calibration.write_yaml(tmp_path / "map_frame.yaml")
