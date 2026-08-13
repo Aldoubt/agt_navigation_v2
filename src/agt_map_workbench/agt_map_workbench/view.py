@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 from PyQt5.QtCore import QPointF, QRectF, Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QPainter, QPen, QPolygonF
+from PyQt5.QtGui import QBrush, QColor, QPainter, QPen, QPolygonF
 from PyQt5.QtWidgets import QGraphicsItem, QGraphicsView
 
 
@@ -15,12 +15,21 @@ class PointCloudItem(QGraphicsItem):
         super().__init__()
         self._xy = np.empty((0, 2), dtype=np.float64)
         self._z = np.empty(0, dtype=np.float64)
+        self._intensity = np.empty(0, dtype=np.float64)
+        self._has_intensity = False
         self._z_min = -np.inf
         self._z_max = np.inf
         self._rect = QRectF()
+        self._color_mode = "height"
+        self._point_size_px = 1.0
+        self._sample_limit = 60_000
 
     def set_cloud(self, cloud, *, sample_limit: int = 60_000) -> None:
         """Sample structured PCD fields before expanding to an Nx3 float64 matrix."""
+        sample_limit = int(sample_limit)
+        if sample_limit <= 0:
+            raise ValueError("sample_limit must be > 0")
+        self._sample_limit = sample_limit
         point_count = int(cloud.points.shape[0])
         for field in ("x", "y", "z"):
             if field not in cloud.schema.fields:
@@ -40,15 +49,30 @@ class PointCloudItem(QGraphicsItem):
                 np.asarray(points["z"], dtype=np.float64),
             )
         )
-        self.set_points(xyz)
+        intensity = None
+        if "intensity" in cloud.schema.fields:
+            field_index = cloud.schema.fields.index("intensity")
+            if int(cloud.schema.counts[field_index]) == 1:
+                intensity = np.asarray(points["intensity"], dtype=np.float64)
+        self.set_points(xyz, intensity=intensity)
 
-    def set_points(self, xyz: np.ndarray) -> None:
+    def set_points(self, xyz: np.ndarray, *, intensity: np.ndarray | None = None) -> None:
         xyz = np.asarray(xyz, dtype=np.float64)
         finite = np.all(np.isfinite(xyz), axis=1)
+        if intensity is not None:
+            intensity = np.asarray(intensity, dtype=np.float64).reshape(-1)
+            if intensity.shape[0] != xyz.shape[0]:
+                raise ValueError("intensity length must match xyz")
         xyz = xyz[finite]
         self.prepareGeometryChange()
         self._xy = np.column_stack((xyz[:, 0], -xyz[:, 1])) if xyz.size else np.empty((0, 2))
         self._z = xyz[:, 2].copy() if xyz.size else np.empty(0)
+        if intensity is not None:
+            self._intensity = intensity[finite].copy()
+            self._has_intensity = True
+        else:
+            self._intensity = np.empty(self._z.shape[0], dtype=np.float64)
+            self._has_intensity = False
         if self._xy.shape[0]:
             minimum = np.min(self._xy, axis=0)
             maximum = np.max(self._xy, axis=0)
@@ -69,9 +93,23 @@ class PointCloudItem(QGraphicsItem):
         self._z_max = float(maximum)
         self.update()
 
+    def set_display_options(self, *, color_mode: str, point_size_px: float) -> None:
+        color_mode = str(color_mode)
+        if color_mode not in {"height", "intensity", "mono"}:
+            raise ValueError(f"unsupported color mode: {color_mode}")
+        self._color_mode = color_mode
+        self._point_size_px = max(1.0, min(6.0, float(point_size_px)))
+        self.update()
+
     def sample_count(self) -> int:
         """Number of finite points currently held by the display sample."""
         return int(self._z.size)
+
+    def sample_limit(self) -> int:
+        return int(self._sample_limit)
+
+    def has_intensity(self) -> bool:
+        return bool(self._has_intensity)
 
     def visible_sample_count(self) -> int:
         """Number of sampled points inside the active Z display window."""
@@ -93,6 +131,29 @@ class PointCloudItem(QGraphicsItem):
     def boundingRect(self) -> QRectF:  # noqa: N802 - Qt API
         return self._rect
 
+    @staticmethod
+    def _bucket(values: np.ndarray) -> np.ndarray:
+        finite = np.isfinite(values)
+        if not np.any(finite):
+            return np.zeros(values.shape[0], dtype=np.int32)
+        valid = values[finite]
+        low = float(np.min(valid))
+        high = float(np.max(valid))
+        scale = max(1e-9, high - low)
+        result = np.zeros(values.shape[0], dtype=np.int32)
+        result[finite] = np.clip(((valid - low) / scale * 15.0).astype(np.int32), 0, 15)
+        return result
+
+    def _draw_points(self, painter: QPainter, xy: np.ndarray, color: QColor) -> None:
+        if xy.shape[0] == 0:
+            return
+        pen = QPen(color)
+        pen.setWidthF(self._point_size_px)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        polygon = QPolygonF([QPointF(float(x), float(y)) for x, y in xy])
+        painter.drawPoints(polygon)
+
     def paint(self, painter: QPainter, option, widget=None) -> None:  # noqa: N802 - Qt API
         del option, widget
         if self._xy.shape[0] == 0:
@@ -101,21 +162,28 @@ class PointCloudItem(QGraphicsItem):
         if not np.any(visible):
             return
         xy = self._xy[visible]
-        z = self._z[visible]
-        z_low = float(np.min(z))
-        z_high = float(np.max(z))
-        scale = max(1e-9, z_high - z_low)
-        bucket = np.clip(((z - z_low) / scale * 15.0).astype(np.int32), 0, 15)
         painter.setRenderHint(QPainter.Antialiasing, False)
+
+        if self._color_mode == "mono":
+            self._draw_points(painter, xy, QColor(225, 230, 235))
+            return
+
+        if self._color_mode == "intensity" and self._has_intensity:
+            values = self._intensity[visible]
+        else:
+            values = self._z[visible]
+        bucket = self._bucket(values)
         for index in range(16):
             selected = xy[bucket == index]
             if selected.shape[0] == 0:
                 continue
-            t = index / 15.0
-            color = QColor.fromHsvF((2.0 / 3.0) * (1.0 - t), 0.9, 0.9)
-            painter.setPen(QPen(color, 0))
-            polygon = QPolygonF([QPointF(float(x), float(y)) for x, y in selected])
-            painter.drawPoints(polygon)
+            if self._color_mode == "intensity" and self._has_intensity:
+                gray = int(45 + (210 * index / 15.0))
+                color = QColor(gray, gray, gray)
+            else:
+                t = index / 15.0
+                color = QColor.fromHsvF((2.0 / 3.0) * (1.0 - t), 0.9, 0.95)
+            self._draw_points(painter, selected, color)
 
 
 class PointCloudView(QGraphicsView):
@@ -128,6 +196,16 @@ class PointCloudView(QGraphicsView):
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorViewCenter)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.set_background_mode("dark")
+
+    def set_background_mode(self, mode: str) -> None:
+        mode = str(mode)
+        if mode == "dark":
+            self.setBackgroundBrush(QBrush(QColor(24, 27, 31)))
+        elif mode == "light":
+            self.setBackgroundBrush(QBrush(QColor(245, 245, 245)))
+        else:
+            raise ValueError(f"unsupported background mode: {mode}")
 
     def set_authoring_enabled(self, enabled: bool) -> None:
         self.authoring_enabled = bool(enabled)
