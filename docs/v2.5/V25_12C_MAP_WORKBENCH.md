@@ -6,57 +6,39 @@ Date: 2026-08-13
 
 ## Goal
 
-Provide a visual authoring client over the frozen V25-12B point-cloud processing contract and add an auditable Map Frame Calibration workflow for site-friendly coordinate definition
-
-The Workbench must make scene-boundary editing, stable-frame definition and later georeference preparation easier without creating a second point-cloud editing truth
-
-## Architecture
+V25-12C provides one Offline Plane editor for three related but separate authoring products
 
 ```text
-agt_map_workbench
-  Qt5 visual authoring only
-        ↓
-┌──────────────────────────────┐
-│ Point-cloud editing          │
-│ → V25-12B Recipe             │
-└──────────────────────────────┘
-        ↓
-agt_offline_assets
-        ↓
-immutable processing run
-
-and
-
-┌──────────────────────────────┐
-│ Map Frame Calibration        │
-│ origin + X wall + Z pillar   │
-└──────────────────────────────┘
-        ↓
-agt_map_frame_calibration/v1
-        ↓
-map_frame.yaml
+PCD editing        → V25-12B processing Recipe
+Map frame          → map_frame.yaml
+Navigation map     → ground-relative PGM/YAML + evidence
 ```
 
-The Workbench is an Offline Plane package
+It does not publish runtime ROS topics, own TF, command the vehicle, or modify READY assets in place
 
-It does not publish ROS topics, own TF, command the vehicle or modify a READY Map Version in place
+## Current real-data baseline
 
-## MVP renderer
-
-The renderer remains intentionally 2.5D rather than a full 3D CAD environment
+Primary full scene
 
 ```text
-full PCD
-  ↓
-deterministic display sample
-  ↓
-XY top view
-+ explicit Z window
-+ configurable display density
-+ height / intensity / monochrome rendering
+runtime/maps/green house full.pcd
 ```
 
-Formal processing always uses the complete source PCD
+The earlier `greenhouse_aligned_full2.pcd` is an already-cropped historical V25-12B smoke asset
+
+## 1. Preview / asset separation
+
+The point-cloud renderer remains 2.5D and deterministically sampled
+
+Preview controls
+
+- dark/light background
+- height/intensity/mono color
+- 1–4 px point size
+- 60k/150k/300k/600k display sample
+- display-only Z window
+
+Formal PCD processing and Navigation Map derivation use the complete loaded PCD
 
 ```text
 Preview resolution != Asset resolution
@@ -64,290 +46,213 @@ Preview resolution != Asset resolution
 
 Display sampling never becomes processing input
 
-## Current full-map validation asset
+## 2. Point-cloud editing
 
-Primary real scene asset
-
-```text
-runtime/maps/green house full.pcd
-```
-
-The earlier
+The visual editor still serializes to the frozen V25-12B contract
 
 ```text
-runtime/maps/greenhouse_ground/pcd/greenhouse_aligned_full2.pcd
-```
-
-is an already-cropped historical V25-12B smoke asset and shall not be confused with the current full-scene validation map
-
-## Operator feedback incorporated
-
-The first GUI smoke exposed
-
-1. polygon clicks lacked visible feedback
-2. Z changes lacked quantitative feedback
-3. fit-to-cloud placed edge points too close to the viewport boundary
-4. Recipe order was not explicit enough
-5. a white background made outer geometry difficult to inspect
-6. fixed 60k display sampling made visual density too sparse for edge inspection
-7. the site needs a stable, repeatable map coordinate definition before future RTK georeference
-
-The first four feedback items are already addressed by fixed-size numbered vertices, visible-point counts, padded authoring bounds and explicit Recipe execution order
-
-This update addresses display density/background and adds Map Frame Calibration
-
-## Current greenhouse display evidence
-
-The operator reported that the following window gives a useful view of the full greenhouse structure
-
-```text
-Z min = -1.505 m
-Z max =  1.400 m
-```
-
-This is a display observation only
-
-It is not a frozen `height_range` processing parameter
-
-## Display controls
-
-Preview now supports
-
-- dark background by default
-- optional light background
-- Z-height coloring
-- scalar intensity coloring when available
-- monochrome coloring
-- 1 / 2 / 3 / 4 px point size
-- deterministic display limits of 60k / 150k / 300k / 600k points
-- explicit source point count versus displayed/visible sample count
-- padded fit-to-cloud authoring margin
-
-Changing any display control must not alter Recipe semantics or the full-resolution processing input
-
-## Point-cloud editing
-
-Current authoring path
-
-```text
-source/master PCD
-    ↓ deterministic preview
-polygon × active Z window
+polygon × Z
     ↓
 delete_polygon / crop_polygon
     ↓
 agt_pointcloud_processing_recipe/v1
     ↓
-V25-12B immutable full-resolution processing
+immutable full-resolution processing
 ```
 
-Visible authoring feedback includes
+Visible feedback includes fixed-size numbered vertices, coordinates and explicit Recipe execution order
 
-- fixed-size numbered polygon vertices
-- per-vertex XY coordinates
-- visible sample count under active Z window
-- explicit Recipe execution order
+## 3. Map Frame Calibration
 
-The Workbench still does not invent a GUI-private point-cloud edit format
+### Z semantics are now separated
 
-## Map Frame Calibration MVP
+The first real smoke showed that one shared Z control was ambiguous
 
-Map Frame Calibration is separate from destructive point-cloud editing
-
-Goal
+The Workbench now has independent values for
 
 ```text
-stable site structures
-        ↓
-site-friendly right-handed map frame
-        ↓
-map_frame.yaml
+Display Z       only changes visualization
+Origin Z        nearest-point origin snapping
+X-wall Z        wall-corridor fitting
+Z-pillar Z      pillar-cylinder fitting
 ```
 
-Recommended greenhouse meaning
+A convenience button copies the current Display Z into all three calibration ranges, after which they can be edited independently
+
+Completed X/Z fits report the actual `z_window_m` captured in their fit evidence
+
+### Structural fitting
 
 ```text
-+X  greenhouse wall / row direction
-+Z  upward
-+Y  generated by right-hand rule
+origin click
+    ↓ nearest 3D point inside Origin Z
+
+X wall endpoints
+    ↓ XY corridor + X-wall Z
+    ↓ PCA principal line
+
+Z pillar center
+    ↓ XY cylinder + Z-pillar Z
+    ↓ 3D PCA principal line
 ```
 
-The site map is not required to use `+X = East`
-
-Future geographic alignment is a separate georeference contract
-
-### Origin
-
-The operator clicks a physically meaningful stable location such as a wall corner or pillar base
-
-The current MVP snaps to a finite source PCD point inside the active Z window
-
-### X reference
-
-The operator clicks two points along a reliable wall in the intended `+X` direction
-
-Selection and fitting
+The noisy X/Z candidates are orthogonalized
 
 ```text
-selected wall endpoints
-+ XY corridor half width
-+ active Z window
-        ↓
-coarse spatial filtering on source fields
-        ↓
-local XY point set only
-        ↓
-PCA principal line
-```
-
-The implementation avoids expanding the complete map to an additional float64 XYZ matrix before fitting
-
-Evidence includes
-
-- selected start/end XY
-- corridor half width
-- active Z window
-- fitted point count
-- RMS residual
-- linearity ratio
-- fitted X candidate
-
-### Z reference
-
-The operator clicks the XY center of a reliable vertical pillar
-
-Selection and fitting
-
-```text
-pillar XY center
-+ cylinder radius
-+ active Z window
-        ↓
-coarse spatial filtering on source fields
-        ↓
-local 3D point set only
-        ↓
-3D PCA principal line
-```
-
-Evidence includes
-
-- selected center XY
-- cylinder radius
-- active Z window
-- fitted point count
-- RMS residual
-- linearity ratio
-- fitted Z candidate
-
-The default sign keeps fitted Z generally aligned with the source map positive Z
-
-The operator may explicitly flip Z if necessary
-
-### Right-handed orthogonalization
-
-Site structures are not assumed mathematically perpendicular
-
-The raw X candidate is projected onto the plane perpendicular to fitted Z
-
-Then
-
-```text
+X ← X projected perpendicular to Z
 Y = Z × X
 X = Y × Z
 ```
 
-The output basis is therefore orthonormal and right-handed
+The result is an orthonormal right-handed map frame
 
-The UI provides explicit X and Z flip controls while Y is recomputed consistently
+### Preview-label correction
 
-### Visual preview
+Axis lines use map coordinates, but marker/label size and offsets are screen-space UI properties
 
-When origin, X and Z are all available, the 2.5D canvas overlays
+The label is now a child of the fixed marker item so offsets such as 8 px / 20 px are no longer interpreted as metres in the scene
 
-- origin marker
-- +X axis
-- +Y axis
-- +Z-up label
+The solved origin is displayed once as `O / +Z↑`; X1/X2 and Z-pillar labels use different local offsets to reduce overlap
 
-This is a top-view calibration preview, not yet a free-rotation 3D renderer
+### Geographic boundary
 
-### Calibration artifact
+`map_frame.yaml` remains separate from RTK/ENU/UTM georeference
+
+```text
+source map
+    ↓ map_frame.yaml
+site-friendly map
+    ↕ future georeference.yaml
+ENU / UTM
+```
+
+## 4. Ground-relative Navigation Map
+
+### Reason for the change
+
+A fixed global Z slice is not a reliable way to derive a greenhouse PGM because the floor is not perfectly level
+
+A locally higher but traversable floor must not become occupied merely because its absolute Z is larger
+
+### Offline derivation contract
+
+Implemented in
+
+```text
+src/agt_offline_assets/agt_offline_assets/navigation_map_derivation.py
+```
 
 Schema
 
 ```text
-agt_map_frame_calibration/v1
+agt_ground_relative_navigation_map/v1
 ```
 
-`map_frame.yaml` records
-
-- source asset file identity
-- source / target frame IDs
-- origin in source coordinates
-- X/Y/Z unit axes expressed in source coordinates
-- source-to-map rotation and translation
-- X and Z selection geometry
-- fitting point counts
-- RMS residuals
-- linearity ratios
-- input X/Z angle
-- right-handed output assertion
-- georeference status
-
-## RTK / georeference boundary
-
-Map Frame Calibration and geographic registration are separate contracts
+Pipeline
 
 ```text
-source/master PCD
-        ↓ map_frame.yaml
-site-friendly map
-        ↕ future georeference.yaml
-ENU / UTM / earth
+full finite XYZ
+    ↓
+XY grid
+    ↓
+per-cell low-quantile ground seed
+    ↓
+finite-distance gap filling
+    ↓
+local median ground smoothing
+    ↓
+z_ground(x,y)
+    ↓
+h_rel = z - z_ground(x,y)
+    ↓
+relative obstacle evidence
++ ground support
++ slope
++ step
+    ↓
+FREE / OCCUPIED / UNKNOWN
 ```
 
-The site `map` frame may align with greenhouse walls/rows for navigation, semantic annotation and route authoring convenience
+Important semantics
 
-Future RTK integration shall estimate a separate geographic transform from multiple map-to-ENU/UTM control points and/or reliable absolute heading evidence
+- FREE requires explicit ground support
+- OCCUPIED can come from obstacle evidence, excessive slope, or excessive local step
+- cells without enough evidence remain UNKNOWN
+- no global absolute-height obstacle slice is used
 
-`map_frame.yaml` therefore exports
+The current algorithm is an elevation-grid MVP, not a claim that the final greenhouse DTM method is frozen
+
+Later PMF/CSF/progressive morphology candidates can be compared behind the same derivation/output contract
+
+### Workbench Navigation Map tab
+
+Parameters exposed in the MVP
+
+- grid resolution
+- ground low quantile
+- ground gap-fill distance
+- smoothing radius
+- relative obstacle min/max height
+- maximum slope
+- maximum step
+
+Preview layers
 
 ```text
-georeference:
-  status: UNBOUND
+Final trinary PGM
+Ground height
+Obstacle evidence
+Slope
+Step
 ```
 
-until explicit geographic calibration is performed
+The semi-transparent layer is aligned to the currently loaded PCD coordinates
 
-## Source voxel-history interpretation
+The editor intentionally does not apply `map_frame.yaml` to an untransformed source cloud behind the operator's back
 
-A sparse Workbench view is not evidence that the source PCD was voxel-downsampled
+A transformed immutable PCD revision will be materialized in the next increment; loading that product will make Navigation Map authoring naturally occur in the new map frame
 
-Reasons
+### Manual override contract
 
-- the GUI intentionally samples points for display
-- point size/background affect apparent density
-- a standalone PCD may not preserve processing lineage
+Manual repair is world-coordinate polygon metadata, not pixel painting
 
-Without `processing.yaml`, Recipe or other lineage evidence, prior voxel filtering shall not be asserted as fact
+```text
+FORCE_FREE
+FORCE_OCCUPIED
+UNKNOWN
+NO_GO
+```
 
-Future nearest-neighbor / point-spacing diagnostics may provide heuristic evidence but cannot replace provenance
+Therefore the repair can be replayed after changing map resolution
 
-## Updated acceptance gate
+### Exported evidence
+
+```text
+navigation_map.pgm
+navigation_map.yaml
+derivation.yaml
+ground_height.npy
+slope_deg.npy
+step_m.npy
+obstacle_count.npy
+ground_support_count.npy
+```
+
+## 5. Updated local acceptance gate
 
 Build
 
 ```bash
 source /opt/ros/humble/setup.bash
-colcon build --symlink-install --packages-select agt_map_workbench
+colcon build --symlink-install --packages-up-to agt_map_workbench
 source install/setup.bash
 ```
 
-Unit and repository tests
+Tests
 
 ```bash
 python3 -m pytest -q \
+  src/agt_offline_assets/test/test_navigation_map_derivation.py \
   src/agt_map_workbench/test/test_workbench_model.py \
   src/agt_map_workbench/test/test_frame_calibration.py \
   tests/test_v25_12c_map_workbench_contract.py
@@ -369,51 +274,39 @@ Launch
 ros2 run agt_map_workbench agt_map_workbench
 ```
 
+### GUI smoke
+
 Open
 
 ```text
 runtime/maps/green house full.pcd
 ```
 
-### Display acceptance
+Verify
 
-1. dark background improves boundary readability
-2. 150k / 300k / 600k display density changes Preview only
-3. source PCD count remains unchanged
-4. point-size control changes only rendering
-5. Z-window changes still update visible sample counts
-6. polygon editing and Recipe ordering remain correct
+1. coordinate labels stay near O/X/Y endpoints at different zoom levels
+2. changing Display Z does not alter completed X/Z fit evidence
+3. Origin/X-wall/Z-pillar each use their dedicated calibration Z range
+4. Navigation Map generation does not depend on Display Z
+5. switch Final/Ground/Obstacle/Slope/Step layers and verify overlays remain aligned with the loaded PCD
+6. inspect whether raised but smooth ground remains free instead of becoming occupied from absolute height alone
+7. draw one FORCE_FREE or FORCE_OCCUPIED polygon and verify it appears in the override list and final overlay
+8. export a new Navigation Map run and verify all PGM/YAML/evidence files exist
 
-### Map Frame Calibration smoke
+Do not promote V25-12C to PASS until these tests are run on the real full greenhouse PCD
 
-1. set a useful Z window for the structure being selected
-2. choose a physically meaningful origin
-3. verify the reported source XYZ is plausible
-4. choose an X wall start and end in the intended positive direction
-5. inspect X point count, RMS residual, linearity and direction
-6. choose a reliable vertical pillar center
-7. inspect Z point count, RMS residual, linearity and direction
-8. verify the solved frame reports an X/Z input angle close to the physical scene geometry
-9. verify +X/+Y preview matches the desired greenhouse convention
-10. use X/Z flip controls if the axis signs are wrong
-11. export `map_frame.yaml`
-12. confirm fitting selection evidence is present
-13. confirm `georeference.status == UNBOUND`
+## 6. Next increment
 
-V25-12C shall not be promoted to PASS until these updated tests and the real full-map calibration smoke are run locally
+Priority after this acceptance
 
-## Not yet frozen in this MVP
+```text
+map_frame.yaml
+    ↓
+materialize transformed PCD
+    ↓
+new immutable Map Revision
+    ↓
+Ground-relative Navigation Map in final map frame
+```
 
-- applying `map_frame.yaml` to materialize a new immutable transformed PCD/map revision
-- nearest-neighbor / point-spacing diagnostics
-- voxel/SOR/radius filter parameter widgets
-- fast non-formal processing preview
-- Recipe import/replay UI
-- semantic overlay
-- Localization Prior overlay
-- geographic control-point authoring
-- true free-rotation 3D renderer
-- derived Localization Map field-projection policy
-- automatic stable-structure classification
-
-These features may be added incrementally without bypassing V25-12B processing and Site Package lineage contracts
+Then continue with Localization Prior, Semantic Map, Route Preview and RTK georeference
