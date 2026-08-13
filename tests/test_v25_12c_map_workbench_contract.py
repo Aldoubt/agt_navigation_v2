@@ -80,10 +80,11 @@ def test_display_quality_controls_are_preview_only():
         "显示 15 万点",
         "显示 30 万点",
         "显示 60 万点",
-        "点大小 4px",
         "仅影响预览，不修改正式 PCD",
     ):
         assert token in app
+    assert "for size in (1, 2, 3, 4)" in app
+    assert 'f"点大小 {size}px"' in app
     assert 'set_background_mode("dark")' in view
     assert '"height", "intensity", "mono"' in view
     assert "setWidthF(self._point_size_px)" in view
