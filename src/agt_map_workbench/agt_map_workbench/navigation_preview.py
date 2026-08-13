@@ -30,9 +30,13 @@ def _rgba_for_result(result: NavigationMapResult, layer: str) -> np.ndarray:
             low = float(np.nanpercentile(values, 2.0))
             high = float(np.nanpercentile(values, 98.0))
             scale = max(1e-9, high - low)
-            t = np.clip((values - low) / scale, 0.0, 1.0)
+            t = np.clip(np.nan_to_num((values - low) / scale), 0.0, 1.0)
             rgba[..., 0] = np.where(finite, (40 + 160 * t).astype(np.uint8), 0)
-            rgba[..., 1] = np.where(finite, (110 + 120 * (1.0 - np.abs(t - 0.5) * 2.0)).astype(np.uint8), 0)
+            rgba[..., 1] = np.where(
+                finite,
+                (110 + 120 * (1.0 - np.abs(t - 0.5) * 2.0)).astype(np.uint8),
+                0,
+            )
             rgba[..., 2] = np.where(finite, (230 - 150 * t).astype(np.uint8), 0)
             rgba[..., 3] = np.where(finite, 120, 0).astype(np.uint8)
     elif layer == "obstacle":
