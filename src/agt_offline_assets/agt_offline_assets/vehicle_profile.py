@@ -32,17 +32,38 @@ class CanonicalVehicleProfile:
     navigation_footprint_xy: tuple[tuple[float, float], ...]
     navigation_width_m: float
     navigation_length_m: float
+    wheel_base_m: float | None
+    track_width_m: float | None
+    wheel_diameter_m: float | None
+    ground_clearance_m: float | None
     minimum_turning_radius_m: float
     minimum_turning_radius_verified: bool
+    maximum_steering_angle_rad: float | None
+    maximum_steering_angle_deg: float | None
     allow_in_place_rotation: bool
     max_forward_velocity_mps: float | None
     max_reverse_velocity_mps: float | None
     max_angular_velocity_rps: float | None
+    manufacturer_maximum_speed_mps: float | None
     route_acceptance_enabled: bool
+    preview_planning_enabled: bool
     blocked_reason: str
 
     @property
+    def planning_preview_ready(self) -> bool:
+        """Whether offline ordering/connector preview has enough kinematic truth."""
+        if not self.preview_planning_enabled:
+            return False
+        if self.kinematics == "ackermann":
+            if not self.minimum_turning_radius_verified:
+                return False
+            if self.minimum_turning_radius_m <= 0.0:
+                return False
+        return bool(self.navigation_footprint_xy)
+
+    @property
     def route_feasibility_ready(self) -> bool:
+        """Whether the profile may participate in formal vehicle-READY promotion."""
         if not self.route_acceptance_enabled:
             return False
         if self.kinematics == "ackermann" and not self.minimum_turning_radius_verified:
@@ -68,6 +89,15 @@ def _optional_nonnegative(value: Any) -> float | None:
         return None
     numeric = float(value)
     if not math.isfinite(numeric) or numeric < 0.0:
+        return None
+    return numeric
+
+
+def _optional_positive(value: Any) -> float | None:
+    if value is None:
+        return None
+    numeric = float(value)
+    if not math.isfinite(numeric) or numeric <= 0.0:
         return None
     return numeric
 
@@ -137,6 +167,22 @@ def load_canonical_vehicle_profile(path: str | Path) -> CanonicalVehicleProfile:
     )
     navigation_length, navigation_width = _polygon_extent(navigation_footprint)
 
+    wheel_base = _optional_positive(geometry.get("wheel_base") or geometry.get("wheelbase"))
+    track_width = _optional_positive(
+        geometry.get("track_width") or geometry.get("wheel_track") or geometry.get("effective_track_width")
+    )
+    wheel_diameter = _optional_positive(geometry.get("wheel_diameter"))
+    if wheel_diameter is None:
+        wheel_radius = _optional_positive(geometry.get("wheel_radius"))
+        wheel_diameter = None if wheel_radius is None else 2.0 * wheel_radius
+    ground_clearance = _optional_nonnegative(geometry.get("ground_clearance"))
+    steering_rad = _optional_positive(geometry.get("max_steering_angle_rad"))
+    steering_deg = _optional_positive(geometry.get("max_steering_angle_deg"))
+    if steering_rad is None and steering_deg is not None:
+        steering_rad = math.radians(steering_deg)
+    if steering_deg is None and steering_rad is not None:
+        steering_deg = math.degrees(steering_rad)
+
     coverage = platform.get("coverage_repair") or {}
     if not isinstance(coverage, Mapping):
         coverage = {}
@@ -165,14 +211,21 @@ def load_canonical_vehicle_profile(path: str | Path) -> CanonicalVehicleProfile:
         raise AssetContractError("vehicle_route_acceptance_invalid", "route_acceptance must be a mapping")
     if route_acceptance:
         acceptance_enabled = bool(route_acceptance.get("enabled", True))
+        preview_enabled = bool(route_acceptance.get("preview_planning_enabled", acceptance_enabled))
         blocked_reason = str(route_acceptance.get("blocked_reason", "")).strip()
     else:
         acceptance_enabled = True
+        preview_enabled = True
         blocked_reason = ""
     if kinematics == "ackermann" and not radius_verified:
         acceptance_enabled = False
+        preview_enabled = False
         if not blocked_reason:
             blocked_reason = "Ackermann minimum turning radius is not verified"
+
+    manufacturer_performance = platform.get("manufacturer_performance") or {}
+    if not isinstance(manufacturer_performance, Mapping):
+        manufacturer_performance = {}
 
     return CanonicalVehicleProfile(
         profile_id=profile_id,
@@ -187,13 +240,23 @@ def load_canonical_vehicle_profile(path: str | Path) -> CanonicalVehicleProfile:
         navigation_footprint_xy=navigation_footprint,
         navigation_width_m=navigation_width,
         navigation_length_m=navigation_length,
+        wheel_base_m=wheel_base,
+        track_width_m=track_width,
+        wheel_diameter_m=wheel_diameter,
+        ground_clearance_m=ground_clearance,
         minimum_turning_radius_m=radius,
         minimum_turning_radius_verified=radius_verified,
+        maximum_steering_angle_rad=steering_rad,
+        maximum_steering_angle_deg=steering_deg,
         allow_in_place_rotation=allow_in_place,
         max_forward_velocity_mps=_velocity(platform, limits, "max_forward_velocity", "max_linear_velocity"),
         max_reverse_velocity_mps=_velocity(platform, limits, "max_reverse_velocity"),
         max_angular_velocity_rps=_velocity(platform, limits, "max_angular_velocity"),
+        manufacturer_maximum_speed_mps=_optional_nonnegative(
+            manufacturer_performance.get("maximum_speed_mps")
+        ),
         route_acceptance_enabled=acceptance_enabled,
+        preview_planning_enabled=preview_enabled,
         blocked_reason=blocked_reason,
     )
 
@@ -206,9 +269,16 @@ def vehicle_profile_to_route_binding(profile: CanonicalVehicleProfile) -> dict[s
         "kinematics": profile.kinematics,
         "navigation_footprint": [list(vertex) for vertex in profile.navigation_footprint_xy],
         "navigation_width_m": profile.navigation_width_m,
+        "navigation_length_m": profile.navigation_length_m,
+        "wheel_base_m": profile.wheel_base_m,
+        "track_width_m": profile.track_width_m,
+        "wheel_diameter_m": profile.wheel_diameter_m,
+        "ground_clearance_m": profile.ground_clearance_m,
         "minimum_turning_radius_m": profile.minimum_turning_radius_m,
         "minimum_turning_radius_verified": profile.minimum_turning_radius_verified,
+        "maximum_steering_angle_rad": profile.maximum_steering_angle_rad,
         "allow_in_place_rotation": profile.allow_in_place_rotation,
+        "preview_planning_ready": profile.planning_preview_ready,
         "route_feasibility_ready": profile.route_feasibility_ready,
         "blocked_reason": profile.blocked_reason,
     }
