@@ -70,6 +70,7 @@ flowchart LR
   REQUEST["Connector Requests\nLOW_U / HIGH_U"]
   FWD["Forward-first\nAnalytic Dubins → Dubins-CC"]
   FIT["Turn-Zone Fit Diagnostic\noutward / inward / lateral deficit"]
+  REFINE["Turn-Zone Refinement Proposal\ngeometry + frozen Navigation Grid evidence"]
   REV["Reverse fallback\nReeds-Shepp / RS-CC"]
   SMAC["Search fallback\nSmac Hybrid / State Lattice"]
   SWEEP["Full-footprint + kinematic\nswept validation"]
@@ -88,8 +89,10 @@ flowchart LR
   ORDER --> REQUEST
   REQUEST --> FWD
   FWD -->|Turn Zone reject| FIT
-  FIT -->|modest expansion physically available| TURN
-  FIT -->|headland insufficient| REV
+  FIT --> REFINE
+  NAV --> REFINE
+  REFINE -->|FREE evidence + operator approval| TURN
+  REFINE -->|OCCUPIED / UNKNOWN / insufficient headland| REV
   FWD -->|centerline accepted| SWEEP
   REV -->|infeasible| SMAC
   REV --> SWEEP
@@ -105,14 +108,15 @@ flowchart LR
 核心语义
 
 ```text
-Aisle Graph          决定“有哪些结构化道路”
-Coverage Ordering    决定“这台车能走哪些道路、以什么顺序访问”
-Connector Request    决定“下一对道路需要在哪一侧连接”
-Connector Planner    决定“怎样满足运动学连接”
-Zone-Fit Diagnostic  决定“forward 失败是 envelope 太小还是 headland 真不足”
-Navigation Map       决定“几何上是否安全”
-Vehicle Profile      决定“这台车是否真的能通过/转过去”
-Route Asset          冻结最终可执行离线路线
+Aisle Graph             决定“有哪些结构化道路”
+Coverage Ordering       决定“这台车能走哪些道路、以什么顺序访问”
+Connector Request       决定“下一对道路需要在哪一侧连接”
+Connector Planner       决定“怎样满足运动学连接”
+Zone-Fit Diagnostic     决定“当前 envelope 还缺多少几何空间”
+Turn-Zone Refinement    决定“缺失空间是否得到冻结 Navigation Map 证据支持”
+Navigation Map          决定“静态几何证据上是否存在 FREE/OCCUPIED/UNKNOWN”
+Vehicle Profile         决定“这台车是否真的能通过/转过去”
+Route Asset             冻结最终可执行离线路线
 ```
 
 ## 4. Navigation Map 与 Aisle Graph 分工
@@ -125,6 +129,10 @@ navigation_map.yaml
 ```
 
 负责 Occupied / Free / Unknown、footprint collision、clearance、Nav2 static/global costmap 和 connector fallback search 的安全约束
+
+V25-12E 还允许通过轻量 `NavigationGridEvidence` 重新读取冻结 PGM/YAML，在不重跑 PCD 的前提下检查 Turn Zone 新增区域的 FREE/OCCUPIED/UNKNOWN 证据
+
+这仍然只是静态栅格 evidence，不替代最终 full-footprint swept validation
 
 Aisle Graph
 
@@ -150,6 +158,19 @@ Turn Zone 是 connector search envelope，不是 FREE-space truth
 首版自动派生 `turn_low_u` / `turn_high_u`，后续允许 Workbench operator 修订
 
 自动 Turn Zone 参数不是车辆事实，也不是固定场景真值；R5 zone-fit diagnostic 可以证明某个 envelope 过小，但扩大 Turn Zone 前仍必须和 Navigation Map / 真实 headland 空间核对
+
+Turn Zone 修订使用独立 DRAFT proposal
+
+```text
+turn_zone_refinement_proposal.yaml
+schema: agt_turn_zone_refinement_proposal/v1
+```
+
+它聚合共享 LOW_U/HIGH_U zone 中每个 connector 的最小 outward / inward / lateral deficit，并记录是哪一个 connector 驱动该方向的最大扩张
+
+当提供冻结 Navigation Map 时，只统计 `proposed_polygon - current_polygon` 新增区域中的 FREE/OCCUPIED/UNKNOWN，不用原有 Turn Zone 大面积内容稀释扩张风险
+
+proposal 不是 drive permission，也不会原地覆盖 `turn_zones.yaml`
 
 ## 6. Vehicle Profile 是唯一车辆几何真值
 
@@ -311,9 +332,22 @@ formal Route READY
 
 ### 8.1 Forward Turn-Zone fit diagnostic
 
-真实温室首轮 R5 出现 17/17 `NO_FORWARD_DUBINS_IN_TURN_ZONE`，但每个 connector 都存在 4~5 个 analytic Dubins candidate，且最佳 inside fraction 约在 0.519~0.907
+真实温室首轮 R5 出现 17/17 `NO_FORWARD_DUBINS_IN_TURN_ZONE`，但每个 connector 都存在 4~5 个 analytic Dubins candidate
 
-这不能直接解释成“必须倒车”
+后续真实 zone-fit 诊断表明 17/17 都需要扩张；绝大多数由 outward 缺口主导，整体最大单轴缺口中位数约 `0.470 m`，90th percentile 约 `0.686 m`
+
+关键异常
+
+```text
+connector_001  HIGH_U  outward 0.677 m + lateral-low 0.277 m
+connector_016  LOW_U   outward 0.361 m + inward 0.846 m
+```
+
+完整实测记录见
+
+```text
+docs/experiments/v25_12e_r5_turn_zone_fit_20260814.md
+```
 
 新增独立 schema
 
@@ -331,23 +365,45 @@ required_lateral_high_extension_m
 max_required_extension_m
 ```
 
-对于当前矩形 `AUTO_ENDPOINT_ENVELOPE` Turn Zone，这些是精确的 row-frame bounding-envelope deficit
+### 8.2 Evidence-gated Turn Zone refinement
 
-对于未来任意/凹多边形，它们只是 bounding-envelope diagnostic，不能替代 polygon containment
+不能根据 deficit 直接扩大 Turn Zone
 
-决策规则
+新增
 
 ```text
-如果所需扩张很小
-+ Navigation Map / 真实棚头确有对应 FREE 空间
-→ 修订 Turn Zone
-→ 重跑 R5
-
-如果所需扩张很大
-或扩张区域实际是墙 / 垄 / UNKNOWN / 不可用空间
-→ forward-only 物理不可接受
-→ 将该 connector 送入 R6 reverse fallback
+NavigationGridEvidence
+agt_turn_zone_refinement_proposal/v1
 ```
+
+流程
+
+```text
+frozen turn_zones.yaml
++ frozen forward_connector_zone_fit.yaml
++ frozen navigation_map.pgm/yaml
+        ↓
+aggregate per-zone required expansion
+        ↓
+add explicit discretization/operator margin
+        ↓
+measure only newly added cells
+        ↓
+FREE / OCCUPIED / UNKNOWN / grid coverage
+        ↓
+EVIDENCE_SUPPORTS_EXPANSION
+or REVIEW_REQUIRED_*
+```
+
+默认 evidence gate 是保守 preview gate，不是最终车辆安全结论
+
+只有 evidence-supported + operator-approved proposal 才允许生成 revised DRAFT Turn Zones 并重新进入 R5
+
+对于 `connector_016` 这类 inward deficit 明显异常的情况，必须保留 driving-connector identity，不允许被一个全局 outward 常数修改隐藏
+
+如果所需扩张很小且真实棚头确有对应 FREE 空间，则修订 Turn Zone 并重跑 R5
+
+如果所需扩张很大，或新增区域实际是墙 / 垄 / UNKNOWN / 地图外空间，则该 connector 才进入 R6 reverse fallback
 
 是否允许 reverse 由 Route Policy 联合 canonical Vehicle Profile 决定
 
@@ -380,6 +436,7 @@ Ground Surface
 Row Structural Band
 Aisle Graph
 Turn Zones
+Turn Zone refinement proposal
 ordered aisle traversal
 connector candidates
 Forward / Reverse motion
@@ -394,7 +451,7 @@ R1  Aisle Graph deterministic export
 R2  Turn Zone derivation / authoring / export
 R3  Canonical Vehicle Profile adapter
 R4  Vehicle-aware deterministic boustrophedon ordering
-R5  Forward connector backend + Turn-Zone fit diagnostic
+R5  Forward connector + zone-fit diagnostic + evidence-gated Turn Zone refinement
 R6  Reverse fallback backend
 R7  Smac search fallback adapter
 R8  Swept-footprint / kinematic feasibility
@@ -409,12 +466,12 @@ V25-12C Ground / Row / Aisle / 3D Review
   REAL-DATA OPERATOR REVIEW POSITIVE
 
 R1 Aisle Graph
-  IMPLEMENTED; GREENHOUSE REAL-DATA ACCEPTED; AUTOMATED GATE TO CONFIRM AFTER DOC FIX
+  IMPLEMENTED; GREENHOUSE REAL-DATA ACCEPTED; AUTOMATED GATE TO CONFIRM
 
 R2 Turn Zones
   IMPLEMENTED CORE
   REAL ASSET GENERATED
-  envelope geometry under R5 diagnostic
+  envelope geometry under R5 evidence-gated refinement
 
 R3 Canonical Vehicle Profile
   IMPLEMENTED CORE
@@ -429,9 +486,11 @@ R4 Coverage Ordering
 
 R5 Forward Connector
   IMPLEMENTED CORE
-  real greenhouse: 0/17 fit current Turn Zones
+  real greenhouse: 0/17 fit original Turn Zones
   17/17 have analytic Dubins candidates
-  Turn-Zone fit diagnostic IMPLEMENTED / LOCAL GATE PENDING
+  real zone-fit diagnostic RECORDED
+  frozen Navigation Grid loader IMPLEMENTED
+  evidence-gated Turn Zone refinement proposal IMPLEMENTED / LOCAL GATE PENDING
 
 R6+ reverse/search/swept feasibility/final Route Asset
   NOT YET CLAIMED IMPLEMENTED
