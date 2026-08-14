@@ -87,6 +87,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_reverse_fallback_admission test/test_reverse_fallback_admission.py
   )
+  ament_add_pytest_test(
+    test_reverse_primitive_connector test/test_reverse_primitive_connector.py
+  )
 endif()
 
 ament_package()
