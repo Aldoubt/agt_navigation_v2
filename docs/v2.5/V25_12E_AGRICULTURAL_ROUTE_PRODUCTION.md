@@ -1,6 +1,6 @@
 # V25-12E Agricultural Route Production
 
-Status: STARTED — R1 IMPLEMENTED / LOCAL ACCEPTANCE PENDING
+Status: STARTED — R1 REAL-DATA ACCEPTED / AUTOMATED GATE PENDING; R2-R3 IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
 
 Date: 2026-08-14
 
@@ -26,7 +26,7 @@ Robust local-plane slope        usable
 Hybrid Row Skeleton             usable
 Row Structural Band             usable
 Interior Aisle                  usable
-Boundary Aisle                  implemented / local review ongoing
+Boundary Aisle                  usable in current greenhouse review
 Aisle Centerline                usable
 Vehicle Corridor                reacts to vehicle width as expected
 2D / 3D Review                  usable
@@ -90,13 +90,23 @@ aisle_graph.yaml
 
 职责：结构化道路 identity、centerline XYZ、宽度、endpoint、相邻结构、诊断证据
 
+`aisle_count` 是实际导出的 aisle 数量
+
+`aisle_id` 绑定 corridor diagnostic pair index，因此允许存在稳定 ID 缺口，例如 19 条有效 aisle 中最后一个 ID 为 `aisle_020`
+
+这不是计数错误，而是为了避免某一个前序 aisle 失效后其余 identity 集体漂移
+
 ### Turn Zones
 
 ```text
 turn_zones.yaml
 ```
 
-职责：限制允许调头、倒车和方向切换的空间区域
+职责：限制 connector 允许搜索、调头、倒车和方向切换的区域
+
+Turn Zone 是 search envelope，不是 FREE-space truth
+
+所有 connector 仍必须重新通过 Navigation Map + full-footprint feasibility
 
 ### Vehicle Profile
 
@@ -107,6 +117,8 @@ profiles/platforms/<platform>.yaml
 ```
 
 Workbench 输入的临时车宽只用于 Review
+
+Ackermann 未验证 minimum turning radius 时必须 fail-closed
 
 ### Route Asset
 
@@ -146,11 +158,93 @@ Smac Hybrid-A* / State Lattice search fallback
 
 每个 candidate 都必须再过 full-footprint / occupancy / semantic / turn-zone / kinematic gate
 
-## 6. Implementation ledger
+## 6. Real greenhouse R1 acceptance record
+
+Operator export from the current greenhouse `processed.pcd`
+
+```text
+schema                    agt_agricultural_aisle_graph/v1
+status                    DRAFT
+frame                     map
+navigation resolution     0.10 m
+corridor pair count       20
+aisle count               19
+row direction             [0.963456, 0.267866]
+nominal row spacing       1.797185 m
+```
+
+Representative interior aisle
+
+```text
+aisle_001
+kind                      interior
+pair                      ROW_ROW
+left/right                row_01 / row_02
+length                    27.458922 m
+geometric width           1.057342 m
+minimum derivation width  0.45 m
+longitudinal overlap      25.083555 m
+centerline cells          225
+status                    ACCEPTED
+```
+
+Representative boundary aisle
+
+```text
+aisle_020
+kind                      boundary
+pair                      BOUNDARY_HIGH
+left/right                row_20 / boundary_high
+length                    25.136239 m
+geometric width           1.456873 m
+minimum derivation width  0.45 m
+longitudinal overlap      23.873834 m
+centerline cells          250
+status                    ACCEPTED
+```
+
+Operator confirms exported channel count matches the Workbench channel review
+
+The XYZ ground heights and start/end poses are plausible against the current 2D/3D review
+
+R1 real-data acceptance is therefore PASS
+
+The final R1 stage status remains pending until the automated regression command is explicitly confirmed PASS
+
+### Important centerline semantics
+
+The exported `centerline_xyz` is structural route evidence, not final controller path
+
+The greenhouse example contains occasional larger longitudinal sample gaps / lateral steps caused by grid evidence discontinuities
+
+Therefore the downstream Route stage must perform deterministic longitudinal regularization/smoothing and full-footprint validation before generating a controller-consumable Runtime Path
+
+## 7. Canonical BUNKER implication
+
+Current canonical BUNKER profile records
+
+```text
+physical width             0.778 m
+navigation footprint width 0.938 m
+kinematics                 tracked_differential
+```
+
+For representative `aisle_001`
+
+```text
+1.057342 - 0.938 ≈ 0.119 m total navigation-footprint surplus
+≈ 0.060 m per side before any additional route-policy clearance
+```
+
+Therefore Workbench temporary width settings must not be used as formal route acceptance
+
+R3 canonical vehicle-profile binding is required before route ordering/connection is promoted
+
+## 8. Implementation ledger
 
 ### R1 — Aisle Graph deterministic export
 
-Status: IMPLEMENTED / LOCAL ACCEPTANCE PENDING
+Status: IMPLEMENTED / REAL-DATA ACCEPTANCE PASS / AUTOMATED GATE PENDING
 
 Implemented
 
@@ -168,34 +262,52 @@ agt_agricultural_aisle_graph/v1
 status: DRAFT
 ```
 
-Current behavior
+### R2 — Turn Zone candidate derivation/export core
 
-- Interior aisle 与 Boundary aisle identity 可区分
-- accepted corridor centerline 从 grid evidence 恢复为 ordered XYZ polyline
-- polyline 沿 Hybrid Row 正向 `u` 确定性排序
-- start/end pose 使用相同 row-direction yaw
-- aisle identity 绑定 corridor diagnostic pair index，避免前序 aisle 状态变化导致整体重编号
-- width / length / longitudinal overlap / safe-cell / centerline-cell evidence 进入 YAML
-- 同一输入按固定 rounding / sampling 生成 deterministic output
-- Workbench 导出不写入用户 workspace 绝对路径
-- Aisle Graph 明确保持 DRAFT，不修改 Navigation Map、Corridor evidence 或 READY Route Asset
+Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
 
-Local acceptance still required
+Implemented
 
-- unit/repository tests PASS
-- 在真实 greenhouse `processed.pcd` 上导出 YAML
-- 对照 2D / 3D aisle centerline 检查 aisle 数量、Boundary aisle、start/end、XYZ 高度
-- 检查 DRAFT YAML 后再进入 R2/R3
+```text
+src/agt_offline_assets/agt_offline_assets/turn_zones.py
+src/agt_offline_assets/test/test_turn_zones.py
+tests/test_v25_12e_turn_zone_vehicle_profile_contract.py
+```
 
-### R2 — Turn Zone authoring/export
+Schema
 
-Status: NOT STARTED
+```text
+agt_turn_zones/v1
+status: DRAFT
+```
+
+Current baseline derives deterministic LOW_U / HIGH_U endpoint envelopes
+
+They are explicitly labeled `SEARCH_ENVELOPE_NOT_FREE_SPACE_TRUTH`
+
+Manual polygon authoring / Workbench overlay is still pending
 
 ### R3 — Canonical Vehicle Profile adapter
 
-Status: NOT STARTED
+Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
 
-只读取 `profiles/platforms/<platform>.yaml`，不复制 vehicle truth
+Implemented
+
+```text
+src/agt_offline_assets/agt_offline_assets/vehicle_profile.py
+src/agt_offline_assets/test/test_vehicle_profile.py
+tests/test_v25_12e_turn_zone_vehicle_profile_contract.py
+```
+
+Current behavior
+
+- reads existing canonical platform YAML
+- hashes exact profile file
+- uses navigation footprint when present
+- normalizes route-relevant kinematics/velocity fields
+- tracked/differential zero-radius rotation is represented explicitly
+- Ackermann route acceptance fails closed until positive minimum turning radius is verified
+- does not create a second vehicle geometry YAML
 
 ### R4 — Coverage ordering
 
@@ -229,7 +341,7 @@ Status: FOUNDATION EXISTS, NEW AGRICULTURAL INPUT NOT WIRED
 
 Status: 3D REVIEW SUBSTRATE EXISTS, ROUTE OVERLAY NOT WIRED
 
-## 7. Continuity rule
+## 9. Continuity rule
 
 每完成一个 R increment 必须同时
 
@@ -239,12 +351,12 @@ Status: 3D REVIEW SUBSTRATE EXISTS, ROUTE OVERLAY NOT WIRED
 4. 明确 `IMPLEMENTED`、`LOCAL ACCEPTANCE PENDING`、`PASS` 三种状态，不提前宣称
 5. 记录 operator real-data review 的结论与剩余问题
 
-## 8. Current next action
+## 10. Current next action
 
 ```text
-Local pytest for R1
-→ Workbench real greenhouse aisle_graph.yaml export
-→ inspect aisle count / boundary aisles / XYZ / start-end poses
-→ mark R1 PASS only after operator review
-→ start R2 Turn Zone + R3 Vehicle Profile adapter
+Run R1/R2/R3 automated tests
+→ inspect canonical bunker adapter output
+→ derive greenhouse turn_zones.yaml
+→ add Workbench Turn Zone overlay/authoring if candidate envelopes look reasonable
+→ then start R4 deterministic coverage ordering
 ```
