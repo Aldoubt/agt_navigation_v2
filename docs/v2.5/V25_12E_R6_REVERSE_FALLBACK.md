@@ -1,14 +1,14 @@
 # V25-12E R6 Reverse Fallback
 
-Status: R6A REAL-DATA PASS; R6B BOUNDED REVERSE PRIMITIVE CORE IMPLEMENTED / LOCAL ACCEPTANCE PENDING
+Status: R6A REAL-DATA PASS; R6B CORE IMPLEMENTED; SAFE CONNECTOR ANCHOR RETEST PENDING
 
 Date: 2026-08-14
 
 This file is the focused continuation ledger for reverse-aware agricultural
 connector planning. Read it together with:
 
-- `docs/v2.5/V25_12E_AGRICULTURAL_ROUTE_PRODUCTION.md`
-- `docs/architecture/agricultural_route_production.md`
+- `docs/v2.5/V25_12E_CURRENT_STATE.md`
+- `docs/architecture/agricultural_route_r6_reverse_fallback.md`
 - `docs/experiments/v25_12e_r5_6_forward_candidate_audit_20260814.md`
 - `profiles/platforms/mk_mini.yaml`
 
@@ -34,16 +34,6 @@ Schema:
 agt_reverse_fallback_admission/v1
 ```
 
-Purpose:
-
-```text
-R5.6 candidate audit
-        ↓
-explicit evidence-policy gate
-        ↓
-R6B input connector IDs
-```
-
 Default decisions:
 
 ```text
@@ -61,17 +51,7 @@ FORWARD_PREVIEW_FREE
 → KEEP_FORWARD
 ```
 
-R6A does not generate a path and cannot promote Route READY
-
-Current implementation:
-
-```text
-src/agt_offline_assets/agt_offline_assets/reverse_fallback_admission.py
-src/agt_offline_assets/agt_offline_assets/reverse_route_io.py
-src/agt_offline_assets/test/test_reverse_fallback_admission.py
-```
-
-Real greenhouse operator acceptance:
+Real greenhouse acceptance:
 
 ```text
 connector count             17
@@ -81,7 +61,7 @@ hold mixed evidence          3
 keep forward                 0
 ```
 
-Frozen automatically admitted IDs:
+Automatically admitted IDs:
 
 ```text
 connector_002
@@ -110,122 +90,168 @@ connector_013 → HOLD_MIXED_EVIDENCE
 
 R6A real-data acceptance PASS
 
-## 3. R6B — Bounded Reverse-aware Connector Planner
+## 3. R6B backend boundary
 
-Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
+Long-term policy wording remains:
 
-Current backend identity:
+```text
+Reeds-Shepp / reverse-aware local connector
+        ↓ fail
+Smac Hybrid-A* / State Lattice
+```
+
+Current implemented backend is deliberately named:
 
 ```text
 BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP
 ```
 
-Schema:
+It is not analytic Reeds-Shepp. It is a bounded local primitive search over one
+already-known aisle pair
 
-```text
-agt_reverse_primitive_connector_plan/v1
-```
-
-Implementation:
-
-```text
-src/agt_offline_assets/agt_offline_assets/reverse_primitive_connector.py
-src/agt_offline_assets/test/test_reverse_primitive_connector.py
-```
-
-R6B consumes only connector IDs admitted by R6A
-
-Current local primitive model:
+Current model:
 
 ```text
 canonical MK-mini Rmin = 1.5 m
 curvature primitives    = {-1/R, 0, +1/R}
 motion direction        = FORWARD or REVERSE
-explicit zero-distance cusp action
+explicit cusp action
 max cusps default       = 2
 primary maneuver family = F → R → F
 ```
 
-The search is bounded in the Agricultural Aisle Graph row frame:
+Every motion sample is checked against the frozen Navigation Grid using the
+canonical MK-mini preview navigation footprint. `OCCUPIED`, `UNKNOWN`, and
+out-of-grid evidence fail closed
+
+## 4. First real R6B smoke
+
+Input:
 
 ```text
-longitudinal extent = requested Turn Zone extent + small explicit padding
-lateral extent      = current from/to aisle pair + small explicit padding
+13 R6A-admitted connectors
 ```
 
-It does not search the whole map
-
-Every motion sample is checked against:
+Observed:
 
 ```text
-frozen Navigation Grid
-+ canonical MK-mini preview navigation footprint
-+ 0.05 m default preview footprint padding
+1  REVERSE_PRIMITIVE_PREVIEW_FREE
+11 R6B_START_FOOTPRINT_NOT_FREE
+1  NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION
 ```
 
-`OCCUPIED`, `UNKNOWN`, and out-of-grid footprint evidence all fail closed
-
-Output samples explicitly contain:
+Solved baseline:
 
 ```text
-x / y / z / yaw
-motion_direction = FORWARD | REVERSE
-curvature_per_m
-segment_index
-is_cusp
+connector_015
+motion             FORWARD → REVERSE → FORWARD
+cusps              2
+path length        4.499 m
+forward distance   3.899 m
+reverse distance   0.600 m
+search expansions  1490
+goal error         0.154 m / 8.11 deg
+footprint          FREE=1.000 OCCUPIED=0 UNKNOWN=0 coverage=1.000
 ```
 
-The current `z` value is only linear start/end interpolation for review; R6B is a planar route connector planner
+Unsolved-after-search baseline:
 
-R6B requirements remain:
+```text
+connector_017
+NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION
+search expansions 67
+```
 
-1. respect canonical MK-mini `Rmin=1.5 m`
-2. permit true `motion_direction=REVERSE` only inside connector segments
-3. preserve forward aisle traversal semantics
-4. evaluate each candidate against frozen Navigation Grid evidence
-5. use canonical MK-mini preview navigation footprint
-6. keep UNKNOWN fail-closed
-7. never modify Navigation Map occupancy
-8. remain preview evidence until the physical `base_footprint` reference is measured
-9. expose direction-change / cusp poses explicitly
-10. output deterministic path samples suitable for later 2D/3D review
+The other eleven connectors did not enter search at all because the preview
+footprint was not FREE at the raw ConnectorRequest start pose
 
-## 4. R6B design boundary
+## 5. Root cause: raw aisle endpoint is not a vehicle-safe anchor
 
-Do not collapse R6B into R7
+R4 currently forms ConnectorRequest poses directly from Aisle Graph endpoint
+poses
+
+```text
+Aisle Graph raw endpoint
+≠ guaranteed vehicle-safe connector anchor
+```
+
+The Aisle Graph endpoint is structural centerline evidence. It was never a
+contract that placing the full 0.84 x 0.60 m MK-mini preview footprint exactly
+at the extreme centerline cell remains FREE
+
+Therefore the R6B start-footprint gate is kept strict. We do not relax occupancy
+or footprint checks
+
+## 6. Safe Connector Anchor Preparation
+
+New schema:
+
+```text
+agt_connector_anchor_plan/v1
+```
+
+Implementation:
+
+```text
+src/agt_offline_assets/agt_offline_assets/connector_anchors.py
+src/agt_offline_assets/test/test_connector_anchors.py
+```
+
+Policy:
+
+```text
+raw start/goal endpoint
+↓
+walk inward on that same aisle centerline
+↓
+find nearest pose where MK-mini preview footprint is stably FREE
+↓
+freeze retreat distance + adjusted pose
+↓
+adjust ConnectorRequest only
+```
+
+The default stable-free check also verifies a short inward span rather than one
+isolated FREE pose
+
+Important boundary:
+
+```text
+Aisle Graph is immutable evidence
+Navigation Map occupancy is immutable evidence
+Connector Anchor is a derived route-production asset
+```
+
+Later Route assembly must trim each aisle traversal to the selected safe anchor;
+it must not drive through an unsafe raw endpoint and then start the connector
+
+## 7. R6B / R7 / R8 boundary
 
 ```text
 R6B
-= bounded reverse-aware connector solution for an already-known aisle pair
-= finite local primitive search
-= max cusp / path length / expansion budget
+= safe-anchor-adjusted bounded reverse-aware connector solution
 
 R7
-= general search fallback when local connector families cannot solve the pair
-= Smac Hybrid-A* / State Lattice class backend
+= general search fallback for connectors that remain unsolved after valid safe anchors
+
+R8
+= formal vehicle footprint / kinematic feasibility and Route READY gate
 ```
 
-The preferred long-term analytic backend may still be Reeds-Shepp / RS-CC, but
-the current R6B implementation must never be called analytic Reeds-Shepp
+A connector that has no stable FREE anchor within the bounded inward-retreat
+limit is held for anchor/map review. It is not handed to R7 unchanged
 
-Target fallback policy remains:
+R6B remains preview-only until the real vehicle `base_footprint` reference and
+final mounted envelope are physically measured
 
-```text
-R6B bounded reverse primitive
-        ↓ fail
-R7 Smac Hybrid-A* / State Lattice
-```
-
-## 5. Current next action
+## 8. Current next action
 
 ```text
-local pytest for R6A + R6B
-→ load frozen reverse_fallback_admission.yaml
-→ run only the 13 admitted connector IDs
-→ inspect solved / unsolved count
-→ inspect path length / reverse distance / cusp count / search expansions
-→ verify preview footprint OCCUPIED=0 / UNKNOWN=0 on every solved path
-→ inspect whether any connector hits search budget
-→ freeze R6B real-data result
-→ send only unsolved connectors to R7
+local pytest connector-anchor + R6 contracts
+→ derive connector_anchors.yaml for the 13 admitted connectors
+→ inspect start/goal retreat distances
+→ apply only READY anchors to ConnectorRequests
+→ rerun R6B
+→ preserve connector_015 as a solved regression baseline
+→ only valid-anchor unsolved connectors may move to R7
 ```
