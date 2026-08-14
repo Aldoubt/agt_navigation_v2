@@ -68,6 +68,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_agricultural_route_io test/test_agricultural_route_io.py
   )
+  ament_add_pytest_test(
+    test_forward_connector test/test_forward_connector.py
+  )
 endif()
 
 ament_package()
