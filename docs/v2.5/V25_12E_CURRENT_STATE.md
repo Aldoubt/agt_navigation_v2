@@ -114,52 +114,115 @@ NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION
 
 The eleven start-footprint failures did not enter search
 
-## Connector anchor finding
+## Safe Connector Anchor smoke
 
-Root cause:
+The first anchor strategy walked inward only on the existing structural aisle
+centerline for at most 1.50 m and required 0.30 m of stable preview-footprint
+FREE support
+
+Real greenhouse result:
 
 ```text
-R4 ConnectorRequest
-currently uses raw Aisle Graph endpoint pose
+13 admitted connectors
+2  READY_FOR_LOCAL_CONNECTOR
+11 HOLD_ANCHOR_REVIEW
+```
 
-but
+READY:
 
-raw structural centerline endpoint
-!= guaranteed full-vehicle-safe connector anchor
+```text
+connector_015
+connector_017
+```
+
+Notable partial result:
+
+```text
+connector_014 start retreat 0.650 m
+but goal had no stable FREE anchor within the bounded limit
+```
+
+Some raw poses were individually FREE (`connector_006` goal and
+`connector_010` goal) but failed the stable inward-span requirement
+
+This proves that increasing the retreat limit alone is not the correct repair
+
+## Root cause now frozen
+
+```text
+Aisle Graph structural safe evidence
+!= Navigation Map FREE configuration space
+```
+
+`navigation_corridor.safe_common` does not require
+`navigation.occupancy == FREE`
+
+The final Navigation Map additionally includes obstacle padding and geometry-bad
+cells, and FREE also requires sufficient ground support
+
+Therefore:
+
+```text
+raw structural aisle centerline
+!= guaranteed MK-mini vehicle-pose-free route lane
 ```
 
 Do not relax R6B occupancy / footprint gates
 
+## Vehicle-Safe Aisle Lane
+
 New derived asset:
 
 ```text
-connector_anchors.yaml
-schema agt_connector_anchor_plan/v1
+vehicle_safe_aisles.yaml
+schema agt_vehicle_safe_aisle_lane/v1
 ```
 
 Implementation:
 
 ```text
-src/agt_offline_assets/agt_offline_assets/connector_anchors.py
-src/agt_offline_assets/test/test_connector_anchors.py
+src/agt_offline_assets/agt_offline_assets/vehicle_safe_lane.py
+src/agt_offline_assets/test/test_vehicle_safe_lane.py
 ```
 
 Policy:
 
 ```text
-R6A admitted connector only
-raw endpoint
-→ walk inward on the same aisle centerline
-→ nearest stable MK-mini preview-footprint FREE pose
-→ freeze retreat distance
-→ adjusted ConnectorRequest
-→ R6B
+immutable Aisle Graph structural centerline
++ frozen Navigation Grid
++ canonical MK-mini preview footprint
+        ↓
+resample structural aisle
+        ↓
+bounded lateral search in row frame
+        ↓
+preview footprint must be fully FREE
+        ↓
+bounded lateral continuity
+        ↓
+longest continuous vehicle-safe lane segment
 ```
+
+The lane records:
+
+```text
+coverage fraction
+LOW_U retreat
+HIGH_U retreat
+allowed lateral shift
+maximum used lateral shift
+continuous lane centerline
+```
+
+The allowed lateral shift is conservatively bounded by both configuration and
+vehicle-width surplus inside the aisle
+
+No lateral teleport is allowed: if adjacent samples would require a lateral
+jump above the configured limit, the lane segment is explicitly broken
 
 Aisle Graph and Navigation Map remain immutable evidence
 
-Later Route assembly must trim aisle traversal to the selected connector anchor
-rather than driving through the unsafe raw endpoint tail
+This layer is still PREVIEW_ONLY_NOT_R8_VEHICLE_READY
 
 ## Current architecture boundary
 
@@ -168,27 +231,29 @@ R5.6 Forward Candidate Audit
 ↓
 R6A Admission 13 / 1 / 3 / 0
 ↓
-Safe Connector Anchor Preparation
+Vehicle-Safe Aisle Lane
+↓
+Vehicle-safe Connector Anchors
 ↓
 R6B bounded local F/R/F primitive search
 ├─ solved → later R8
-└─ valid-anchor unsolved → R7 Smac Hybrid-A* / State Lattice
+└─ valid-lane / valid-anchor unsolved → R7 Smac Hybrid-A* / State Lattice
 ```
 
-Held R6A connectors still do not enter anchor preparation or R6B automatically
-
-R6B remains preview-only because the real `base_footprint` reference / final mounted envelope are not yet physically measured
+Held R6A connectors still do not enter R6B automatically
 
 ## Next gate
 
 ```text
-1. local pytest connector anchor + R6 contracts
-2. derive connector_anchors.yaml from aisle_graph.yaml + R6A admission
-3. inspect start/goal retreat distances for all 13 admitted connectors
-4. apply READY anchor-adjusted ConnectorRequests
-5. rerun R6B
-6. preserve connector_015 regression
-7. only valid-anchor unsolved connectors may move to R7
+1. local pytest vehicle-safe lane + R6 contracts
+2. derive vehicle_safe_aisles.yaml from frozen aisle_graph.yaml + navigation_map.yaml + mk_mini.yaml
+3. inspect READY / PARTIAL / UNAVAILABLE aisle counts
+4. inspect coverage / LOW_U retreat / HIGH_U retreat / lateral shift for all aisles
+5. only after real-data lane review, wire connector anchors to the vehicle-safe lane
+6. rerun the 13 R6A-admitted connectors
+7. preserve connector_015 as the solved R6B regression baseline
+8. only valid-lane / valid-anchor unsolved connectors may move to R7
 ```
 
-Do not reopen Ground / Row / Aisle tuning unless a new real-data failure directly points back to those layers
+Do not reopen Ground / Row tuning unless the new vehicle-safe lane evidence shows
+that the Navigation Map / corridor contracts themselves require upstream changes
