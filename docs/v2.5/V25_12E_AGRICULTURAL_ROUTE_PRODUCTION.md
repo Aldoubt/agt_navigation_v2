@@ -248,7 +248,7 @@ Every candidate must pass full-footprint / occupancy / semantic / turn-zone / ki
 
 ## 8. Implementation ledger
 
-### R1 — Aisle Graph
+### R1 — Aisle Graph deterministic export
 
 Status: IMPLEMENTED / REAL-DATA ACCEPTANCE PASS / AUTOMATED GATE PENDING
 
