@@ -124,6 +124,16 @@ from .forward_connector_diagnostics import (
     forward_connector_zone_fit_to_dict,
     write_forward_connector_zone_fit_report,
 )
+from .forward_connector_navigation_gate import (
+    FORWARD_CONNECTOR_NAVIGATION_GATE_SCHEMA,
+    ForwardConnectorNavigationGateConfig,
+    ForwardConnectorNavigationPlan,
+    ForwardConnectorNavigationResult,
+    GridPathEvidence,
+    derive_forward_connector_navigation_gate,
+    forward_connector_navigation_gate_to_dict,
+    write_forward_connector_navigation_gate,
+)
 from .turn_zone_refinement import (
     TURN_ZONE_REFINEMENT_SCHEMA,
     TurnZoneExpansionEvidence,
@@ -249,6 +259,14 @@ __all__ = [
     "diagnose_forward_connector_zone_fit",
     "forward_connector_zone_fit_to_dict",
     "write_forward_connector_zone_fit_report",
+    "FORWARD_CONNECTOR_NAVIGATION_GATE_SCHEMA",
+    "ForwardConnectorNavigationGateConfig",
+    "ForwardConnectorNavigationPlan",
+    "ForwardConnectorNavigationResult",
+    "GridPathEvidence",
+    "derive_forward_connector_navigation_gate",
+    "forward_connector_navigation_gate_to_dict",
+    "write_forward_connector_navigation_gate",
     "TURN_ZONE_REFINEMENT_SCHEMA",
     "TurnZoneExpansionEvidence",
     "TurnZoneRefinementConfig",
