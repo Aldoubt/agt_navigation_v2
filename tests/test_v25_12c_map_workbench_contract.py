@@ -10,6 +10,7 @@ NAV_PREVIEW = PACKAGE / "agt_map_workbench/navigation_preview.py"
 AGRICULTURAL_APP = PACKAGE / "agt_map_workbench/agricultural_workbench.py"
 NAV_DERIVATION = OFFLINE / "agt_offline_assets/navigation_map_derivation.py"
 NAV_STRUCTURE = OFFLINE / "agt_offline_assets/navigation_structure.py"
+NAV_CORRIDOR = OFFLINE / "agt_offline_assets/navigation_corridor.py"
 APP = PACKAGE / "agt_map_workbench/app.py"
 VIEW = PACKAGE / "agt_map_workbench/view.py"
 PACKAGE_XML = PACKAGE / "package.xml"
@@ -227,6 +228,26 @@ def test_agricultural_structure_is_offline_evidence_not_gui_private_algorithm():
     assert "find_peaks" not in agricultural
 
 
+def test_corridor_refinement_separates_rows_vegetation_walls_and_aisles():
+    corridor = _read(NAV_CORRIDOR)
+    agricultural = _read(AGRICULTURAL_APP)
+    for token in (
+        "CorridorRefinementConfig",
+        "CorridorRefinementResult",
+        "row_centerline",
+        "row_structural_band",
+        "vegetation_envelope",
+        "boundary_exclusion",
+        "aisle_candidate",
+        "aisle_centerline",
+        "derive_corridor_refinement",
+    ):
+        assert token in corridor
+    assert "derive_corridor_refinement" in agricultural
+    assert "result.occupancy =" not in corridor
+    assert "aisles exist only between adjacent" in corridor.lower()
+
+
 def test_agricultural_workbench_exposes_independent_structure_layers():
     agricultural = _read(AGRICULTURAL_APP)
     preview = _read(NAV_PREVIEW)
@@ -237,6 +258,12 @@ def test_agricultural_workbench_exposes_independent_structure_layers():
         "种植行支持强度",
         "规则化种植行",
         "行道候选",
+        "垄中心线",
+        "垄结构带",
+        "植被 / 原始障碍包络",
+        "墙体 / 地图边界排除带",
+        "精炼行道候选",
+        "行道中心线",
         "仅看分析层（隐藏点云底图）",
         "优先使用标定 +X（无标定则自动）",
     ):
@@ -248,19 +275,28 @@ def test_agricultural_workbench_exposes_independent_structure_layers():
         "row_support",
         "row_regularized",
         "aisle_candidate",
+        "row_centerline",
+        "row_structural_band",
+        "vegetation_envelope",
+        "boundary_exclusion",
+        "refined_aisle",
+        "aisle_centerline",
     ):
         assert machine_layer in preview
     assert "obstacle" in preview
-    assert "row_regularized" in preview
 
 
-def test_row_structure_preserves_raw_obstacle_evidence_boundary():
+def test_row_structure_and_corridor_preserve_raw_obstacle_evidence_boundary():
     structure = _read(NAV_STRUCTURE)
+    corridor = _read(NAV_CORRIDOR)
     assert "result.obstacle_count" in structure
     assert "raw_obstacle" in structure
     assert "row_regularized_obstacle" in structure
     assert "aisle_candidate" in structure
+    assert "navigation.obstacle_count" in corridor
+    assert "vegetation_envelope = raw_obstacle.copy()" in corridor
     assert "result.occupancy =" not in structure
+    assert "result.occupancy =" not in corridor
 
 
 def test_navigation_override_is_world_polygon_not_pixel_paint():
@@ -280,12 +316,14 @@ def test_navigation_override_is_world_polygon_not_pixel_paint():
     assert "no_go" in nav
 
 
-def test_navigation_derivation_and_structure_unit_tests_are_registered():
+def test_navigation_derivation_structure_and_corridor_tests_are_registered():
     cmake = _read(OFFLINE_CMAKE)
     assert "test_navigation_map_derivation" in cmake
     assert "test/test_navigation_map_derivation.py" in cmake
     assert "test_navigation_structure" in cmake
     assert "test/test_navigation_structure.py" in cmake
+    assert "test_navigation_corridor" in cmake
+    assert "test/test_navigation_corridor.py" in cmake
 
 
 def test_operator_ui_is_chinese_but_machine_contract_remains_stable():
