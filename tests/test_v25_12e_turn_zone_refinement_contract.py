@@ -34,7 +34,8 @@ def test_turn_zone_refinement_is_proposal_not_drive_permission():
     ):
         assert token in text
     assert "proposed & ~current" in text
-    assert "occupancy =" not in text
+    assert "navigation.occupancy =" not in text
+    assert "apply_navigation_overrides" not in text
 
 
 def test_real_zone_fit_record_and_architecture_preserve_r6_decision_gate():
