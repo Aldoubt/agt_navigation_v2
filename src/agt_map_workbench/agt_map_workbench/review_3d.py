@@ -4,6 +4,11 @@ The 2D canvas remains the authoring authority.  This module is review-only: it
 renders a deterministic PCD display sample plus offline navigation evidence in
 one shared XYZ frame.  It intentionally avoids OpenGL/VTK/Open3D dependencies
 so the Workbench stays deployable in the current ROS 2 Humble environment.
+
+The selected 6/15/30 万点 setting is the stationary review density. During
+mouse orbit/pan the renderer intentionally switches to a lightweight preview:
+the cloud is capped and dense evidence layers are deterministically decimated.
+The full selected review density is restored as soon as the drag ends.
 """
 
 from __future__ import annotations
@@ -32,6 +37,15 @@ _LAYER_COLORS = {
     "refined_aisle": QColor(40, 205, 225, 95),
     "aisle_centerline": QColor(80, 245, 140, 245),
     "vehicle_corridor": QColor(255, 165, 40, 115),
+}
+
+_INTERACTIVE_CLOUD_LIMIT = 20_000
+_INTERACTIVE_DENSE_LAYER_LIMIT = 4_000
+_DENSE_LAYERS = {
+    "ground",
+    "row_structural_band",
+    "refined_aisle",
+    "vehicle_corridor",
 }
 
 
@@ -210,6 +224,13 @@ class Review3DCanvas(QWidget):
         result[finite] = np.clip(((valid - low) / scale * 15.0).astype(np.int32), 0, 15)
         return result
 
+    @staticmethod
+    def _cap_deterministic(values: np.ndarray, limit: int) -> np.ndarray:
+        if values.shape[0] <= limit:
+            return values
+        stride = int(math.ceil(values.shape[0] / float(limit)))
+        return values[::stride]
+
     def _draw_screen_points(
         self,
         painter: QPainter,
@@ -229,8 +250,8 @@ class Review3DCanvas(QWidget):
     def _draw_cloud(self, painter: QPainter) -> None:
         points = self._points
         intensity = self._intensity
-        if self._dragging and points.shape[0] > 60_000:
-            stride = int(math.ceil(points.shape[0] / 60_000.0))
+        if self._dragging and points.shape[0] > _INTERACTIVE_CLOUD_LIMIT:
+            stride = int(math.ceil(points.shape[0] / float(_INTERACTIVE_CLOUD_LIMIT)))
             points = points[::stride]
             if intensity.shape[0] == self._points.shape[0]:
                 intensity = intensity[::stride]
@@ -245,6 +266,18 @@ class Review3DCanvas(QWidget):
             return
         xy = xy[inside]
         points = points[inside]
+
+        # Mouse interaction prioritizes frame rate over stationary color detail.
+        # The selected height/intensity rendering returns immediately on release.
+        if self._dragging:
+            self._draw_screen_points(
+                painter,
+                xy,
+                QColor(120, 185, 205, 150),
+                width_px=max(1.0, self._point_size_px),
+            )
+            return
+
         if self._color_mode == "mono":
             self._draw_screen_points(
                 painter, xy, QColor(205, 215, 225, 185), width_px=self._point_size_px
@@ -290,6 +323,8 @@ class Review3DCanvas(QWidget):
             xyz = self._layers.get(name)
             if xyz is None or xyz.shape[0] == 0:
                 continue
+            if self._dragging and name in _DENSE_LAYERS:
+                xyz = self._cap_deterministic(xyz, _INTERACTIVE_DENSE_LAYER_LIMIT)
             xy, _ = self._project(xyz)
             if name in {"row_centerline", "aisle_centerline"}:
                 width = 2.4
@@ -333,7 +368,12 @@ class Review3DCanvas(QWidget):
         painter.setRenderHint(QPainter.Antialiasing, True)
         self._draw_axis_gizmo(painter)
         painter.setPen(QColor(220, 225, 230))
-        painter.drawText(12, 22, "左键旋转 | 右键平移 | 滚轮缩放 | 双击适配")
+        mode = "轻量交互预览" if self._dragging else "完整审查采样"
+        painter.drawText(
+            12,
+            22,
+            f"左键旋转 | 右键平移 | 滚轮缩放 | 双击适配 | {mode}",
+        )
         painter.end()
 
     # --------------------------------------------------------------- events
@@ -506,7 +546,9 @@ class ThreeDReviewWidget(QWidget):
         self.canvas.set_cloud(cloud, sample_limit=int(self.sample_limit.currentData()))
         self._update_display_options()
         self.status.setText(
-            f"3D Review：显示采样 {self.canvas.sample_count():,} 点；正式 PCD 未改变"
+            f"3D Review：显示采样 {self.canvas.sample_count():,} 点；"
+            f"拖动时点云≤{_INTERACTIVE_CLOUD_LIMIT:,} 点、稠密图层≤{_INTERACTIVE_DENSE_LAYER_LIMIT:,} 点；"
+            "正式 PCD 未改变"
         )
 
     def reload_cloud_sample(self, cloud) -> None:
@@ -531,7 +573,6 @@ class ThreeDReviewWidget(QWidget):
         if navigation is None:
             return
         ground_valid = np.asarray(navigation.ground_valid, dtype=bool)
-        # Ground is dense; cap it by deterministic raster stride for review.
         stride = max(1, int(math.ceil(math.sqrt(np.count_nonzero(ground_valid) / 70_000.0))))
         ground_mask = np.zeros_like(ground_valid)
         ground_mask[::stride, ::stride] = ground_valid[::stride, ::stride]
