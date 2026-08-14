@@ -11,12 +11,30 @@ ament_python_install_package(${PROJECT_NAME})
 # The launcher basename intentionally differs from the Python package name to
 # avoid import shadowing when it executes from the build/cli directory.
 set(AGT_MAP_WORKBENCH_CLI_DIR "${CMAKE_CURRENT_BINARY_DIR}/cli")
+set(AGT_MAP_WORKBENCH_LAUNCHER_SOURCE
+  "${CMAKE_CURRENT_SOURCE_DIR}/scripts/map_workbench_launcher.py"
+)
+set(AGT_MAP_WORKBENCH_LAUNCHER_TRACKED_DIR
+  "${CMAKE_CURRENT_BINARY_DIR}/launcher_source"
+)
 file(MAKE_DIRECTORY "${AGT_MAP_WORKBENCH_CLI_DIR}")
+file(MAKE_DIRECTORY "${AGT_MAP_WORKBENCH_LAUNCHER_TRACKED_DIR}")
+
+# configure_file establishes a CMake configure dependency on the launcher
+# source. Therefore an incremental colcon build refreshes the build-tree copy
+# whenever the Python entry point changes instead of silently running a stale
+# launcher from a previous build.
+configure_file(
+  "${AGT_MAP_WORKBENCH_LAUNCHER_SOURCE}"
+  "${AGT_MAP_WORKBENCH_LAUNCHER_TRACKED_DIR}/map_workbench_launcher.py"
+  COPYONLY
+)
+
 # Remove the historical launcher basename if an older incremental build left it
 # in build/cli; otherwise it can still shadow the agt_map_workbench package.
 file(REMOVE "${AGT_MAP_WORKBENCH_CLI_DIR}/agt_map_workbench.py")
 file(COPY
-  "${CMAKE_CURRENT_SOURCE_DIR}/scripts/map_workbench_launcher.py"
+  "${AGT_MAP_WORKBENCH_LAUNCHER_TRACKED_DIR}/map_workbench_launcher.py"
   DESTINATION "${AGT_MAP_WORKBENCH_CLI_DIR}"
   FILE_PERMISSIONS
     OWNER_READ OWNER_WRITE OWNER_EXECUTE
