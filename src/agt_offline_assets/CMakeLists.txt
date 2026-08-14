@@ -41,6 +41,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_navigation_map_derivation test/test_navigation_map_derivation.py
   )
+  ament_add_pytest_test(
+    test_navigation_structure test/test_navigation_structure.py
+  )
 endif()
 
 ament_package()
