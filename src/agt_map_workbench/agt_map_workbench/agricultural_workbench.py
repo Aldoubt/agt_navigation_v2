@@ -1,0 +1,259 @@
+"""Agricultural structure extension for the V25-12C Map Workbench."""
+
+from __future__ import annotations
+
+import sys
+
+import numpy as np
+from PyQt5.QtWidgets import (
+    QApplication,
+    QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
+)
+
+from agt_offline_assets import (
+    NavigationStructureConfig,
+    NavigationStructureResult,
+    derive_navigation_structure,
+)
+
+from .app import MapWorkbenchWindow
+
+
+_STRUCTURE_LAYERS = {
+    "ground_confidence",
+    "robust_slope",
+    "plane_residual",
+    "row_support",
+    "row_regularized",
+    "aisle_candidate",
+}
+
+
+class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
+    """Adds terrain-scale and crop-row evidence without replacing the base editor."""
+
+    def __init__(self) -> None:
+        self._navigation_structure_result: NavigationStructureResult | None = None
+        super().__init__()
+        self.setWindowTitle("AGT 地图工作台 — V25-12C 农业结构")
+
+    def _build_navigation_tab(self) -> QWidget:
+        tab = super()._build_navigation_tab()
+        layout = tab.layout()
+
+        self._nav_layer.addItem("Ground Confidence", "ground_confidence")
+        self._nav_layer.addItem("0.5m Robust Plane 坡度", "robust_slope")
+        self._nav_layer.addItem("局部平面残差", "plane_residual")
+        self._nav_layer.addItem("种植行支持强度", "row_support")
+        self._nav_layer.addItem("规则化种植行", "row_regularized")
+        self._nav_layer.addItem("行道候选", "aisle_candidate")
+
+        panel = QWidget()
+        panel_layout = QVBoxLayout(panel)
+        panel_layout.setContentsMargins(0, 4, 0, 0)
+        title = QLabel(
+            "农业结构分析：Ground Confidence → Robust Plane Slope → "
+            "Row Structure → Aisle Candidate"
+        )
+        title.setWordWrap(True)
+        panel_layout.addWidget(title)
+
+        row = QHBoxLayout()
+        self._structure_slope_window = QDoubleSpinBox()
+        self._structure_slope_window.setPrefix("坡度窗口：")
+        self._structure_slope_window.setSuffix(" m")
+        self._structure_slope_window.setDecimals(2)
+        self._structure_slope_window.setRange(0.30, 1.50)
+        self._structure_slope_window.setSingleStep(0.10)
+        self._structure_slope_window.setValue(0.50)
+        self._row_direction_mode = QComboBox()
+        self._row_direction_mode.addItem("优先使用标定 +X（无标定则自动）", "calibration_or_auto")
+        self._row_direction_mode.addItem("自动估计种植行方向", "auto")
+        row.addWidget(self._structure_slope_window)
+        row.addWidget(self._row_direction_mode)
+        panel_layout.addLayout(row)
+
+        row = QHBoxLayout()
+        self._row_half_width = QDoubleSpinBox()
+        self._row_half_width.setPrefix("垄半宽：")
+        self._row_half_width.setSuffix(" m")
+        self._row_half_width.setDecimals(2)
+        self._row_half_width.setRange(0.08, 0.80)
+        self._row_half_width.setSingleStep(0.02)
+        self._row_half_width.setValue(0.22)
+        self._row_max_gap = QDoubleSpinBox()
+        self._row_max_gap.setPrefix("短缺口：")
+        self._row_max_gap.setSuffix(" m")
+        self._row_max_gap.setDecimals(2)
+        self._row_max_gap.setRange(0.0, 2.0)
+        self._row_max_gap.setSingleStep(0.10)
+        self._row_max_gap.setValue(0.60)
+        row.addWidget(self._row_half_width)
+        row.addWidget(self._row_max_gap)
+        panel_layout.addLayout(row)
+
+        row = QHBoxLayout()
+        self._row_min_length = QDoubleSpinBox()
+        self._row_min_length.setPrefix("最短连续垄：")
+        self._row_min_length.setSuffix(" m")
+        self._row_min_length.setDecimals(2)
+        self._row_min_length.setRange(0.50, 10.0)
+        self._row_min_length.setSingleStep(0.25)
+        self._row_min_length.setValue(1.50)
+        self._row_min_spacing = QDoubleSpinBox()
+        self._row_min_spacing.setPrefix("最小垄距：")
+        self._row_min_spacing.setSuffix(" m")
+        self._row_min_spacing.setDecimals(2)
+        self._row_min_spacing.setRange(0.30, 3.0)
+        self._row_min_spacing.setSingleStep(0.05)
+        self._row_min_spacing.setValue(0.55)
+        row.addWidget(self._row_min_length)
+        row.addWidget(self._row_min_spacing)
+        panel_layout.addLayout(row)
+
+        analyze = QPushButton("重新计算 Ground Confidence / Robust Slope / 种植行")
+        analyze.clicked.connect(self._recompute_navigation_structure)
+        panel_layout.addWidget(analyze)
+
+        self._only_analysis_layer = QCheckBox("仅看分析层（隐藏点云底图）")
+        self._only_analysis_layer.toggled.connect(self._update_cloud_analysis_visibility)
+        panel_layout.addWidget(self._only_analysis_layer)
+
+        self._structure_status = QLabel("农业结构：等待 Ground-relative 导航图")
+        self._structure_status.setWordWrap(True)
+        panel_layout.addWidget(self._structure_status)
+
+        # Base tab ends with a stretch; keep the extension above that stretch.
+        layout.insertWidget(max(0, layout.count() - 1), panel)
+        return tab
+
+    def _structure_config(self) -> NavigationStructureConfig:
+        return NavigationStructureConfig(
+            robust_slope_window_m=float(self._structure_slope_window.value()),
+            row_direction_mode="auto",
+            row_half_width_m=float(self._row_half_width.value()),
+            row_max_gap_m=float(self._row_max_gap.value()),
+            row_minimum_segment_length_m=float(self._row_min_length.value()),
+            row_minimum_spacing_m=float(self._row_min_spacing.value()),
+        )
+
+    def _row_direction_for_structure(self):
+        if self._row_direction_mode.currentData() != "calibration_or_auto":
+            return None
+        calibration = self._frame_calibration
+        if calibration is None:
+            return None
+        direction = np.asarray(calibration.x_axis_in_source[:2], dtype=np.float64)
+        if np.linalg.norm(direction) <= 1e-9:
+            return None
+        return direction
+
+    def _recompute_navigation_structure(self) -> None:
+        if self._navigation_result is None:
+            QMessageBox.information(
+                self,
+                "导航图未生成",
+                "请先生成 Ground-relative 导航图，再计算农业结构层",
+            )
+            return
+        try:
+            row_direction = self._row_direction_for_structure()
+            self._navigation_structure_result = derive_navigation_structure(
+                self._navigation_result,
+                self._structure_config(),
+                row_direction_xy=row_direction,
+            )
+        except Exception as exc:
+            self._navigation_structure_result = None
+            self._structure_status.setText("农业结构：计算失败")
+            QMessageBox.critical(self, "农业结构分析失败", str(exc))
+            return
+        self._refresh_structure_status()
+        self._refresh_navigation_status()
+        self._update_navigation_overlay()
+        self.statusBar().showMessage("农业结构分析完成：Ground Confidence / Robust Slope / Row Structure")
+
+    def _navigation_finished(self, result) -> None:
+        self._navigation_structure_result = None
+        super()._navigation_finished(result)
+        self._recompute_navigation_structure()
+
+    def _clear_navigation_state(self, *, clear_overrides: bool) -> None:
+        self._navigation_structure_result = None
+        super()._clear_navigation_state(clear_overrides=clear_overrides)
+        if hasattr(self, "_structure_status"):
+            self._structure_status.setText("农业结构：等待 Ground-relative 导航图")
+
+    def _refresh_structure_status(self) -> None:
+        if not hasattr(self, "_structure_status"):
+            return
+        structure = self._navigation_structure_result
+        if structure is None:
+            self._structure_status.setText("农业结构：等待 Ground-relative 导航图")
+            return
+        model = structure.row_model
+        direction_source = (
+            "标定 +X"
+            if self._row_direction_mode.currentData() == "calibration_or_auto"
+            and self._frame_calibration is not None
+            else "自动估计"
+        )
+        confident = int(np.count_nonzero(structure.ground_confidence >= 0.30))
+        aisle = int(np.count_nonzero(structure.aisle_candidate))
+        row_cells = int(np.count_nonzero(structure.row_regularized_obstacle))
+        self._structure_status.setText(
+            f"农业结构：方向={direction_source} / {model.angle_deg:.1f}° | "
+            f"识别垄 {len(model.centers_v_m)} 条 | 规则化垄栅格 {row_cells:,}\n"
+            f"Ground Confidence≥0.30：{confident:,} | 行道候选：{aisle:,} | "
+            f"Robust Slope 窗口={structure.config.robust_slope_window_m:.2f} m"
+        )
+
+    def _refresh_navigation_status(self) -> None:
+        # Reset the base text first so repeated refreshes never duplicate suffixes.
+        MapWorkbenchWindow._refresh_navigation_status(self)
+        if not hasattr(self, "_nav_status") or self._navigation_structure_result is None:
+            return
+        model = self._navigation_structure_result.row_model
+        self._nav_status.setText(
+            self._nav_status.text()
+            + f"\n农业结构：row angle={model.angle_deg:.1f}° | rows={len(model.centers_v_m)}"
+        )
+
+    def _update_navigation_overlay(self) -> None:
+        if not hasattr(self, "_nav_layer"):
+            return
+        if self._navigation_result is None or not self._nav_overlay_visible.isChecked():
+            self._navigation_preview_item.clear_result()
+            return
+        layer = str(self._nav_layer.currentData())
+        if layer in _STRUCTURE_LAYERS:
+            if self._navigation_structure_result is None:
+                self._navigation_preview_item.clear_result()
+                return
+            self._navigation_preview_item.set_result(
+                self._navigation_result,
+                layer,
+                self._navigation_structure_result,
+            )
+            return
+        self._navigation_preview_item.set_result(self._navigation_result, layer)
+
+    def _update_cloud_analysis_visibility(self, checked: bool) -> None:
+        # Keep a faint base map available in normal mode; analysis-only is truly isolated.
+        self._cloud_item.setOpacity(0.0 if checked else 1.0)
+        self._scene.update()
+
+
+def main(argv=None) -> int:
+    app = QApplication(list(sys.argv if argv is None else argv))
+    window = AgriculturalMapWorkbenchWindow()
+    window.show()
+    return app.exec_()
