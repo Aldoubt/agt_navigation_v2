@@ -31,17 +31,42 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         if not isinstance(splitter, QSplitter):
             raise RuntimeError("3D Review expects the Workbench central QSplitter")
 
-        tabs = QTabWidget()
-        old_view = splitter.replaceWidget(0, tabs)
+        # Do not use QSplitter.replaceWidget() here.  On some Qt5 builds the
+        # replacement inherits a collapsed/zero splitter size, leaving the
+        # controls visible while the whole 2D/3D review plane appears missing.
+        old_sizes = splitter.sizes()
+        old_view = splitter.widget(0)
         if old_view is None:
-            raise RuntimeError("unable to attach the existing 2D Workbench view")
+            raise RuntimeError("unable to locate the existing 2D Workbench view")
+        old_view.setParent(None)
+
+        tabs = QTabWidget()
+        tabs.setMinimumWidth(640)
         tabs.addTab(old_view, "2D 编辑 / 分析")
 
         review = ThreeDReviewWidget()
         review.vehicleProfileChanged.connect(self._vehicle_profile_changed)
         review.sampleLimitChanged.connect(self._review_sample_changed)
         tabs.addTab(review, "3D 审查")
+
+        splitter.insertWidget(0, tabs)
+        splitter.setCollapsible(0, False)
+        splitter.setCollapsible(1, False)
         splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 0)
+        splitter.setHandleWidth(6)
+
+        # Re-establish a useful initial geometry after reparenting the old view.
+        # Keep a sane historical ratio even if Qt reports a zero-width first
+        # pane from a previous/collapsed layout state.
+        if len(old_sizes) >= 2 and old_sizes[0] >= 320 and old_sizes[1] >= 240:
+            splitter.setSizes([int(old_sizes[0]), int(old_sizes[1])])
+        else:
+            splitter.setSizes([1040, 480])
+
+        tabs.setCurrentIndex(0)
+        old_view.show()
+        tabs.show()
         self._review_3d = review
 
         if self._cloud is not None:
