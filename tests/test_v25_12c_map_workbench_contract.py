@@ -322,6 +322,8 @@ def test_ros2_run_launcher_is_executable_and_does_not_shadow_python_package():
     assert "WORLD_EXECUTE" in cmake
     assert "map_workbench_launcher.py" in cmake
     assert "RENAME agt_map_workbench" in cmake
+    assert "configure_file(" in cmake
+    assert "AGT_MAP_WORKBENCH_LAUNCHER_SOURCE" in cmake
     assert 'file(REMOVE "${AGT_MAP_WORKBENCH_CLI_DIR}/agt_map_workbench.py")' in cmake
     assert LAUNCHER.name != "agt_map_workbench.py"
     assert "from agt_map_workbench.agricultural_workbench import main" in launcher
