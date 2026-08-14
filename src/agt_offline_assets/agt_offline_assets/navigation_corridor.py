@@ -6,7 +6,7 @@ This layer keeps three concepts separate:
 * vegetation envelope: observed raw obstacle evidence around plants
 * aisle candidate: corridor that exists only between adjacent valid rows
 
-It deliberately does not mutate the final OccupancyGrid.  The output is review
+It deliberately does not mutate the final OccupancyGrid. The output is review
 evidence for the later explicit navigation fusion policy.
 """
 
@@ -148,9 +148,6 @@ def _filter_row_centers(
             adjacent.append(interior_centers[index] - interior_centers[index - 1])
         if index + 1 < interior_centers.size:
             adjacent.append(interior_centers[index + 1] - interior_centers[index])
-        # A missing crop row can create a 2x spacing gap.  Accept either one
-        # nominal spacing or a clear integer multiple rather than deleting both
-        # neighbors merely because one row is absent.
         for gap in adjacent:
             if low <= gap <= high or 2.0 * low <= gap <= 2.0 * high:
                 keep[index] = True
@@ -158,6 +155,63 @@ def _filter_row_centers(
     rejected.extend(interior_centers[~keep].tolist())
     accepted = interior_centers[keep]
     return accepted, np.sort(np.asarray(rejected, dtype=np.float64)), nominal
+
+
+def _safest_centerline_within_pair(
+    safe: np.ndarray,
+    geometry: np.ndarray,
+    uu: np.ndarray,
+    vv: np.ndarray,
+    *,
+    corridor_min: float,
+    corridor_max: float,
+    midpoint: float,
+    obstacle_distance: np.ndarray,
+    resolution_m: float,
+    half_width_m: float,
+) -> np.ndarray:
+    """Choose a safe cross-section ridge instead of forcing the exact midpoint.
+
+    For each longitudinal grid slice, the selected lateral position maximizes
+    clearance to both raw obstacles and the structural corridor edges. A small
+    centrality/continuity preference keeps the result smooth when multiple cells
+    have equal clearance. If a complete cross-section has no safe cell, the
+    centerline remains broken there rather than crossing an unsafe obstacle.
+    """
+    output = np.zeros(safe.shape, dtype=bool)
+    if not np.any(safe) or not np.any(geometry):
+        return output
+
+    u_min = float(np.min(uu[geometry]))
+    u_max = float(np.max(uu[geometry]))
+    bins = max(1, int(np.ceil((u_max - u_min) / resolution_m)) + 1)
+    u_index = np.floor((uu - u_min) / resolution_m).astype(np.int64)
+    valid_index = (u_index >= 0) & (u_index < bins)
+    previous_v: float | None = None
+
+    for bin_index in range(bins):
+        cells = safe & valid_index & (u_index == bin_index)
+        if not np.any(cells):
+            continue
+        candidate_v = vv[cells]
+        edge_clearance = np.minimum(
+            candidate_v - corridor_min,
+            corridor_max - candidate_v,
+        )
+        raw_clearance = obstacle_distance[cells]
+        clearance = np.minimum(edge_clearance, raw_clearance)
+        centrality_penalty = 0.02 * np.abs(candidate_v - midpoint)
+        if previous_v is not None:
+            continuity_penalty = 0.04 * np.abs(candidate_v - previous_v)
+        else:
+            continuity_penalty = 0.0
+        score = clearance - centrality_penalty - continuity_penalty
+        selected_v = float(candidate_v[int(np.argmax(score))])
+        selected_cells = cells & (np.abs(vv - selected_v) <= half_width_m)
+        output |= selected_cells
+        previous_v = selected_v
+
+    return output
 
 
 def derive_corridor_refinement(
@@ -198,8 +252,6 @@ def derive_corridor_refinement(
     )
     vegetation_envelope = raw_obstacle.copy()
 
-    # Cells close to the outer observed support are not treated as aisles.  This
-    # prevents wall-to-row gaps and map exterior from becoming free corridors.
     observed_distance = ndimage.distance_transform_edt(observed) * navigation.resolution_m
     boundary_exclusion = observed & (
         observed_distance <= float(cfg.boundary_exclusion_m)
@@ -258,9 +310,6 @@ def derive_corridor_refinement(
     aisle_centerline = np.zeros(navigation.occupancy.shape, dtype=bool)
     diagnostics: list[AislePairDiagnostic] = []
 
-    # Aisles exist only between adjacent accepted crop rows.  Every pair emits
-    # an explicit diagnostic so GUI/operator review can distinguish geometric
-    # rejection from evidence rejection instead of guessing from a missing line.
     for index in range(max(0, accepted.size - 1)):
         left = float(accepted[index])
         right = float(accepted[index + 1])
@@ -329,12 +378,20 @@ def derive_corridor_refinement(
         corridor_max = right - cfg.row_structural_half_width_m - cfg.aisle_side_clearance_m
         longitudinal = (uu >= overlap_min) & (uu <= overlap_max)
         geometry = longitudinal & (vv >= corridor_min) & (vv <= corridor_max)
-        midpoint = 0.5 * (left + right)
-        center_geometry = longitudinal & (
-            np.abs(vv - midpoint) <= float(cfg.aisle_centerline_half_width_m)
-        )
         safe = geometry & safe_base
-        safe_centerline = center_geometry & safe
+        midpoint = 0.5 * (left + right)
+        safe_centerline = _safest_centerline_within_pair(
+            safe,
+            geometry,
+            uu,
+            vv,
+            corridor_min=corridor_min,
+            corridor_max=corridor_max,
+            midpoint=midpoint,
+            obstacle_distance=obstacle_distance,
+            resolution_m=navigation.resolution_m,
+            half_width_m=float(cfg.aisle_centerline_half_width_m),
+        )
 
         aisle_candidate |= safe
         aisle_centerline |= safe_centerline
