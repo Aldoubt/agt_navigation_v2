@@ -71,6 +71,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_forward_connector test/test_forward_connector.py
   )
+  ament_add_pytest_test(
+    test_forward_connector_diagnostics test/test_forward_connector_diagnostics.py
+  )
 endif()
 
 ament_package()
