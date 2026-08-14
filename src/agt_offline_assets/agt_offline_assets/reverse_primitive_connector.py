@@ -1,0 +1,800 @@
+"""R6B bounded reverse-aware local connector preview for agricultural aisles.
+
+This backend is deliberately *not* labelled analytic Reeds-Shepp.  It performs a
+bounded deterministic search over Ackermann motion primitives inside one known
+aisle-pair headland neighborhood.  The search may use FORWARD and REVERSE motion
+with explicit cusp actions, respects the canonical minimum turning radius, and
+fails closed on OCCUPIED / UNKNOWN / out-of-grid Navigation Grid evidence.
+
+R6B consumes only connector IDs admitted by the R6A reverse-fallback gate.  It
+is still preview evidence because MK-mini's exact on-vehicle ``base_footprint``
+reference has not been physically verified.  R8 remains the formal vehicle
+swept-footprint / Route-READY gate.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+import heapq
+import math
+from pathlib import Path
+from typing import Any, Iterable, Mapping
+
+import numpy as np
+import yaml
+
+from .agricultural_coverage_ordering import ConnectorRequest
+from .forward_connector import (
+    ForwardConnectorSample,
+    _dubins_candidates,
+    _sample_candidate,
+    _wrap_pi,
+)
+from .forward_connector_navigation_gate import (
+    GridPathEvidence,
+    _evaluate_candidate,
+    _preview_local_footprint,
+    _transform_polygon,
+)
+from .navigation_grid import NavigationGridEvidence
+from .navigation_map_derivation import FREE
+from .reverse_fallback_admission import ReverseFallbackAdmissionPlan
+from .turn_zones import TurnZone, TurnZoneSet, _points_inside_polygon
+from .vehicle_profile import CanonicalVehicleProfile
+
+
+REVERSE_PRIMITIVE_CONNECTOR_SCHEMA = "agt_reverse_primitive_connector_plan/v1"
+REVERSE_PRIMITIVE_BACKEND = "BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP"
+
+
+@dataclass(frozen=True)
+class ReversePrimitiveConnectorConfig:
+    primitive_length_m: float = 0.30
+    collision_sample_step_m: float = 0.10
+    state_xy_resolution_m: float = 0.15
+    state_yaw_resolution_deg: float = 15.0
+    goal_position_tolerance_m: float = 0.18
+    goal_yaw_tolerance_deg: float = 12.0
+    goal_shot_distance_m: float = 3.0
+    max_cusps: int = 2
+    max_expansions: int = 30000
+    max_path_length_m: float = 18.0
+    reverse_cost_multiplier: float = 1.15
+    cusp_penalty_m: float = 0.75
+    steering_change_penalty_m: float = 0.05
+    longitudinal_zone_padding_m: float = 0.80
+    lateral_pair_padding_m: float = 1.25
+    preview_footprint_padding_m: float = 0.05
+
+    def validate(self) -> None:
+        positive = (
+            "primitive_length_m",
+            "collision_sample_step_m",
+            "state_xy_resolution_m",
+            "state_yaw_resolution_deg",
+            "goal_position_tolerance_m",
+            "goal_yaw_tolerance_deg",
+            "goal_shot_distance_m",
+            "max_path_length_m",
+        )
+        for name in positive:
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(f"{name} must be finite and > 0")
+        for name in (
+            "reverse_cost_multiplier",
+            "cusp_penalty_m",
+            "steering_change_penalty_m",
+            "longitudinal_zone_padding_m",
+            "lateral_pair_padding_m",
+            "preview_footprint_padding_m",
+        ):
+            value = float(getattr(self, name))
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"{name} must be finite and >= 0")
+        if self.max_cusps < 1:
+            raise ValueError("max_cusps must be >= 1")
+        if self.max_expansions <= 0:
+            raise ValueError("max_expansions must be > 0")
+
+
+@dataclass(frozen=True)
+class ReversePrimitiveSample:
+    x: float
+    y: float
+    z: float
+    yaw: float
+    motion_direction: str
+    curvature_per_m: float
+    segment_index: int
+    is_cusp: bool = False
+
+
+@dataclass(frozen=True)
+class ReversePrimitiveConnectorResult:
+    connector_id: str
+    from_aisle_id: str
+    to_aisle_id: str
+    turn_zone_id: str
+    status: str
+    backend: str
+    minimum_turning_radius_m: float
+    samples: tuple[ReversePrimitiveSample, ...]
+    path_length_m: float | None
+    forward_distance_m: float
+    reverse_distance_m: float
+    cusp_count: int
+    search_expansions: int
+    goal_position_error_m: float | None
+    goal_yaw_error_rad: float | None
+    centerline_evidence: GridPathEvidence
+    footprint_evidence: GridPathEvidence
+    reason: str = ""
+
+
+@dataclass(frozen=True)
+class ReversePrimitiveConnectorPlan:
+    frame_id: str
+    platform_id: str
+    platform_profile_sha256: str
+    connectors: tuple[ReversePrimitiveConnectorResult, ...]
+    source: Mapping[str, Any] = field(default_factory=dict)
+    schema: str = REVERSE_PRIMITIVE_CONNECTOR_SCHEMA
+    status: str = "DRAFT"
+
+    @property
+    def solved_count(self) -> int:
+        return sum(item.status == "REVERSE_PRIMITIVE_PREVIEW_FREE" for item in self.connectors)
+
+    @property
+    def unsolved_count(self) -> int:
+        return len(self.connectors) - self.solved_count
+
+
+@dataclass
+class _SearchNode:
+    x: float
+    y: float
+    yaw: float
+    direction: int
+    cusp_count: int
+    last_curvature_index: int
+    cost: float
+    travel_m: float
+    parent_index: int | None
+    edge_samples: tuple[tuple[float, float, float, int, float, bool], ...]
+
+
+def _empty_evidence() -> GridPathEvidence:
+    return GridPathEvidence(0, 0, 0, 0, 0.0, 0.0, 0.0, 0.0)
+
+
+def _direction_name(direction: int) -> str:
+    return "FORWARD" if direction >= 0 else "REVERSE"
+
+
+def _row_frame_bounds(
+    request: ConnectorRequest,
+    zone: TurnZone,
+    row_direction_xy: tuple[float, float],
+    cfg: ReversePrimitiveConnectorConfig,
+) -> tuple[np.ndarray, np.ndarray, float, float, float, float]:
+    u = np.asarray(row_direction_xy, dtype=np.float64)
+    norm = float(np.linalg.norm(u))
+    if norm <= 1.0e-12:
+        raise ValueError("Turn Zone row direction is degenerate")
+    u /= norm
+    v = np.array([-u[1], u[0]], dtype=np.float64)
+    polygon = np.asarray(zone.polygon_xy, dtype=np.float64)
+    zone_u = polygon @ u
+    start_xy = np.asarray(request.start_pose[:2], dtype=np.float64)
+    goal_xy = np.asarray(request.goal_pose[:2], dtype=np.float64)
+    start_v = float(start_xy @ v)
+    goal_v = float(goal_xy @ v)
+    return (
+        u,
+        v,
+        float(np.min(zone_u) - cfg.longitudinal_zone_padding_m),
+        float(np.max(zone_u) + cfg.longitudinal_zone_padding_m),
+        float(min(start_v, goal_v) - cfg.lateral_pair_padding_m),
+        float(max(start_v, goal_v) + cfg.lateral_pair_padding_m),
+    )
+
+
+def _inside_search_envelope(
+    x: float,
+    y: float,
+    bounds: tuple[np.ndarray, np.ndarray, float, float, float, float],
+) -> bool:
+    u, v, u0, u1, v0, v1 = bounds
+    point = np.array([x, y], dtype=np.float64)
+    pu = float(point @ u)
+    pv = float(point @ v)
+    return u0 <= pu <= u1 and v0 <= pv <= v1
+
+
+def _preview_pose_free(
+    x: float,
+    y: float,
+    yaw: float,
+    navigation: NavigationGridEvidence,
+    local_footprint: tuple[tuple[float, float], ...],
+) -> bool:
+    probe = ForwardConnectorSample(x=float(x), y=float(y), z=0.0, yaw=float(yaw))
+    polygon = _transform_polygon(local_footprint, probe)
+    poly = np.asarray(polygon, dtype=np.float64)
+    px0, py0 = np.min(poly, axis=0)
+    px1, py1 = np.max(poly, axis=0)
+    min_x, min_y, max_x, max_y = navigation.bounds_m()
+    if px0 < min_x or py0 < min_y or px1 > max_x or py1 > max_y:
+        return False
+
+    resolution = float(navigation.resolution_m)
+    col0 = max(0, int(math.floor((float(px0) - navigation.origin_x_m) / resolution)))
+    col1 = min(
+        navigation.width - 1,
+        int(math.floor((float(px1) - navigation.origin_x_m) / resolution)),
+    )
+    row0 = max(0, int(math.floor((float(py0) - navigation.origin_y_m) / resolution)))
+    row1 = min(
+        navigation.height - 1,
+        int(math.floor((float(py1) - navigation.origin_y_m) / resolution)),
+    )
+    if row0 > row1 or col0 > col1:
+        return False
+
+    rows, cols = np.indices((row1 - row0 + 1, col1 - col0 + 1), dtype=np.float64)
+    xx = navigation.origin_x_m + (cols + col0 + 0.5) * resolution
+    yy = navigation.origin_y_m + (rows + row0 + 0.5) * resolution
+    inside = _points_inside_polygon(xx, yy, polygon)
+    if not bool(np.any(inside)):
+        return False
+    cells = navigation.occupancy[row0 : row1 + 1, col0 : col1 + 1][inside]
+    return bool(cells.size > 0 and np.all(cells == FREE))
+
+
+def _integrate_primitive(
+    node: _SearchNode,
+    curvature: float,
+    length_m: float,
+    sample_step_m: float,
+) -> tuple[tuple[float, float, float, int, float, bool], ...]:
+    x, y, yaw = float(node.x), float(node.y), float(node.yaw)
+    remaining = float(length_m)
+    output: list[tuple[float, float, float, int, float, bool]] = []
+    while remaining > 1.0e-12:
+        ds_abs = min(sample_step_m, remaining)
+        signed_ds = float(node.direction) * ds_abs
+        if abs(curvature) <= 1.0e-12:
+            x += signed_ds * math.cos(yaw)
+            y += signed_ds * math.sin(yaw)
+        else:
+            yaw_next = yaw + curvature * signed_ds
+            x += (math.sin(yaw_next) - math.sin(yaw)) / curvature
+            y += (-math.cos(yaw_next) + math.cos(yaw)) / curvature
+            yaw = yaw_next
+        yaw = _wrap_pi(yaw)
+        output.append((x, y, yaw, node.direction, curvature, False))
+        remaining -= ds_abs
+    return tuple(output)
+
+
+def _state_key(node: _SearchNode, cfg: ReversePrimitiveConnectorConfig) -> tuple[int, ...]:
+    yaw_resolution = math.radians(cfg.state_yaw_resolution_deg)
+    yaw_index = int(round(_wrap_pi(node.yaw) / yaw_resolution))
+    return (
+        int(round(node.x / cfg.state_xy_resolution_m)),
+        int(round(node.y / cfg.state_xy_resolution_m)),
+        yaw_index,
+        int(node.direction),
+        int(node.cusp_count),
+        int(node.last_curvature_index),
+    )
+
+
+def _heuristic(node: _SearchNode, goal_pose: tuple[float, float, float, float], radius: float) -> float:
+    dx = float(goal_pose[0] - node.x)
+    dy = float(goal_pose[1] - node.y)
+    yaw_error = abs(_wrap_pi(float(goal_pose[3] - node.yaw)))
+    return math.hypot(dx, dy) + 0.20 * radius * yaw_error
+
+
+def _goal_error(node: _SearchNode, goal_pose: tuple[float, float, float, float]) -> tuple[float, float]:
+    position = math.hypot(float(goal_pose[0] - node.x), float(goal_pose[1] - node.y))
+    yaw = abs(_wrap_pi(float(goal_pose[3] - node.yaw)))
+    return position, yaw
+
+
+def _edge_is_free(
+    samples: tuple[tuple[float, float, float, int, float, bool], ...],
+    bounds,
+    navigation: NavigationGridEvidence,
+    local_footprint,
+) -> bool:
+    for x, y, yaw, _direction, _curvature, _is_cusp in samples:
+        if not _inside_search_envelope(x, y, bounds):
+            return False
+        if not _preview_pose_free(x, y, yaw, navigation, local_footprint):
+            return False
+    return True
+
+
+def _try_forward_goal_shot(
+    node: _SearchNode,
+    request: ConnectorRequest,
+    radius: float,
+    cfg: ReversePrimitiveConnectorConfig,
+    bounds,
+    navigation: NavigationGridEvidence,
+    local_footprint,
+) -> tuple[tuple[tuple[float, float, float, int, float, bool], ...], float] | None:
+    if node.direction != 1:
+        return None
+    distance = math.hypot(request.goal_pose[0] - node.x, request.goal_pose[1] - node.y)
+    if distance > cfg.goal_shot_distance_m:
+        return None
+    start = (node.x, node.y, request.start_pose[2], node.yaw)
+    candidates = _dubins_candidates(start, request.goal_pose, radius)
+    for path_type, normalized_lengths in candidates:
+        sampled, length_m = _sample_candidate(
+            start,
+            request.goal_pose,
+            path_type,
+            normalized_lengths,
+            radius,
+            cfg.collision_sample_step_m,
+        )
+        if node.travel_m + float(length_m) > cfg.max_path_length_m:
+            continue
+        converted = tuple(
+            (float(s.x), float(s.y), float(s.yaw), 1, 0.0, False)
+            for s in sampled[1:]
+        )
+        if _edge_is_free(converted, bounds, navigation, local_footprint):
+            return converted, float(length_m)
+    return None
+
+
+def _reconstruct_raw(nodes: list[_SearchNode], node_index: int):
+    edges = []
+    current = node_index
+    while nodes[current].parent_index is not None:
+        edges.append(nodes[current].edge_samples)
+        current = int(nodes[current].parent_index)
+    edges.reverse()
+    output: list[tuple[float, float, float, int, float, bool]] = []
+    for edge in edges:
+        output.extend(edge)
+    return output
+
+
+def _finalize_samples(
+    request: ConnectorRequest,
+    raw_samples: Iterable[tuple[float, float, float, int, float, bool]],
+) -> tuple[ReversePrimitiveSample, ...]:
+    raw = list(raw_samples)
+    start = (
+        float(request.start_pose[0]),
+        float(request.start_pose[1]),
+        float(request.start_pose[3]),
+        1,
+        0.0,
+        False,
+    )
+    combined = [start] + raw
+
+    distances = [0.0]
+    for previous, current in zip(combined[:-1], combined[1:]):
+        distances.append(
+            distances[-1] + math.hypot(float(current[0] - previous[0]), float(current[1] - previous[1]))
+        )
+    total = distances[-1]
+    z0 = float(request.start_pose[2])
+    z1 = float(request.goal_pose[2])
+    segment = 0
+    output: list[ReversePrimitiveSample] = []
+    for index, item in enumerate(combined):
+        x, y, yaw, direction, curvature, is_cusp = item
+        if index > 0 and is_cusp:
+            segment += 1
+        ratio = 0.0 if total <= 1.0e-12 else distances[index] / total
+        output.append(
+            ReversePrimitiveSample(
+                x=float(x),
+                y=float(y),
+                z=float(z0 + ratio * (z1 - z0)),
+                yaw=float(_wrap_pi(yaw)),
+                motion_direction=_direction_name(direction),
+                curvature_per_m=float(curvature),
+                segment_index=segment,
+                is_cusp=bool(is_cusp),
+            )
+        )
+    return tuple(output)
+
+
+def _path_metrics(samples: tuple[ReversePrimitiveSample, ...]) -> tuple[float, float, float, int]:
+    forward = 0.0
+    reverse = 0.0
+    for previous, current in zip(samples[:-1], samples[1:]):
+        distance = math.hypot(current.x - previous.x, current.y - previous.y)
+        if current.motion_direction == "REVERSE":
+            reverse += distance
+        else:
+            forward += distance
+    return forward + reverse, forward, reverse, sum(sample.is_cusp for sample in samples)
+
+
+def _path_evidence(
+    samples: tuple[ReversePrimitiveSample, ...],
+    navigation: NavigationGridEvidence,
+    local_footprint,
+) -> tuple[GridPathEvidence, GridPathEvidence]:
+    forward_samples = tuple(
+        ForwardConnectorSample(
+            x=sample.x,
+            y=sample.y,
+            z=sample.z,
+            yaw=sample.yaw,
+            motion_direction=sample.motion_direction,
+        )
+        for sample in samples
+    )
+    return _evaluate_candidate(forward_samples, navigation, local_footprint)
+
+
+def _search_one(
+    request: ConnectorRequest,
+    zone: TurnZone,
+    zones: TurnZoneSet,
+    navigation: NavigationGridEvidence,
+    vehicle: CanonicalVehicleProfile,
+    cfg: ReversePrimitiveConnectorConfig,
+) -> ReversePrimitiveConnectorResult:
+    radius = float(vehicle.minimum_turning_radius_m)
+    local_footprint = _preview_local_footprint(vehicle, cfg.preview_footprint_padding_m)
+    bounds = _row_frame_bounds(request, zone, zones.row_direction_xy, cfg)
+    start = _SearchNode(
+        x=float(request.start_pose[0]),
+        y=float(request.start_pose[1]),
+        yaw=float(request.start_pose[3]),
+        direction=1,
+        cusp_count=0,
+        last_curvature_index=0,
+        cost=0.0,
+        travel_m=0.0,
+        parent_index=None,
+        edge_samples=(),
+    )
+    if not _preview_pose_free(start.x, start.y, start.yaw, navigation, local_footprint):
+        return ReversePrimitiveConnectorResult(
+            connector_id=request.connector_id,
+            from_aisle_id=request.from_aisle_id,
+            to_aisle_id=request.to_aisle_id,
+            turn_zone_id=request.turn_zone_id,
+            status="R6B_START_FOOTPRINT_NOT_FREE",
+            backend=REVERSE_PRIMITIVE_BACKEND,
+            minimum_turning_radius_m=radius,
+            samples=(),
+            path_length_m=None,
+            forward_distance_m=0.0,
+            reverse_distance_m=0.0,
+            cusp_count=0,
+            search_expansions=0,
+            goal_position_error_m=None,
+            goal_yaw_error_rad=None,
+            centerline_evidence=_empty_evidence(),
+            footprint_evidence=_empty_evidence(),
+            reason="start preview footprint is not FREE in the frozen Navigation Grid",
+        )
+
+    nodes = [start]
+    queue: list[tuple[float, int, int]] = []
+    counter = 0
+    heapq.heappush(queue, (_heuristic(start, request.goal_pose, radius), counter, 0))
+    best_cost = {_state_key(start, cfg): 0.0}
+    expansions = 0
+    goal_yaw_tol = math.radians(cfg.goal_yaw_tolerance_deg)
+    curvature_values = (-1.0 / radius, 0.0, 1.0 / radius)
+
+    solved_index: int | None = None
+    solved_shot: tuple[tuple[float, float, float, int, float, bool], ...] = ()
+
+    while queue and expansions < cfg.max_expansions:
+        _priority, _tie, node_index = heapq.heappop(queue)
+        node = nodes[node_index]
+        key = _state_key(node, cfg)
+        if node.cost > best_cost.get(key, float("inf")) + 1.0e-9:
+            continue
+        expansions += 1
+
+        position_error, yaw_error = _goal_error(node, request.goal_pose)
+        if node.direction == 1 and position_error <= cfg.goal_position_tolerance_m and yaw_error <= goal_yaw_tol:
+            solved_index = node_index
+            break
+
+        shot = _try_forward_goal_shot(
+            node,
+            request,
+            radius,
+            cfg,
+            bounds,
+            navigation,
+            local_footprint,
+        )
+        if shot is not None:
+            solved_index = node_index
+            solved_shot = shot[0]
+            break
+
+        if node.cusp_count < cfg.max_cusps:
+            switched = _SearchNode(
+                x=node.x,
+                y=node.y,
+                yaw=node.yaw,
+                direction=-node.direction,
+                cusp_count=node.cusp_count + 1,
+                last_curvature_index=0,
+                cost=node.cost + cfg.cusp_penalty_m,
+                travel_m=node.travel_m,
+                parent_index=node_index,
+                edge_samples=((node.x, node.y, node.yaw, -node.direction, 0.0, True),),
+            )
+            switched_key = _state_key(switched, cfg)
+            if switched.cost + 1.0e-9 < best_cost.get(switched_key, float("inf")):
+                best_cost[switched_key] = switched.cost
+                nodes.append(switched)
+                counter += 1
+                heapq.heappush(
+                    queue,
+                    (
+                        switched.cost + _heuristic(switched, request.goal_pose, radius),
+                        counter,
+                        len(nodes) - 1,
+                    ),
+                )
+
+        if node.travel_m + cfg.primitive_length_m > cfg.max_path_length_m:
+            continue
+        for curvature_index, curvature in enumerate(curvature_values, start=-1):
+            edge = _integrate_primitive(
+                node,
+                curvature,
+                cfg.primitive_length_m,
+                cfg.collision_sample_step_m,
+            )
+            if not _edge_is_free(edge, bounds, navigation, local_footprint):
+                continue
+            x, y, yaw, _direction, _curvature, _cusp = edge[-1]
+            motion_cost = cfg.primitive_length_m * (
+                cfg.reverse_cost_multiplier if node.direction < 0 else 1.0
+            )
+            steering_change = (
+                cfg.steering_change_penalty_m
+                if curvature_index != node.last_curvature_index
+                else 0.0
+            )
+            child = _SearchNode(
+                x=x,
+                y=y,
+                yaw=yaw,
+                direction=node.direction,
+                cusp_count=node.cusp_count,
+                last_curvature_index=curvature_index,
+                cost=node.cost + motion_cost + steering_change,
+                travel_m=node.travel_m + cfg.primitive_length_m,
+                parent_index=node_index,
+                edge_samples=edge,
+            )
+            child_key = _state_key(child, cfg)
+            if child.cost + 1.0e-9 >= best_cost.get(child_key, float("inf")):
+                continue
+            best_cost[child_key] = child.cost
+            nodes.append(child)
+            counter += 1
+            heapq.heappush(
+                queue,
+                (
+                    child.cost + _heuristic(child, request.goal_pose, radius),
+                    counter,
+                    len(nodes) - 1,
+                ),
+            )
+
+    if solved_index is None:
+        return ReversePrimitiveConnectorResult(
+            connector_id=request.connector_id,
+            from_aisle_id=request.from_aisle_id,
+            to_aisle_id=request.to_aisle_id,
+            turn_zone_id=request.turn_zone_id,
+            status="NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+            backend=REVERSE_PRIMITIVE_BACKEND,
+            minimum_turning_radius_m=radius,
+            samples=(),
+            path_length_m=None,
+            forward_distance_m=0.0,
+            reverse_distance_m=0.0,
+            cusp_count=0,
+            search_expansions=expansions,
+            goal_position_error_m=None,
+            goal_yaw_error_rad=None,
+            centerline_evidence=_empty_evidence(),
+            footprint_evidence=_empty_evidence(),
+            reason=(
+                "bounded F/R/F primitive search found no preview-footprint-free solution; "
+                "hand this connector to R7 rather than expanding R6B into a global planner"
+            ),
+        )
+
+    raw = _reconstruct_raw(nodes, solved_index)
+    raw.extend(solved_shot)
+    samples = _finalize_samples(request, raw)
+    path_length, forward_distance, reverse_distance, cusp_count = _path_metrics(samples)
+    final = samples[-1]
+    goal_position_error = math.hypot(request.goal_pose[0] - final.x, request.goal_pose[1] - final.y)
+    goal_yaw_error = abs(_wrap_pi(request.goal_pose[3] - final.yaw))
+    centerline_evidence, footprint_evidence = _path_evidence(samples, navigation, local_footprint)
+    has_reverse = reverse_distance > 1.0e-6
+    status = "REVERSE_PRIMITIVE_PREVIEW_FREE" if has_reverse else "FORWARD_PRIMITIVE_PREVIEW_FREE"
+    reason = (
+        "bounded local primitive path is FREE in frozen Navigation Grid under the preview footprint assumption; "
+        "this is not analytic Reeds-Shepp and is not R8 vehicle-READY evidence"
+    )
+    return ReversePrimitiveConnectorResult(
+        connector_id=request.connector_id,
+        from_aisle_id=request.from_aisle_id,
+        to_aisle_id=request.to_aisle_id,
+        turn_zone_id=request.turn_zone_id,
+        status=status,
+        backend=REVERSE_PRIMITIVE_BACKEND,
+        minimum_turning_radius_m=radius,
+        samples=samples,
+        path_length_m=path_length,
+        forward_distance_m=forward_distance,
+        reverse_distance_m=reverse_distance,
+        cusp_count=cusp_count,
+        search_expansions=expansions,
+        goal_position_error_m=goal_position_error,
+        goal_yaw_error_rad=goal_yaw_error,
+        centerline_evidence=centerline_evidence,
+        footprint_evidence=footprint_evidence,
+        reason=reason,
+    )
+
+
+def derive_reverse_primitive_connector_plan(
+    connector_requests: Iterable[ConnectorRequest],
+    admission: ReverseFallbackAdmissionPlan,
+    zones: TurnZoneSet,
+    navigation: NavigationGridEvidence,
+    vehicle: CanonicalVehicleProfile,
+    config: ReversePrimitiveConnectorConfig | None = None,
+    *,
+    source: Mapping[str, Any] | None = None,
+) -> ReversePrimitiveConnectorPlan:
+    """Plan bounded reverse-aware connectors for R6A-admitted IDs only."""
+    cfg = config or ReversePrimitiveConnectorConfig()
+    cfg.validate()
+    if vehicle.kinematics != "ackermann":
+        raise ValueError("R6B reverse primitive backend currently requires Ackermann kinematics")
+    if not vehicle.planning_preview_ready:
+        raise ValueError(f"vehicle profile {vehicle.profile_id} is not ready for planning preview")
+    if not vehicle.minimum_turning_radius_verified or vehicle.minimum_turning_radius_m <= 0.0:
+        raise ValueError("R6B requires verified Ackermann minimum turning radius")
+    if admission.platform_id and admission.platform_id != vehicle.profile_id:
+        raise ValueError("R6A admission platform does not match canonical vehicle profile")
+
+    request_map = {request.connector_id: request for request in connector_requests}
+    zone_map = {zone.zone_id: zone for zone in zones.zones}
+    results: list[ReversePrimitiveConnectorResult] = []
+    for connector_id in admission.eligible_connector_ids:
+        request = request_map.get(connector_id)
+        if request is None:
+            raise ValueError(f"R6A admitted connector is missing from coverage requests: {connector_id}")
+        zone = zone_map.get(request.turn_zone_id)
+        if zone is None or zone.side != request.side:
+            raise ValueError(f"R6A admitted connector has invalid Turn Zone metadata: {connector_id}")
+        results.append(_search_one(request, zone, zones, navigation, vehicle, cfg))
+
+    merged_source = dict(admission.source)
+    merged_source.update(dict(navigation.source))
+    merged_source.update(dict(source or {}))
+    merged_source.update(
+        {
+            "backend": REVERSE_PRIMITIVE_BACKEND,
+            "admission_scope": "R6A_ELIGIBLE_CONNECTOR_IDS_ONLY",
+            "validation_scope": "PREVIEW_ONLY_NOT_R8_VEHICLE_READY",
+            "z_semantics": "LINEAR_ENDPOINT_INTERPOLATION_PREVIEW_ONLY",
+            "max_cusps": cfg.max_cusps,
+            "minimum_turning_radius_m": float(vehicle.minimum_turning_radius_m),
+        }
+    )
+    return ReversePrimitiveConnectorPlan(
+        frame_id=zones.frame_id,
+        platform_id=vehicle.profile_id,
+        platform_profile_sha256=vehicle.profile_sha256,
+        connectors=tuple(results),
+        source=merged_source,
+    )
+
+
+def _evidence_to_dict(evidence: GridPathEvidence) -> dict[str, Any]:
+    return {
+        "cell_count": evidence.cell_count,
+        "free_count": evidence.free_count,
+        "occupied_count": evidence.occupied_count,
+        "unknown_count": evidence.unknown_count,
+        "free_fraction": evidence.free_fraction,
+        "occupied_fraction": evidence.occupied_fraction,
+        "unknown_fraction": evidence.unknown_fraction,
+        "grid_coverage_fraction": evidence.grid_coverage_fraction,
+    }
+
+
+def reverse_primitive_connector_plan_to_dict(plan: ReversePrimitiveConnectorPlan) -> dict[str, Any]:
+    return {
+        "schema": plan.schema,
+        "status": plan.status,
+        "frame_id": plan.frame_id,
+        "platform_id": plan.platform_id,
+        "platform_profile_sha256": plan.platform_profile_sha256,
+        "source": dict(plan.source),
+        "connector_count": len(plan.connectors),
+        "summary": {
+            "solved": plan.solved_count,
+            "unsolved": plan.unsolved_count,
+        },
+        "connectors": [
+            {
+                "connector_id": item.connector_id,
+                "from_aisle_id": item.from_aisle_id,
+                "to_aisle_id": item.to_aisle_id,
+                "turn_zone_id": item.turn_zone_id,
+                "status": item.status,
+                "backend": item.backend,
+                "validation_scope": "PREVIEW_ONLY_NOT_R8_VEHICLE_READY",
+                "minimum_turning_radius_m": item.minimum_turning_radius_m,
+                "path_length_m": item.path_length_m,
+                "forward_distance_m": item.forward_distance_m,
+                "reverse_distance_m": item.reverse_distance_m,
+                "cusp_count": item.cusp_count,
+                "search_expansions": item.search_expansions,
+                "goal_position_error_m": item.goal_position_error_m,
+                "goal_yaw_error_rad": item.goal_yaw_error_rad,
+                "centerline_evidence": _evidence_to_dict(item.centerline_evidence),
+                "preview_footprint_evidence": _evidence_to_dict(item.footprint_evidence),
+                "reason": item.reason,
+                "samples": [
+                    {
+                        "x": sample.x,
+                        "y": sample.y,
+                        "z": sample.z,
+                        "yaw": sample.yaw,
+                        "motion_direction": sample.motion_direction,
+                        "curvature_per_m": sample.curvature_per_m,
+                        "segment_index": sample.segment_index,
+                        "is_cusp": sample.is_cusp,
+                    }
+                    for sample in item.samples
+                ],
+            }
+            for item in plan.connectors
+        ],
+    }
+
+
+def write_reverse_primitive_connector_plan(
+    plan: ReversePrimitiveConnectorPlan,
+    path: str | Path,
+) -> Path:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        yaml.safe_dump(
+            reverse_primitive_connector_plan_to_dict(plan),
+            sort_keys=False,
+            allow_unicode=True,
+        ),
+        encoding="utf-8",
+    )
+    return output
