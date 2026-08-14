@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import sys
 
-from PyQt5.QtWidgets import QApplication, QSplitter, QTabWidget
+from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox, QSplitter, QTabWidget
 
 from agt_offline_assets import (
+    AisleGraphConfig,
     VehicleCorridorConfig,
     VehicleCorridorResult,
+    derive_agricultural_aisle_graph,
     derive_vehicle_corridor,
+    write_agricultural_aisle_graph,
 )
 
 from .agricultural_workbench import AgriculturalMapWorkbenchWindow
@@ -25,6 +28,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         super().__init__()
         self.setWindowTitle("AGT 地图工作台 — V25-12C 农业结构 + 3D 审查")
         self._install_3d_review()
+        self._install_offline_asset_actions()
 
     def _install_3d_review(self) -> None:
         splitter = self.centralWidget()
@@ -72,6 +76,74 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         if self._cloud is not None:
             review.set_cloud(self._cloud)
         self._sync_3d_analysis()
+
+    def _install_offline_asset_actions(self) -> None:
+        menu = self.menuBar().addMenu("离线资产")
+        export_aisle_graph = menu.addAction("导出 Aisle Graph YAML")
+        export_aisle_graph.setToolTip(
+            "把当前 Ground / Hybrid Row / Corridor evidence 固化成 DRAFT aisle_graph.yaml"
+        )
+        export_aisle_graph.triggered.connect(self._export_aisle_graph)
+
+    def _export_aisle_graph(self) -> None:
+        navigation = self._navigation_result
+        structure = self._navigation_structure_result
+        corridor = self._corridor_refinement_result
+        if navigation is None or structure is None or corridor is None:
+            QMessageBox.information(
+                self,
+                "农业结构尚未完成",
+                "请先生成 Ground-relative 导航图并完成 Ground / Row / Corridor 证据计算",
+            )
+            return
+        graph = derive_agricultural_aisle_graph(
+            navigation,
+            structure,
+            corridor,
+            AisleGraphConfig(
+                centerline_sample_spacing_m=max(0.10, float(navigation.resolution_m))
+            ),
+            source={
+                "pcd_name": self._source_path.name if self._source_path is not None else "",
+                "navigation_resolution_m": float(navigation.resolution_m),
+                "corridor_pair_count": len(corridor.aisle_pair_diagnostics),
+            },
+        )
+        if not graph.aisles:
+            QMessageBox.warning(
+                self,
+                "没有可导出的行道",
+                "当前 Corridor evidence 没有形成至少两点的 ACCEPTED aisle centerline",
+            )
+            return
+
+        default_path = "aisle_graph.yaml"
+        if self._source_path is not None:
+            default_path = str(self._source_path.parent / default_path)
+        filename, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "导出农业 Aisle Graph",
+            default_path,
+            "YAML (*.yaml *.yml)",
+        )
+        if not filename:
+            return
+        output = write_agricultural_aisle_graph(graph, filename)
+        interior = sum(aisle.kind == "interior" for aisle in graph.aisles)
+        boundary = sum(aisle.kind == "boundary" for aisle in graph.aisles)
+        self.statusBar().showMessage(
+            f"Aisle Graph 已导出：{output.name} | {len(graph.aisles)} 条 | "
+            f"interior={interior} boundary={boundary} | DRAFT"
+        )
+        QMessageBox.information(
+            self,
+            "Aisle Graph 已导出",
+            f"{output}\n\n"
+            f"DRAFT aisles: {len(graph.aisles)}\n"
+            f"Interior: {interior}\nBoundary: {boundary}\n\n"
+            "下一步将进入 Turn Zone / Vehicle Profile / Coverage Ordering，"
+            "此文件当前还不是 READY Route Asset",
+        )
 
     def _open_pcd(self) -> None:
         previous = self._source_path
