@@ -147,6 +147,16 @@ def test_default_safety_width_rejects_fixture_aisle_that_is_too_narrow():
     # That is intentionally below the default 0.45 m minimum aisle width.
     assert np.count_nonzero(result.aisle_candidate) == 0
     assert np.count_nonzero(result.aisle_centerline) == 0
+    assert len(result.aisle_pair_diagnostics) == 2
+    for diagnostic in result.aisle_pair_diagnostics:
+        assert diagnostic.status == "REJECTED_TOO_NARROW"
+        assert np.isclose(diagnostic.center_distance_m, 1.0)
+        assert np.isclose(diagnostic.structural_reserved_m, 0.40)
+        assert np.isclose(diagnostic.side_clearance_reserved_m, 0.24)
+        assert np.isclose(diagnostic.geometric_available_width_m, 0.36)
+        assert np.isclose(diagnostic.minimum_required_width_m, 0.45)
+        assert diagnostic.safe_cell_count == 0
+        assert diagnostic.centerline_cell_count == 0
 
 
 def test_aisle_centerline_is_subset_of_refined_aisle_when_corridor_is_feasible():
@@ -164,3 +174,11 @@ def test_aisle_centerline_is_subset_of_refined_aisle_when_corridor_is_feasible()
     assert np.all(~result.aisle_centerline | result.aisle_candidate)
     assert np.count_nonzero(result.aisle_candidate) > 0
     assert np.count_nonzero(result.aisle_centerline) > 0
+    assert len(result.aisle_pair_diagnostics) == 2
+    for diagnostic in result.aisle_pair_diagnostics:
+        assert diagnostic.status == "ACCEPTED"
+        assert diagnostic.geometric_cell_count > 0
+        assert diagnostic.safe_cell_count > 0
+        assert diagnostic.centerline_cell_count > 0
+        assert diagnostic.longitudinal_overlap_m is not None
+        assert diagnostic.longitudinal_overlap_m >= 1.5
