@@ -82,6 +82,20 @@ from .agricultural_aisle_graph import (
     derive_agricultural_aisle_graph,
     write_agricultural_aisle_graph,
 )
+from .turn_zones import (
+    TURN_ZONE_SCHEMA,
+    TurnZone,
+    TurnZoneConfig,
+    TurnZoneSet,
+    derive_turn_zone_candidates,
+    turn_zones_to_dict,
+    write_turn_zones,
+)
+from .vehicle_profile import (
+    CanonicalVehicleProfile,
+    load_canonical_vehicle_profile,
+    vehicle_profile_to_route_binding,
+)
 
 __all__ = [
     "AssetContractError",
@@ -156,4 +170,14 @@ __all__ = [
     "aisle_graph_to_dict",
     "derive_agricultural_aisle_graph",
     "write_agricultural_aisle_graph",
+    "TURN_ZONE_SCHEMA",
+    "TurnZone",
+    "TurnZoneConfig",
+    "TurnZoneSet",
+    "derive_turn_zone_candidates",
+    "turn_zones_to_dict",
+    "write_turn_zones",
+    "CanonicalVehicleProfile",
+    "load_canonical_vehicle_profile",
+    "vehicle_profile_to_route_binding",
 ]
