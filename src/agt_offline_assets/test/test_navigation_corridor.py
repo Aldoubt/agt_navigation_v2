@@ -113,12 +113,14 @@ def test_structural_row_band_is_independent_from_vegetation_envelope_width():
     assert np.count_nonzero(result.row_centerline) > 0
 
 
-def test_refined_aisle_exists_only_between_adjacent_crop_rows():
+def test_refined_aisle_exists_only_between_adjacent_crop_rows_by_default():
     navigation, structure = _fixture()
     result = derive_corridor_refinement(navigation, structure, _feasible_config())
     assert np.count_nonzero(result.aisle_candidate[15, :]) > 0
     assert np.count_nonzero(result.aisle_candidate[6, :]) == 0
     assert np.count_nonzero(result.aisle_candidate[38, :]) == 0
+    assert np.count_nonzero(result.boundary_aisle_candidate) == 0
+    assert np.count_nonzero(result.boundary_aisle_centerline) == 0
 
 
 def test_raw_obstacle_clearance_cuts_hole_in_aisle_candidate():
@@ -140,6 +142,7 @@ def test_default_safety_width_rejects_fixture_aisle_that_is_too_narrow():
     assert len(result.aisle_pair_diagnostics) == 2
     for diagnostic in result.aisle_pair_diagnostics:
         assert diagnostic.status == "REJECTED_TOO_NARROW"
+        assert diagnostic.pair_kind == "ROW_ROW"
         assert np.isclose(diagnostic.center_distance_m, 1.0)
         assert np.isclose(diagnostic.structural_reserved_m, 0.40)
         assert np.isclose(diagnostic.side_clearance_reserved_m, 0.24)
@@ -168,9 +171,36 @@ def test_aisle_centerline_is_subset_of_refined_aisle_when_corridor_is_feasible()
 def test_aisle_centerline_shifts_around_midpoint_obstacle_when_side_clearance_exists():
     navigation, structure = _fixture()
     result = derive_corridor_refinement(navigation, structure, _feasible_config())
-    # Never traverse the physical obstacle cells.
     assert not np.any(result.aisle_centerline[14:17, 28:31])
-    # The same longitudinal slices still retain a safe centerline on a lateral
-    # side instead of losing the entire segment at the mathematical midpoint.
     assert np.any(result.aisle_centerline[12:19, 28:31])
     assert np.all(~result.aisle_centerline | result.aisle_candidate)
+
+
+def test_explicit_boundary_aisles_connect_wall_anchor_to_nearest_crop_row():
+    navigation, structure = _fixture()
+    config = _feasible_config(
+        enable_boundary_aisles=True,
+        boundary_anchor_max_distance_m=0.80,
+        boundary_wall_half_width_m=0.10,
+        boundary_wall_clearance_m=0.05,
+    )
+    result = derive_corridor_refinement(navigation, structure, config)
+
+    assert np.count_nonzero(result.boundary_aisle_candidate) > 0
+    assert np.count_nonzero(result.boundary_aisle_centerline) > 0
+    assert np.all(~result.boundary_aisle_candidate | result.aisle_candidate)
+    assert np.all(~result.boundary_aisle_centerline | result.aisle_centerline)
+
+    kinds = [diagnostic.pair_kind for diagnostic in result.aisle_pair_diagnostics]
+    assert kinds[:2] == ["ROW_ROW", "ROW_ROW"]
+    assert "BOUNDARY_LOW" in kinds
+    assert "BOUNDARY_HIGH" in kinds
+    boundary_diagnostics = [
+        diagnostic
+        for diagnostic in result.aisle_pair_diagnostics
+        if diagnostic.pair_kind.startswith("BOUNDARY")
+    ]
+    assert len(boundary_diagnostics) == 2
+    assert all(diagnostic.status == "ACCEPTED" for diagnostic in boundary_diagnostics)
+    assert all(diagnostic.safe_cell_count > 0 for diagnostic in boundary_diagnostics)
+    assert all(diagnostic.centerline_cell_count > 0 for diagnostic in boundary_diagnostics)
