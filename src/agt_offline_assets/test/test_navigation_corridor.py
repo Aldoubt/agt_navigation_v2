@@ -139,8 +139,28 @@ def test_raw_obstacle_clearance_cuts_hole_in_aisle_candidate():
     assert np.count_nonzero(result.aisle_candidate[15, 10:20]) > 0
 
 
-def test_aisle_centerline_is_subset_of_refined_aisle():
+def test_default_safety_width_rejects_fixture_aisle_that_is_too_narrow():
     navigation, structure = _fixture()
     result = derive_corridor_refinement(navigation, structure)
+    # Default geometry leaves only 0.36 m between adjacent 1.00 m rows:
+    # 1.00 - 2*0.20 structural half-width - 2*0.12 side clearance.
+    # That is intentionally below the default 0.45 m minimum aisle width.
+    assert np.count_nonzero(result.aisle_candidate) == 0
+    assert np.count_nonzero(result.aisle_centerline) == 0
+
+
+def test_aisle_centerline_is_subset_of_refined_aisle_when_corridor_is_feasible():
+    navigation, structure = _fixture()
+    result = derive_corridor_refinement(
+        navigation,
+        structure,
+        CorridorRefinementConfig(
+            row_structural_half_width_m=0.15,
+            aisle_side_clearance_m=0.05,
+            raw_obstacle_clearance_m=0.05,
+            aisle_minimum_width_m=0.35,
+        ),
+    )
     assert np.all(~result.aisle_centerline | result.aisle_candidate)
+    assert np.count_nonzero(result.aisle_candidate) > 0
     assert np.count_nonzero(result.aisle_centerline) > 0
