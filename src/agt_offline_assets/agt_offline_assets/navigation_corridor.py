@@ -7,7 +7,7 @@ This layer keeps three concepts separate:
 * aisle candidate: corridor that exists only between adjacent valid rows
 
 It deliberately does not mutate the final OccupancyGrid.  The output is review
- evidence for the later explicit navigation fusion policy.
+evidence for the later explicit navigation fusion policy.
 """
 
 from __future__ import annotations
@@ -55,6 +55,25 @@ class CorridorRefinementConfig:
 
 
 @dataclass(frozen=True)
+class AislePairDiagnostic:
+    """Auditable reason why one adjacent crop-row pair did or did not form an aisle."""
+
+    pair_index: int
+    left_row_center_v_m: float
+    right_row_center_v_m: float
+    center_distance_m: float
+    structural_reserved_m: float
+    side_clearance_reserved_m: float
+    geometric_available_width_m: float
+    minimum_required_width_m: float
+    longitudinal_overlap_m: float | None
+    geometric_cell_count: int
+    safe_cell_count: int
+    centerline_cell_count: int
+    status: str
+
+
+@dataclass(frozen=True)
 class CorridorRefinementResult:
     row_centerline: np.ndarray
     row_structural_band: np.ndarray
@@ -65,6 +84,7 @@ class CorridorRefinementResult:
     accepted_row_centers_v_m: tuple[float, ...]
     rejected_row_centers_v_m: tuple[float, ...]
     nominal_row_spacing_m: float | None
+    aisle_pair_diagnostics: tuple[AislePairDiagnostic, ...]
     config: CorridorRefinementConfig
 
 
@@ -201,8 +221,6 @@ def derive_corridor_refinement(
             u_min = float(np.min(uu[support]))
             u_max = float(np.max(uu[support]))
         else:
-            # Keep the evidence explicit: a row peak with no longitudinal
-            # support is not extended across the whole map.
             row_u_ranges.append(None)
             continue
         if u_max - u_min < cfg.minimum_row_longitudinal_span_m:
@@ -217,33 +235,6 @@ def derive_corridor_refinement(
         )
         row_u_ranges.append((u_min, u_max))
 
-    # Aisles exist only between adjacent accepted crop rows.  They are not the
-    # generic complement of row obstacles.  This is the key distinction that
-    # prevents map boundary/wall gaps from being labelled traversable.
-    aisle_geometry = np.zeros(navigation.occupancy.shape, dtype=bool)
-    aisle_centerline = np.zeros(navigation.occupancy.shape, dtype=bool)
-    for index in range(max(0, accepted.size - 1)):
-        left = float(accepted[index])
-        right = float(accepted[index + 1])
-        left_range = row_u_ranges[index] if index < len(row_u_ranges) else None
-        right_range = row_u_ranges[index + 1] if index + 1 < len(row_u_ranges) else None
-        if left_range is None or right_range is None:
-            continue
-        corridor_min = left + cfg.row_structural_half_width_m + cfg.aisle_side_clearance_m
-        corridor_max = right - cfg.row_structural_half_width_m - cfg.aisle_side_clearance_m
-        if corridor_max - corridor_min < cfg.aisle_minimum_width_m:
-            continue
-        overlap_min = max(left_range[0], right_range[0])
-        overlap_max = min(left_range[1], right_range[1])
-        if overlap_max - overlap_min < cfg.minimum_row_longitudinal_span_m:
-            continue
-        longitudinal = (uu >= overlap_min) & (uu <= overlap_max)
-        aisle_geometry |= longitudinal & (vv >= corridor_min) & (vv <= corridor_max)
-        midpoint = 0.5 * (left + right)
-        aisle_centerline |= longitudinal & (
-            np.abs(vv - midpoint) <= float(cfg.aisle_centerline_half_width_m)
-        )
-
     obstacle_distance = (
         ndimage.distance_transform_edt(~raw_obstacle) * navigation.resolution_m
     )
@@ -255,16 +246,117 @@ def derive_corridor_refinement(
     slope_ok = np.isfinite(structure.robust_slope_deg) & (
         structure.robust_slope_deg <= navigation.config.maximum_slope_deg
     )
-
-    aisle_candidate = (
-        aisle_geometry
-        & confident_ground
+    safe_base = (
+        confident_ground
         & slope_ok
         & clear_of_raw_obstacle
         & ~boundary_exclusion
         & ~row_structural_band
     )
-    aisle_centerline &= aisle_candidate
+
+    aisle_candidate = np.zeros(navigation.occupancy.shape, dtype=bool)
+    aisle_centerline = np.zeros(navigation.occupancy.shape, dtype=bool)
+    diagnostics: list[AislePairDiagnostic] = []
+
+    # Aisles exist only between adjacent accepted crop rows.  Every pair emits
+    # an explicit diagnostic so GUI/operator review can distinguish geometric
+    # rejection from evidence rejection instead of guessing from a missing line.
+    for index in range(max(0, accepted.size - 1)):
+        left = float(accepted[index])
+        right = float(accepted[index + 1])
+        center_distance = right - left
+        structural_reserved = 2.0 * float(cfg.row_structural_half_width_m)
+        side_reserved = 2.0 * float(cfg.aisle_side_clearance_m)
+        available_width = center_distance - structural_reserved - side_reserved
+        left_range = row_u_ranges[index] if index < len(row_u_ranges) else None
+        right_range = row_u_ranges[index + 1] if index + 1 < len(row_u_ranges) else None
+
+        base_kwargs = dict(
+            pair_index=index + 1,
+            left_row_center_v_m=left,
+            right_row_center_v_m=right,
+            center_distance_m=center_distance,
+            structural_reserved_m=structural_reserved,
+            side_clearance_reserved_m=side_reserved,
+            geometric_available_width_m=available_width,
+            minimum_required_width_m=float(cfg.aisle_minimum_width_m),
+        )
+
+        if left_range is None or right_range is None:
+            diagnostics.append(
+                AislePairDiagnostic(
+                    **base_kwargs,
+                    longitudinal_overlap_m=None,
+                    geometric_cell_count=0,
+                    safe_cell_count=0,
+                    centerline_cell_count=0,
+                    status="REJECTED_MISSING_ROW_SUPPORT",
+                )
+            )
+            continue
+
+        overlap_min = max(left_range[0], right_range[0])
+        overlap_max = min(left_range[1], right_range[1])
+        overlap_length = max(0.0, overlap_max - overlap_min)
+
+        if available_width < cfg.aisle_minimum_width_m:
+            diagnostics.append(
+                AislePairDiagnostic(
+                    **base_kwargs,
+                    longitudinal_overlap_m=overlap_length,
+                    geometric_cell_count=0,
+                    safe_cell_count=0,
+                    centerline_cell_count=0,
+                    status="REJECTED_TOO_NARROW",
+                )
+            )
+            continue
+
+        if overlap_length < cfg.minimum_row_longitudinal_span_m:
+            diagnostics.append(
+                AislePairDiagnostic(
+                    **base_kwargs,
+                    longitudinal_overlap_m=overlap_length,
+                    geometric_cell_count=0,
+                    safe_cell_count=0,
+                    centerline_cell_count=0,
+                    status="REJECTED_NO_LONGITUDINAL_OVERLAP",
+                )
+            )
+            continue
+
+        corridor_min = left + cfg.row_structural_half_width_m + cfg.aisle_side_clearance_m
+        corridor_max = right - cfg.row_structural_half_width_m - cfg.aisle_side_clearance_m
+        longitudinal = (uu >= overlap_min) & (uu <= overlap_max)
+        geometry = longitudinal & (vv >= corridor_min) & (vv <= corridor_max)
+        midpoint = 0.5 * (left + right)
+        center_geometry = longitudinal & (
+            np.abs(vv - midpoint) <= float(cfg.aisle_centerline_half_width_m)
+        )
+        safe = geometry & safe_base
+        safe_centerline = center_geometry & safe
+
+        aisle_candidate |= safe
+        aisle_centerline |= safe_centerline
+
+        safe_count = int(np.count_nonzero(safe))
+        centerline_count = int(np.count_nonzero(safe_centerline))
+        if safe_count == 0:
+            status = "REJECTED_NO_SAFE_CELLS"
+        elif centerline_count == 0:
+            status = "ACCEPTED_NO_CENTERLINE"
+        else:
+            status = "ACCEPTED"
+        diagnostics.append(
+            AislePairDiagnostic(
+                **base_kwargs,
+                longitudinal_overlap_m=overlap_length,
+                geometric_cell_count=int(np.count_nonzero(geometry)),
+                safe_cell_count=safe_count,
+                centerline_cell_count=centerline_count,
+                status=status,
+            )
+        )
 
     return CorridorRefinementResult(
         row_centerline=row_centerline,
@@ -276,5 +368,6 @@ def derive_corridor_refinement(
         accepted_row_centers_v_m=tuple(float(v) for v in accepted),
         rejected_row_centers_v_m=tuple(float(v) for v in rejected),
         nominal_row_spacing_m=nominal_spacing,
+        aisle_pair_diagnostics=tuple(diagnostics),
         config=cfg,
     )
