@@ -70,10 +70,11 @@ flowchart LR
   REQUEST["Connector Requests\nLOW_U / HIGH_U"]
   FWD["Forward-first\nAnalytic Dubins → Dubins-CC"]
   FIT["Turn-Zone Fit Diagnostic\noutward / inward / lateral deficit"]
-  REFINE["Turn-Zone Refinement Proposal\ngeometry + frozen Navigation Grid evidence"]
+  NAVGATE["Connector Navigation Preview Gate\ncenterline + preview swept footprint"]
+  REFINE["Turn-Zone Refinement Proposal\nreview evidence only"]
   REV["Reverse fallback\nReeds-Shepp / RS-CC"]
   SMAC["Search fallback\nSmac Hybrid / State Lattice"]
-  SWEEP["Full-footprint + kinematic\nswept validation"]
+  SWEEP["Formal full-footprint + kinematic\nswept validation"]
   ROUTE["Existing READY Route Asset\nroute.yaml + route.csv"]
   PREVIEW["2D / 3D Route Preview"]
   NAV2["Runtime ROUTE Capability / Nav2"]
@@ -89,11 +90,15 @@ flowchart LR
   ORDER --> REQUEST
   REQUEST --> FWD
   FWD -->|Turn Zone reject| FIT
+  FIT --> NAVGATE
+  NAV --> NAVGATE
+  PROFILE --> NAVGATE
   FIT --> REFINE
   NAV --> REFINE
-  REFINE -->|FREE evidence + operator approval| TURN
-  REFINE -->|OCCUPIED / UNKNOWN / insufficient headland| REV
-  FWD -->|centerline accepted| SWEEP
+  NAVGATE -->|preview footprint free| TURN
+  NAVGATE -->|occupied / unknown / out of grid| REV
+  REFINE -->|operator geometry review| TURN
+  FWD -->|accepted under revised envelope| SWEEP
   REV -->|infeasible| SMAC
   REV --> SWEEP
   SMAC --> SWEEP
@@ -113,7 +118,8 @@ Coverage Ordering       决定“这台车能走哪些道路、以什么顺序�
 Connector Request       决定“下一对道路需要在哪一侧连接”
 Connector Planner       决定“怎样满足运动学连接”
 Zone-Fit Diagnostic     决定“当前 envelope 还缺多少几何空间”
-Turn-Zone Refinement    决定“缺失空间是否得到冻结 Navigation Map 证据支持”
+Navigation Preview Gate 决定“某一条 forward candidate 本身是否穿过静态 OCCUPIED/UNKNOWN”
+Turn-Zone Refinement    只提供共享 envelope 的几何/审查提案，不再代理 path feasibility
 Navigation Map          决定“静态几何证据上是否存在 FREE/OCCUPIED/UNKNOWN”
 Vehicle Profile         决定“这台车是否真的能通过/转过去”
 Route Asset             冻结最终可执行离线路线
@@ -130,9 +136,9 @@ navigation_map.yaml
 
 负责 Occupied / Free / Unknown、footprint collision、clearance、Nav2 static/global costmap 和 connector fallback search 的安全约束
 
-V25-12E 还允许通过轻量 `NavigationGridEvidence` 重新读取冻结 PGM/YAML，在不重跑 PCD 的前提下检查 Turn Zone 新增区域的 FREE/OCCUPIED/UNKNOWN 证据
+V25-12E 允许通过轻量 `NavigationGridEvidence` 重新读取冻结 PGM/YAML，在不重跑 PCD 的前提下检查 connector 候选路径和 preview swept footprint
 
-这仍然只是静态栅格 evidence，不替代最终 full-footprint swept validation
+这仍然只是静态 preview evidence，不替代最终 formal full-footprint swept validation
 
 Aisle Graph
 
@@ -157,7 +163,7 @@ Turn Zone 是 connector search envelope，不是 FREE-space truth
 
 首版自动派生 `turn_low_u` / `turn_high_u`，后续允许 Workbench operator 修订
 
-自动 Turn Zone 参数不是车辆事实，也不是固定场景真值；R5 zone-fit diagnostic 可以证明某个 envelope 过小，但扩大 Turn Zone 前仍必须和 Navigation Map / 真实 headland 空间核对
+自动 Turn Zone 参数不是车辆事实，也不是固定场景真值；R5 zone-fit diagnostic 可以证明某个 envelope 过小，但扩大 Turn Zone 前仍必须和 connector-specific Navigation Grid evidence / 真实 headland 空间核对
 
 Turn Zone 修订使用独立 DRAFT proposal
 
@@ -168,7 +174,7 @@ schema: agt_turn_zone_refinement_proposal/v1
 
 它聚合共享 LOW_U/HIGH_U zone 中每个 connector 的最小 outward / inward / lateral deficit，并记录是哪一个 connector 驱动该方向的最大扩张
 
-当提供冻结 Navigation Map 时，只统计 `proposed_polygon - current_polygon` 新增区域中的 FREE/OCCUPIED/UNKNOWN，不用原有 Turn Zone 大面积内容稀释扩张风险
+共享矩形扩张可能天然覆盖大量 crop-row ends，因此 whole-zone FREE ratio 不能作为 one-connector drivable-path gate
 
 proposal 不是 drive permission，也不会原地覆盖 `turn_zones.yaml`
 
@@ -319,16 +325,7 @@ forward-only curvature
 + Turn Zone centerline containment
 ```
 
-R5 明确不验证
-
-```text
-full footprint swept collision
-Navigation Map occupancy / UNKNOWN
-vegetation semantic collision
-formal Route READY
-```
-
-因此 `ACCEPTED_CENTERLINE` 只代表可以进入 R8 等后续 gate，不代表车辆最终可执行
+因此 `ACCEPTED_CENTERLINE` 只代表可以进入后续 gate，不代表车辆最终可执行
 
 ### 8.1 Forward Turn-Zone fit diagnostic
 
@@ -355,59 +352,62 @@ docs/experiments/v25_12e_r5_turn_zone_fit_20260814.md
 agt_forward_connector_zone_fit_diagnostic/v1
 ```
 
-它不改变 R5 plan 的冻结语义，而是在 Agricultural Aisle Graph row frame 中选择“需要最少 Turn Zone 扩张”的 forward Dubins candidate，并输出
+它不改变 R5 plan 的冻结语义，而是在 Agricultural Aisle Graph row frame 中选择“需要最少 Turn Zone 扩张”的 forward Dubins candidate，并输出 outward / inward / lateral deficit
+
+### 8.2 Shared Turn-Zone refinement is not path feasibility
+
+真实 Navigation Grid refinement smoke 得到
 
 ```text
-required_outward_extension_m
-required_inward_extension_m
-required_lateral_low_extension_m
-required_lateral_high_extension_m
-max_required_extension_m
+turn_low_u  added FREE 0.164 / OCCUPIED 0.832 / UNKNOWN 0.004
+turn_high_u added FREE 0.344 / OCCUPIED 0.649 / UNKNOWN 0.007
 ```
 
-### 8.2 Evidence-gated Turn Zone refinement
+这不证明 forward Dubins path 碰撞
 
-不能根据 deficit 直接扩大 Turn Zone
+原因是共享 Turn Zone rectangle 覆盖整排 aisle endpoints，扩大整个矩形自然把大量 crop-row ends 纳入 OCCUPIED
+
+因此 shared-zone refinement 只保留为 envelope proposal / operator review evidence
+
+### 8.3 Connector-specific Navigation Preview Gate
 
 新增
 
 ```text
-NavigationGridEvidence
-agt_turn_zone_refinement_proposal/v1
+agt_forward_connector_navigation_gate/v1
 ```
 
 流程
 
 ```text
-frozen turn_zones.yaml
-+ frozen forward_connector_zone_fit.yaml
-+ frozen navigation_map.pgm/yaml
+ConnectorRequest
++ frozen NavigationGridEvidence
++ canonical MK-mini navigation footprint
++ analytic Dubins families
         ↓
-aggregate per-zone required expansion
+per-candidate sampled centerline
         ↓
-add explicit discretization/operator margin
+preview swept navigation-footprint mask
         ↓
-measure only newly added cells
+FREE / OCCUPIED / UNKNOWN / out-of-grid
         ↓
-FREE / OCCUPIED / UNKNOWN / grid coverage
-        ↓
-EVIDENCE_SUPPORTS_EXPANSION
-or REVIEW_REQUIRED_*
+PREVIEW_FOOTPRINT_FREE
+or NO_FORWARD_PREVIEW_FREE_CANDIDATE
 ```
 
-默认 evidence gate 是保守 preview gate，不是最终车辆安全结论
+候选选择优先级是 navigation evidence first，再比较所需 Turn Zone 扩张和 path length
 
-只有 evidence-supported + operator-approved proposal 才允许生成 revised DRAFT Turn Zones 并重新进入 R5
+默认 preview footprint 在 canonical navigation-footprint bounding rectangle 外再加 `0.05 m` padding
 
-对于 `connector_016` 这类 inward deficit 明显异常的情况，必须保留 driving-connector identity，不允许被一个全局 outward 常数修改隐藏
+因为实际 `base_footprint` 参考点仍待实车测量，此 gate 明确是 `PREVIEW_ONLY_NOT_R8_VEHICLE_READY`
 
-如果所需扩张很小且真实棚头确有对应 FREE 空间，则修订 Turn Zone 并重跑 R5
+如果 forward candidate 的 preview swept footprint 通过，则只需为所选安全 candidate 修订最小 Turn Zone envelope
 
-如果所需扩张很大，或新增区域实际是墙 / 垄 / UNKNOWN / 地图外空间，则该 connector 才进入 R6 reverse fallback
+如果所有 forward candidate 都在静态 grid 上撞 OCCUPIED / UNKNOWN / out-of-grid，该 connector 才进入 R6 reverse fallback
 
 是否允许 reverse 由 Route Policy 联合 canonical Vehicle Profile 决定
 
-解析曲线满足曲率仍不足以 READY，必须经过完整 footprint swept collision / unknown / semantic / turn-zone gate
+解析曲线满足曲率仍不足以 READY，必须经过 R8 formal footprint swept collision / unknown / semantic / kinematic gate
 
 ## 9. Route Asset 保持既有合同
 
@@ -436,12 +436,11 @@ Ground Surface
 Row Structural Band
 Aisle Graph
 Turn Zones
-Turn Zone refinement proposal
 ordered aisle traversal
 connector candidates
 Forward / Reverse motion
-vehicle swept footprint
-conflict / invalid poses
+preview vehicle swept footprint
+formal conflict / invalid poses
 ```
 
 ## 11. 实现顺序
@@ -451,10 +450,10 @@ R1  Aisle Graph deterministic export
 R2  Turn Zone derivation / authoring / export
 R3  Canonical Vehicle Profile adapter
 R4  Vehicle-aware deterministic boustrophedon ordering
-R5  Forward connector + zone-fit diagnostic + evidence-gated Turn Zone refinement
+R5  Forward connector + zone-fit + connector-specific Navigation preview gate
 R6  Reverse fallback backend
 R7  Smac search fallback adapter
-R8  Swept-footprint / kinematic feasibility
+R8  Formal swept-footprint / kinematic feasibility
 R9  route.yaml + route.csv + preview export
 R10 Workbench 2D/3D Route Preview acceptance
 ```
@@ -471,7 +470,7 @@ R1 Aisle Graph
 R2 Turn Zones
   IMPLEMENTED CORE
   REAL ASSET GENERATED
-  envelope geometry under R5 evidence-gated refinement
+  shared-zone FREE ratio is review evidence only
 
 R3 Canonical Vehicle Profile
   IMPLEMENTED CORE
@@ -489,9 +488,9 @@ R5 Forward Connector
   real greenhouse: 0/17 fit original Turn Zones
   17/17 have analytic Dubins candidates
   real zone-fit diagnostic RECORDED
-  frozen Navigation Grid loader IMPLEMENTED
-  evidence-gated Turn Zone refinement proposal IMPLEMENTED / LOCAL GATE PENDING
+  shared-zone Navigation result RECORDED / not used as path gate
+  connector-specific Navigation preview gate IMPLEMENTED / LOCAL ACCEPTANCE PENDING
 
-R6+ reverse/search/swept feasibility/final Route Asset
+R6+ reverse/search/formal swept feasibility/final Route Asset
   NOT YET CLAIMED IMPLEMENTED
 ```
