@@ -66,6 +66,7 @@ class AgriculturalAisleGraph:
     aisles: tuple[AislePrimitive, ...]
     source: Mapping[str, Any] = field(default_factory=dict)
     schema: str = AISLE_GRAPH_SCHEMA
+    status: str = "DRAFT"
 
 
 def _normalize_direction(direction_xy: np.ndarray) -> np.ndarray:
@@ -205,7 +206,7 @@ def derive_agricultural_aisle_graph(
         end = points[-1]
         aisles.append(
             AislePrimitive(
-                aisle_id=f"aisle_{len(aisles) + 1:03d}",
+                aisle_id=f"aisle_{diagnostic.pair_index:03d}",
                 kind=kind,
                 pair_kind=str(diagnostic.pair_kind),
                 left_structure_ref=left_ref,
@@ -251,6 +252,7 @@ def aisle_graph_to_dict(
 
     payload: dict[str, Any] = {
         "schema": graph.schema,
+        "status": graph.status,
         "frame_id": graph.frame_id,
         "source": dict(graph.source),
         "row_direction_xy": [r(graph.row_direction_xy[0]), r(graph.row_direction_xy[1])],
