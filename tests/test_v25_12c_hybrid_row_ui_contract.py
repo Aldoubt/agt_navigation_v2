@@ -37,7 +37,10 @@ def test_aisle_centerline_selects_safest_cross_section_not_fixed_midpoint():
         "selected_v",
     ):
         assert token in corridor
-    assert "safe_centerline = _safest_centerline_within_pair(" in corridor
+    # One occurrence is the helper definition; at least one more proves the
+    # corridor evaluator actually invokes it without coupling this contract to
+    # a local variable name such as safe_centerline/centerline.
+    assert corridor.count("_safest_centerline_within_pair(") >= 2
 
 
 def test_navigation_panel_is_scrollable_and_explains_hybrid_row_support():
