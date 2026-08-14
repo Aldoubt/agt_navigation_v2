@@ -106,6 +106,15 @@ from .agricultural_coverage_ordering import (
     coverage_order_to_dict,
     derive_agricultural_coverage_order,
 )
+from .forward_connector import (
+    FORWARD_CONNECTOR_SCHEMA,
+    ForwardConnectorConfig,
+    ForwardConnectorPlan,
+    ForwardConnectorResult,
+    ForwardConnectorSample,
+    derive_forward_connector_plan,
+    forward_connector_plan_to_dict,
+)
 from .agricultural_route_io import (
     load_agricultural_aisle_graph,
     write_agricultural_coverage_order,
@@ -202,6 +211,13 @@ __all__ = [
     "CoverageOrderingConfig",
     "coverage_order_to_dict",
     "derive_agricultural_coverage_order",
+    "FORWARD_CONNECTOR_SCHEMA",
+    "ForwardConnectorConfig",
+    "ForwardConnectorPlan",
+    "ForwardConnectorResult",
+    "ForwardConnectorSample",
+    "derive_forward_connector_plan",
+    "forward_connector_plan_to_dict",
     "load_agricultural_aisle_graph",
     "write_agricultural_coverage_order",
 ]
