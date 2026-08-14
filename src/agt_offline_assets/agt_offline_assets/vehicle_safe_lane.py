@@ -196,21 +196,16 @@ def _derive_one_lane(
             continuity = 0.0 if previous_offset is None else abs(float(offset) - previous_offset)
             score = abs(float(offset)) + 0.5 * continuity
             feasible.append((score, float(offset), (x, y, float(sample[2]))))
-        if not feasible and previous_offset is not None:
-            # A local obstacle may require a larger lateral change than one sample
-            # permits.  Do not teleport laterally; break the current safe segment.
-            previous_offset = None
-            for offset in offsets:
-                x = float(sample[0] + offset * perpendicular[0])
-                y = float(sample[1] + offset * perpendicular[1])
-                if not _preview_pose_free(x, y, yaw, navigation, local_footprint):
-                    continue
-                feasible.append((abs(float(offset)), float(offset), (x, y, float(sample[2]))))
+
         if not feasible:
+            # If a pose exists only after a lateral jump larger than the allowed
+            # per-sample change, that is not a continuous lane.  Freeze an
+            # explicit gap and let the next sample start a new segment.
             selected.append(None)
             selected_offsets.append(None)
             previous_offset = None
             continue
+
         feasible.sort(key=lambda item: (item[0], abs(item[1]), item[1]))
         _, chosen_offset, point = feasible[0]
         selected.append(point)
