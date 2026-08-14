@@ -115,6 +115,14 @@ from .forward_connector import (
     derive_forward_connector_plan,
     forward_connector_plan_to_dict,
 )
+from .forward_connector_diagnostics import (
+    FORWARD_CONNECTOR_ZONE_FIT_SCHEMA,
+    ForwardConnectorZoneFitDiagnostic,
+    ForwardConnectorZoneFitReport,
+    diagnose_forward_connector_zone_fit,
+    forward_connector_zone_fit_to_dict,
+    write_forward_connector_zone_fit_report,
+)
 from .agricultural_route_io import (
     load_agricultural_aisle_graph,
     load_coverage_connector_requests,
@@ -221,6 +229,12 @@ __all__ = [
     "ForwardConnectorSample",
     "derive_forward_connector_plan",
     "forward_connector_plan_to_dict",
+    "FORWARD_CONNECTOR_ZONE_FIT_SCHEMA",
+    "ForwardConnectorZoneFitDiagnostic",
+    "ForwardConnectorZoneFitReport",
+    "diagnose_forward_connector_zone_fit",
+    "forward_connector_zone_fit_to_dict",
+    "write_forward_connector_zone_fit_report",
     "load_agricultural_aisle_graph",
     "load_coverage_connector_requests",
     "load_turn_zones",
