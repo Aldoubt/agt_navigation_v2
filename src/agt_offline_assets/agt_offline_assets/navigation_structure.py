@@ -9,7 +9,7 @@ Navigation Map policy uses them.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from math import ceil, degrees, atan
+from math import ceil
 from typing import Iterable
 
 import numpy as np
@@ -33,6 +33,12 @@ class NavigationStructureConfig:
     row_max_gap_m: float = 0.60
     row_minimum_segment_length_m: float = 1.50
     row_minimum_support_fraction: float = 0.12
+    row_obstacle_evidence_weight: float = 0.55
+    row_terrain_evidence_weight: float = 0.45
+    row_terrain_background_sigma_m: float = 0.45
+    row_terrain_prominence_scale_m: float = 0.08
+    row_terrain_minimum_ground_confidence: float = 0.20
+    row_minimum_cell_evidence: float = 0.08
     aisle_minimum_ground_confidence: float = 0.30
 
     def validate(self) -> None:
@@ -64,6 +70,20 @@ class NavigationStructureConfig:
             raise ValueError("row_minimum_segment_length_m must be > 0")
         if not 0.0 <= self.row_minimum_support_fraction <= 1.0:
             raise ValueError("row_minimum_support_fraction must be in [0, 1]")
+        if self.row_obstacle_evidence_weight < 0.0:
+            raise ValueError("row_obstacle_evidence_weight must be >= 0")
+        if self.row_terrain_evidence_weight < 0.0:
+            raise ValueError("row_terrain_evidence_weight must be >= 0")
+        if self.row_obstacle_evidence_weight + self.row_terrain_evidence_weight <= 0.0:
+            raise ValueError("row evidence weights must have a positive sum")
+        if self.row_terrain_background_sigma_m <= 0.0:
+            raise ValueError("row_terrain_background_sigma_m must be > 0")
+        if self.row_terrain_prominence_scale_m <= 0.0:
+            raise ValueError("row_terrain_prominence_scale_m must be > 0")
+        if not 0.0 <= self.row_terrain_minimum_ground_confidence <= 1.0:
+            raise ValueError("row_terrain_minimum_ground_confidence must be in [0, 1]")
+        if not 0.0 <= self.row_minimum_cell_evidence <= 1.0:
+            raise ValueError("row_minimum_cell_evidence must be in [0, 1]")
         if not 0.0 <= self.aisle_minimum_ground_confidence <= 1.0:
             raise ValueError("aisle_minimum_ground_confidence must be in [0, 1]")
 
@@ -115,8 +135,7 @@ def _robust_local_plane_slope(
     z = np.asarray(result.ground_height_m, dtype=np.float64)
     valid = np.isfinite(z) & np.asarray(result.ground_valid, dtype=bool)
     radius_prefilter = int(config.robust_slope_prefilter_radius_cells)
-    if radius_prefilter > 0:
-        filled = np.where(valid, z, 0.0)
+    if radius_prefilter > 0 and np.any(valid):
         _, nearest = ndimage.distance_transform_edt(~valid, return_indices=True)
         nearest_z = z[tuple(nearest)]
         filtered = ndimage.median_filter(
@@ -201,6 +220,60 @@ def _ground_confidence(
     return np.clip(confidence, 0.0, 1.0)
 
 
+def _terrain_ridge_evidence(
+    result: NavigationMapResult,
+    ground_confidence: np.ndarray,
+    config: NavigationStructureConfig,
+    ndimage,
+) -> np.ndarray:
+    """Extract raised crop-ridge relief after removing slowly varying terrain."""
+    z = np.asarray(result.ground_height_m, dtype=np.float64)
+    eligible = (
+        np.asarray(result.ground_valid, dtype=bool)
+        & np.isfinite(z)
+        & (
+            np.asarray(ground_confidence, dtype=np.float64)
+            >= float(config.row_terrain_minimum_ground_confidence)
+        )
+    )
+    evidence = np.zeros(z.shape, dtype=np.float64)
+    if not np.any(eligible):
+        return evidence
+
+    _, nearest = ndimage.distance_transform_edt(~eligible, return_indices=True)
+    filled = z[tuple(nearest)]
+    sigma_cells = max(
+        1.0, float(config.row_terrain_background_sigma_m) / result.resolution_m
+    )
+    background = ndimage.gaussian_filter(filled, sigma=sigma_cells, mode="nearest")
+    prominence = np.maximum(0.0, z - background)
+    evidence = np.clip(
+        prominence / float(config.row_terrain_prominence_scale_m), 0.0, 1.0
+    )
+    evidence *= np.asarray(ground_confidence, dtype=np.float64)
+    evidence[~eligible] = 0.0
+    return evidence
+
+
+def _hybrid_row_evidence(
+    result: NavigationMapResult,
+    terrain_ridge_evidence: np.ndarray,
+    config: NavigationStructureConfig,
+) -> np.ndarray:
+    obstacle = np.log1p(np.asarray(result.obstacle_count, dtype=np.float64))
+    obstacle_max = float(np.max(obstacle)) if obstacle.size else 0.0
+    if obstacle_max > 0.0:
+        obstacle /= obstacle_max
+    obstacle_weight = float(config.row_obstacle_evidence_weight)
+    terrain_weight = float(config.row_terrain_evidence_weight)
+    total = obstacle_weight + terrain_weight
+    hybrid = (
+        obstacle_weight * obstacle
+        + terrain_weight * np.asarray(terrain_ridge_evidence, dtype=np.float64)
+    ) / total
+    return np.clip(hybrid, 0.0, 1.0)
+
+
 def _normalize_direction(direction_xy: Iterable[float]) -> np.ndarray:
     direction = np.asarray(tuple(direction_xy), dtype=np.float64).reshape(2)
     norm = float(np.linalg.norm(direction))
@@ -212,15 +285,18 @@ def _normalize_direction(direction_xy: Iterable[float]) -> np.ndarray:
     return direction
 
 
-def _auto_row_direction(result: NavigationMapResult) -> np.ndarray:
-    """Estimate dominant elongated obstacle direction with a compact angle search."""
+def _auto_row_direction(
+    result: NavigationMapResult,
+    evidence_weight: np.ndarray,
+) -> np.ndarray:
+    """Estimate dominant elongated hybrid-row direction with a compact search."""
     xx, yy = _grid_xy(result)
-    weight = np.log1p(np.asarray(result.obstacle_count, dtype=np.float64))
-    valid = weight > 0.0
+    weight = np.asarray(evidence_weight, dtype=np.float64)
+    valid = weight > 0.05
     if np.count_nonzero(valid) < 20:
         return np.array([1.0, 0.0], dtype=np.float64)
-    x = xx[valid]
-    y = yy[valid]
+    x = xx[valid].copy()
+    y = yy[valid].copy()
     w = weight[valid]
     x -= np.average(x, weights=w)
     y -= np.average(y, weights=w)
@@ -246,9 +322,6 @@ def _auto_row_direction(result: NavigationMapResult) -> np.ndarray:
 def _fill_short_gaps_1d(mask: np.ndarray, maximum_gap_bins: int) -> np.ndarray:
     output = np.asarray(mask, dtype=bool).copy()
     if maximum_gap_bins <= 0 or output.size == 0:
-        return output
-    false_idx = np.flatnonzero(~output)
-    if false_idx.size == 0:
         return output
     padded = np.r_[False, output, False]
     starts = np.flatnonzero(~padded[:-1] & padded[1:])
@@ -281,6 +354,7 @@ def _row_structure(
     direction_xy: np.ndarray,
     ground_confidence: np.ndarray,
     robust_slope_deg: np.ndarray,
+    hybrid_evidence: np.ndarray,
     ndimage,
     signal,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, RowModel]:
@@ -290,11 +364,12 @@ def _row_structure(
     uu = xx * direction[0] + yy * direction[1]
     vv = xx * perpendicular[0] + yy * perpendicular[1]
 
-    obstacle_weight = np.log1p(np.asarray(result.obstacle_count, dtype=np.float64))
-    evidence = obstacle_weight > 0.0
+    weight = np.asarray(hybrid_evidence, dtype=np.float64)
+    evidence = weight >= float(config.row_minimum_cell_evidence)
     if not np.any(evidence):
         empty = np.zeros(result.occupancy.shape, dtype=np.float64)
-        model = RowModel(direction, float(degrees(atan(direction[1] / max(direction[0], 1e-12)))), (), config.row_half_width_m, ())
+        angle_deg = float(np.degrees(np.arctan2(direction[1], direction[0])))
+        model = RowModel(direction, angle_deg, (), config.row_half_width_m, ())
         return empty, empty.astype(bool), empty.astype(bool), model
 
     v_min = float(np.min(vv))
@@ -302,13 +377,21 @@ def _row_structure(
     bin_m = max(float(config.row_profile_bin_m), result.resolution_m)
     bin_count = max(8, int(ceil((v_max - v_min) / bin_m)))
     profile, edges = np.histogram(
-        vv[evidence], bins=bin_count, range=(v_min, v_max), weights=obstacle_weight[evidence]
+        vv[evidence],
+        bins=bin_count,
+        range=(v_min, v_max),
+        weights=weight[evidence],
     )
     sigma = float(config.row_profile_smoothing_m) / max(bin_m, 1e-9)
-    smooth_profile = ndimage.gaussian_filter1d(profile.astype(np.float64), sigma=max(0.0, sigma))
-    prominence = max(1e-9, float(np.max(smooth_profile)) * config.row_minimum_prominence_ratio)
+    smooth_profile = ndimage.gaussian_filter1d(
+        profile.astype(np.float64), sigma=max(0.0, sigma)
+    )
+    prominence = max(
+        1e-9,
+        float(np.max(smooth_profile)) * config.row_minimum_prominence_ratio,
+    )
     distance_bins = max(1, int(round(config.row_minimum_spacing_m / bin_m)))
-    peaks, properties = signal.find_peaks(
+    peaks, _ = signal.find_peaks(
         smooth_profile,
         distance=distance_bins,
         prominence=prominence,
@@ -320,12 +403,18 @@ def _row_structure(
     u_bin_m = result.resolution_m
     u_bins = max(1, int(ceil((u_max - u_min) / u_bin_m)))
     max_gap_bins = int(round(config.row_max_gap_m / u_bin_m))
-    minimum_segment_bins = max(1, int(round(config.row_minimum_segment_length_m / u_bin_m)))
+    minimum_segment_bins = max(
+        1, int(round(config.row_minimum_segment_length_m / u_bin_m))
+    )
 
     row_regularized = np.zeros(result.occupancy.shape, dtype=bool)
     row_support = np.zeros(result.occupancy.shape, dtype=np.float64)
     accepted_centers: list[float] = []
     support_fractions: list[float] = []
+    profile_max = max(float(np.max(smooth_profile)), 1e-9)
+
+    all_u_index = np.floor((uu - u_min) / u_bin_m).astype(np.int64)
+    all_u_index = np.clip(all_u_index, 0, u_bins - 1)
 
     for peak in peaks:
         center_v = float(centers[int(peak)])
@@ -341,20 +430,19 @@ def _row_structure(
             continue
         repaired = _fill_short_gaps_1d(u_support, max_gap_bins)
         repaired = _remove_short_true_runs(repaired, minimum_segment_bins)
-        all_u_index = np.floor((uu - u_min) / u_bin_m).astype(np.int64)
-        all_u_index = np.clip(all_u_index, 0, u_bins - 1)
         mask = band & repaired[all_u_index]
         if not np.any(mask):
             continue
         row_regularized |= mask
-        row_support[band] = np.maximum(
-            row_support[band],
-            float(smooth_profile[int(peak)] / max(np.max(smooth_profile), 1e-9)),
-        )
+        peak_score = float(smooth_profile[int(peak)] / profile_max)
+        row_support[band] = np.maximum(row_support[band], peak_score)
         accepted_centers.append(center_v)
         support_fractions.append(support_fraction)
 
-    raw_obstacle = np.asarray(result.obstacle_count) >= result.config.minimum_obstacle_points
+    raw_obstacle = (
+        np.asarray(result.obstacle_count)
+        >= result.config.minimum_obstacle_points
+    )
     acceptable_slope = np.isfinite(robust_slope_deg) & (
         robust_slope_deg <= result.config.maximum_slope_deg
     )
@@ -386,18 +474,21 @@ def derive_navigation_structure(
     ndimage, signal = _require_scipy()
     robust_slope, residual = _robust_local_plane_slope(result, cfg, ndimage)
     confidence = _ground_confidence(result, residual, cfg)
+    terrain_ridge = _terrain_ridge_evidence(result, confidence, cfg, ndimage)
+    hybrid_evidence = _hybrid_row_evidence(result, terrain_ridge, cfg)
     if row_direction_xy is not None:
         direction = _normalize_direction(row_direction_xy)
     elif cfg.row_direction_mode == "provided":
         raise ValueError("row_direction_mode=provided requires row_direction_xy")
     else:
-        direction = _auto_row_direction(result)
+        direction = _auto_row_direction(result, hybrid_evidence)
     row_support, row_regularized, aisle_candidate, row_model = _row_structure(
         result,
         cfg,
         direction,
         confidence,
         robust_slope,
+        hybrid_evidence,
         ndimage,
         signal,
     )
