@@ -1,6 +1,6 @@
 # V25-12E Agricultural Route Production
 
-Status: STARTED — R1 AISLE GRAPH IMPLEMENTATION
+Status: STARTED — R1 IMPLEMENTED / LOCAL ACCEPTANCE PENDING
 
 Date: 2026-08-14
 
@@ -150,25 +150,42 @@ Smac Hybrid-A* / State Lattice search fallback
 
 ### R1 — Aisle Graph deterministic export
 
-Status: IN PROGRESS
+Status: IMPLEMENTED / LOCAL ACCEPTANCE PENDING
 
-Deliverables
+Implemented
 
 ```text
-agt_offline_assets/agricultural_aisle_graph.py
-agt_agricultural_aisle_graph/v1
-unit tests
-Workbench export entry
+src/agt_offline_assets/agt_offline_assets/agricultural_aisle_graph.py
+src/agt_offline_assets/test/test_agricultural_aisle_graph.py
+tests/test_v25_12e_aisle_graph_contract.py
+Workbench: 离线资产 → 导出 Aisle Graph YAML
 ```
 
-Acceptance
+Schema
+
+```text
+agt_agricultural_aisle_graph/v1
+status: DRAFT
+```
+
+Current behavior
 
 - Interior aisle 与 Boundary aisle identity 可区分
-- centerline 从当前 grid evidence 恢复为 ordered XYZ polyline
-- start/end pose 可重现
-- width/length/diagnostic evidence 进入 YAML
-- 同一输入生成 deterministic output
-- 不修改 `NavigationMapResult` / `CorridorRefinementResult`
+- accepted corridor centerline 从 grid evidence 恢复为 ordered XYZ polyline
+- polyline 沿 Hybrid Row 正向 `u` 确定性排序
+- start/end pose 使用相同 row-direction yaw
+- aisle identity 绑定 corridor diagnostic pair index，避免前序 aisle 状态变化导致整体重编号
+- width / length / longitudinal overlap / safe-cell / centerline-cell evidence 进入 YAML
+- 同一输入按固定 rounding / sampling 生成 deterministic output
+- Workbench 导出不写入用户 workspace 绝对路径
+- Aisle Graph 明确保持 DRAFT，不修改 Navigation Map、Corridor evidence 或 READY Route Asset
+
+Local acceptance still required
+
+- unit/repository tests PASS
+- 在真实 greenhouse `processed.pcd` 上导出 YAML
+- 对照 2D / 3D aisle centerline 检查 aisle 数量、Boundary aisle、start/end、XYZ 高度
+- 检查 DRAFT YAML 后再进入 R2/R3
 
 ### R2 — Turn Zone authoring/export
 
@@ -225,9 +242,9 @@ Status: 3D REVIEW SUBSTRATE EXISTS, ROUTE OVERLAY NOT WIRED
 ## 8. Current next action
 
 ```text
-Implement R1 Aisle Graph
-→ local pytest
-→ Workbench real greenhouse export
-→ inspect aisle_graph.yaml
-→ only then start R2/R3
+Local pytest for R1
+→ Workbench real greenhouse aisle_graph.yaml export
+→ inspect aisle count / boundary aisles / XYZ / start-end poses
+→ mark R1 PASS only after operator review
+→ start R2 Turn Zone + R3 Vehicle Profile adapter
 ```
