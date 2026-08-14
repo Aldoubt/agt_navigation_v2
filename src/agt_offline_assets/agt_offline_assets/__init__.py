@@ -63,6 +63,7 @@ from .navigation_structure import (
     derive_navigation_structure,
 )
 from .navigation_corridor import (
+    AislePairDiagnostic,
     CorridorRefinementConfig,
     CorridorRefinementResult,
     derive_corridor_refinement,
@@ -127,6 +128,7 @@ __all__ = [
     "NavigationStructureResult",
     "RowModel",
     "derive_navigation_structure",
+    "AislePairDiagnostic",
     "CorridorRefinementConfig",
     "CorridorRefinementResult",
     "derive_corridor_refinement",
