@@ -1,8 +1,8 @@
 """Vehicle-pose-free aisle lanes for V25-12E route production.
 
-The Agricultural Aisle Graph is structural corridor evidence.  Its centerline is
+The Agricultural Aisle Graph is structural corridor evidence. Its centerline is
 not required to be a configuration-space FREE trajectory for a particular
-vehicle.  This layer keeps that graph immutable and derives a vehicle-specific
+vehicle. This layer keeps that graph immutable and derives a vehicle-specific
 lane near each structural centerline using the frozen Navigation Grid and the
 canonical preview footprint.
 
@@ -163,6 +163,32 @@ def _offset_candidates(maximum_shift_m: float, step_m: float) -> tuple[float, ..
     return tuple(sorted(set(float(v) for v in values), key=lambda v: (abs(v), v)))
 
 
+def _empty_lane(
+    aisle: AislePrimitive,
+    *,
+    structural_length_m: float,
+    allowed_lateral_shift_m: float,
+    total_sample_count: int,
+    reason: str,
+) -> VehicleSafeLane:
+    return VehicleSafeLane(
+        aisle_id=aisle.aisle_id,
+        status="NO_VEHICLE_SAFE_LANE",
+        structural_length_m=structural_length_m,
+        selected_span_m=0.0,
+        coverage_fraction=0.0,
+        low_u_retreat_m=None,
+        high_u_retreat_m=None,
+        allowed_lateral_shift_m=allowed_lateral_shift_m,
+        maximum_used_lateral_shift_m=0.0,
+        safe_sample_count=0,
+        total_sample_count=total_sample_count,
+        centerline_xyz=(),
+        lateral_offsets_m=(),
+        reason=reason,
+    )
+
+
 def _derive_one_lane(
     aisle: AislePrimitive,
     navigation: NavigationGridEvidence,
@@ -175,7 +201,20 @@ def _derive_one_lane(
     samples, distances = _resample_polyline(aisle, cfg.sample_spacing_m)
     total = float(distances[-1]) if distances.size else 0.0
     required_lateral_width = float(vehicle.navigation_width_m + 2.0 * cfg.preview_footprint_padding_m)
-    width_surplus = max(0.0, float(aisle.geometric_width_m) - required_lateral_width)
+
+    if float(aisle.geometric_width_m) + 1.0e-9 < required_lateral_width:
+        return _empty_lane(
+            aisle,
+            structural_length_m=total,
+            allowed_lateral_shift_m=0.0,
+            total_sample_count=int(samples.shape[0]),
+            reason=(
+                "STRUCTURAL_WIDTH_BELOW_PREVIEW_VEHICLE_WIDTH: "
+                f"aisle={aisle.geometric_width_m:.3f} m required={required_lateral_width:.3f} m"
+            ),
+        )
+
+    width_surplus = float(aisle.geometric_width_m) - required_lateral_width
     allowed_shift = min(float(cfg.maximum_lateral_shift_m), 0.5 * width_surplus)
     offsets = _offset_candidates(allowed_shift, cfg.lateral_search_step_m)
     yaw = math.atan2(float(direction[1]), float(direction[0]))
@@ -198,9 +237,6 @@ def _derive_one_lane(
             feasible.append((score, float(offset), (x, y, float(sample[2]))))
 
         if not feasible:
-            # If a pose exists only after a lateral jump larger than the allowed
-            # per-sample change, that is not a continuous lane.  Freeze an
-            # explicit gap and let the next sample start a new segment.
             selected.append(None)
             selected_offsets.append(None)
             previous_offset = None
@@ -224,20 +260,11 @@ def _derive_one_lane(
         segments.append((start, len(selected) - 1))
 
     if not segments:
-        return VehicleSafeLane(
-            aisle_id=aisle.aisle_id,
-            status="NO_VEHICLE_SAFE_LANE",
+        return _empty_lane(
+            aisle,
             structural_length_m=total,
-            selected_span_m=0.0,
-            coverage_fraction=0.0,
-            low_u_retreat_m=None,
-            high_u_retreat_m=None,
             allowed_lateral_shift_m=allowed_shift,
-            maximum_used_lateral_shift_m=0.0,
-            safe_sample_count=0,
             total_sample_count=len(selected),
-            centerline_xyz=(),
-            lateral_offsets_m=(),
             reason="no preview-footprint-free pose was found near the structural aisle centerline",
         )
 
@@ -336,6 +363,7 @@ def derive_vehicle_safe_lane_plan(
             "vehicle_navigation_width_m": float(vehicle.navigation_width_m),
             "preview_footprint_padding_m": float(cfg.preview_footprint_padding_m),
             "validation_scope": "PREVIEW_ONLY_NOT_R8_VEHICLE_READY",
+            "structural_width_gate_preserved": True,
             "structural_aisle_graph_mutated": False,
             "navigation_occupancy_mutated": False,
         }
