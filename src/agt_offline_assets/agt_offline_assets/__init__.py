@@ -96,6 +96,16 @@ from .vehicle_profile import (
     load_canonical_vehicle_profile,
     vehicle_profile_to_route_binding,
 )
+from .agricultural_coverage_ordering import (
+    COVERAGE_ORDER_SCHEMA,
+    AisleRejection,
+    AisleTraversal,
+    AgriculturalCoverageOrder,
+    ConnectorRequest,
+    CoverageOrderingConfig,
+    coverage_order_to_dict,
+    derive_agricultural_coverage_order,
+)
 
 __all__ = [
     "AssetContractError",
@@ -180,4 +190,12 @@ __all__ = [
     "CanonicalVehicleProfile",
     "load_canonical_vehicle_profile",
     "vehicle_profile_to_route_binding",
+    "COVERAGE_ORDER_SCHEMA",
+    "AisleRejection",
+    "AisleTraversal",
+    "AgriculturalCoverageOrder",
+    "ConnectorRequest",
+    "CoverageOrderingConfig",
+    "coverage_order_to_dict",
+    "derive_agricultural_coverage_order",
 ]
