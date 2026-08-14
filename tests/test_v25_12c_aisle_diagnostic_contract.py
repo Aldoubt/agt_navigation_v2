@@ -23,6 +23,7 @@ def test_corridor_emits_explicit_pair_decision_diagnostics():
         "geometric_cell_count",
         "safe_cell_count",
         "centerline_cell_count",
+        "pair_kind",
         "REJECTED_TOO_NARROW",
         "REJECTED_NO_LONGITUDINAL_OVERLAP",
         "REJECTED_MISSING_ROW_SUPPORT",
@@ -46,7 +47,9 @@ def test_workbench_exposes_why_each_aisle_pair_is_accepted_or_rejected():
         "中心线",
         "状态：",
         "拒绝：几何宽度不足",
-        "拒绝：两垄纵向重叠不足",
+        "拒绝：两侧结构纵向重叠不足",
         "拒绝：Ground / 坡度 / 障碍净空后无安全栅格",
+        "左边界/墙 ↔ 最外侧垄",
+        "最外侧垄 ↔ 右边界/墙",
     ):
         assert token in agricultural
