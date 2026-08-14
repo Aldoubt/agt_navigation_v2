@@ -1,9 +1,13 @@
 """Deterministic coverage ordering over an Agricultural Aisle Graph.
 
 R4 chooses which aisles are compatible with the canonical vehicle profile and
-assigns a boustrophedon traversal order.  It deliberately does not synthesize a
+assigns a boustrophedon traversal order. It deliberately does not synthesize a
 Dubins/Reeds-Shepp connector; instead it emits explicit connector requests for
 R5/R6/R7.
+
+Important semantic boundary: traversing an aisle against the graph's canonical
+row direction is still normal forward vehicle motion. Reverse gear is reserved
+for later connector fallback stages.
 """
 
 from __future__ import annotations
@@ -46,7 +50,8 @@ class AisleTraversal:
     sequence: int
     aisle_id: str
     aisle_kind: str
-    direction: str
+    motion_direction: str
+    graph_orientation: str
     entry_side: str
     exit_side: str
     entry_pose: tuple[float, float, float, float]
@@ -97,7 +102,7 @@ def _lateral_coordinate(aisle: AislePrimitive, perpendicular: np.ndarray) -> flo
     return float(midpoint @ perpendicular)
 
 
-def _reverse_pose(pose: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+def _reverse_pose_heading(pose: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
     x, y, z, yaw = pose
     reverse_yaw = float(np.arctan2(np.sin(yaw + np.pi), np.cos(yaw + np.pi)))
     return (float(x), float(y), float(z), reverse_yaw)
@@ -153,20 +158,20 @@ def derive_agricultural_coverage_order(
 
     traversals: list[AisleTraversal] = []
     for index, aisle in enumerate(eligible):
-        forward = (index % 2 == 0) == (cfg.start_side == "LOW_U")
+        with_graph_direction = (index % 2 == 0) == (cfg.start_side == "LOW_U")
         required_width = max(required_vehicle_width, float(aisle.minimum_required_width_m))
-        if forward:
+        if with_graph_direction:
             entry_pose = tuple(float(v) for v in aisle.start_pose)
             exit_pose = tuple(float(v) for v in aisle.end_pose)
             centerline = aisle.centerline_xyz
-            direction_name = "FORWARD"
+            graph_orientation = "WITH_ROW_DIRECTION"
             entry_side = "LOW_U"
             exit_side = "HIGH_U"
         else:
-            entry_pose = _reverse_pose(aisle.end_pose)
-            exit_pose = _reverse_pose(aisle.start_pose)
+            entry_pose = _reverse_pose_heading(aisle.end_pose)
+            exit_pose = _reverse_pose_heading(aisle.start_pose)
             centerline = tuple(reversed(aisle.centerline_xyz))
-            direction_name = "REVERSE_ORIENTATION"
+            graph_orientation = "AGAINST_ROW_DIRECTION"
             entry_side = "HIGH_U"
             exit_side = "LOW_U"
         traversals.append(
@@ -174,7 +179,8 @@ def derive_agricultural_coverage_order(
                 sequence=index + 1,
                 aisle_id=aisle.aisle_id,
                 aisle_kind=aisle.kind,
-                direction=direction_name,
+                motion_direction="FORWARD",
+                graph_orientation=graph_orientation,
                 entry_side=entry_side,
                 exit_side=exit_side,
                 entry_pose=entry_pose,
@@ -242,7 +248,8 @@ def coverage_order_to_dict(order: AgriculturalCoverageOrder) -> dict[str, Any]:
                 "sequence": traversal.sequence,
                 "aisle_id": traversal.aisle_id,
                 "aisle_kind": traversal.aisle_kind,
-                "direction": traversal.direction,
+                "motion_direction": traversal.motion_direction,
+                "graph_orientation": traversal.graph_orientation,
                 "entry_side": traversal.entry_side,
                 "exit_side": traversal.exit_side,
                 "entry_pose": pose_dict(traversal.entry_pose),
