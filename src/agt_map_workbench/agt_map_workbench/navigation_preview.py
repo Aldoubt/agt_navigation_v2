@@ -30,6 +30,8 @@ _CORRIDOR_LAYERS = {
     "row_structural_band",
     "vegetation_envelope",
     "boundary_exclusion",
+    "boundary_aisle",
+    "boundary_aisle_centerline",
     "refined_aisle",
     "aisle_centerline",
 }
@@ -140,9 +142,13 @@ def _rgba_for_result(
         rgba[corridor.vegetation_envelope] = (255, 145, 40, 205)
     elif layer == "boundary_exclusion":
         rgba[corridor.boundary_exclusion] = (255, 65, 65, 210)
+    elif layer == "boundary_aisle":
+        rgba[corridor.boundary_aisle_candidate] = (40, 170, 255, 235)
+    elif layer == "boundary_aisle_centerline":
+        rgba[corridor.boundary_aisle_centerline] = (80, 255, 190, 250)
     elif layer == "refined_aisle":
         rgba[corridor.aisle_candidate] = (35, 225, 255, 220)
-    else:
+    elif layer == "aisle_centerline":
         rgba[corridor.aisle_centerline] = (90, 255, 120, 245)
 
     return np.flipud(rgba).copy()
