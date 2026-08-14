@@ -117,7 +117,10 @@ from .forward_connector import (
 )
 from .agricultural_route_io import (
     load_agricultural_aisle_graph,
+    load_coverage_connector_requests,
+    load_turn_zones,
     write_agricultural_coverage_order,
+    write_forward_connector_plan,
 )
 
 __all__ = [
@@ -219,5 +222,8 @@ __all__ = [
     "derive_forward_connector_plan",
     "forward_connector_plan_to_dict",
     "load_agricultural_aisle_graph",
+    "load_coverage_connector_requests",
+    "load_turn_zones",
     "write_agricultural_coverage_order",
+    "write_forward_connector_plan",
 ]
