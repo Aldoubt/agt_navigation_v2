@@ -1,6 +1,6 @@
 # V25-12E R6 Reverse Fallback
 
-Status: R6A IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING; R6B NOT STARTED
+Status: R6A REAL-DATA PASS; R6B BOUNDED REVERSE PRIMITIVE CORE IMPLEMENTED / LOCAL ACCEPTANCE PENDING
 
 Date: 2026-08-14
 
@@ -67,33 +67,117 @@ Current implementation:
 
 ```text
 src/agt_offline_assets/agt_offline_assets/reverse_fallback_admission.py
+src/agt_offline_assets/agt_offline_assets/reverse_route_io.py
 src/agt_offline_assets/test/test_reverse_fallback_admission.py
 ```
 
-Frozen real greenhouse expectation before optional mixed approval:
+Real greenhouse operator acceptance:
 
 ```text
-eligible reverse fallback 13
-hold map review            1
-hold mixed evidence        3
-keep forward               0
+connector count             17
+eligible reverse fallback   13
+hold map review              1
+hold mixed evidence          3
+keep forward                 0
 ```
 
-## 3. R6B — Reverse-aware Connector Planner
-
-Status: NOT STARTED
-
-R6B shall consume only connector IDs admitted by R6A
-
-Target backend policy remains:
+Frozen automatically admitted IDs:
 
 ```text
-Reeds-Shepp / reverse-aware local connector
-        ↓ fail
-Smac Hybrid-A* / State Lattice search fallback
+connector_002
+connector_003
+connector_004
+connector_005
+connector_006
+connector_008
+connector_010
+connector_011
+connector_012
+connector_014
+connector_015
+connector_016
+connector_017
 ```
 
-R6B requirements:
+Held IDs:
+
+```text
+connector_001 → HOLD_MAP_REVIEW
+connector_007 → HOLD_MIXED_EVIDENCE
+connector_009 → HOLD_MIXED_EVIDENCE
+connector_013 → HOLD_MIXED_EVIDENCE
+```
+
+R6A real-data acceptance PASS
+
+## 3. R6B — Bounded Reverse-aware Connector Planner
+
+Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
+
+Current backend identity:
+
+```text
+BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP
+```
+
+Schema:
+
+```text
+agt_reverse_primitive_connector_plan/v1
+```
+
+Implementation:
+
+```text
+src/agt_offline_assets/agt_offline_assets/reverse_primitive_connector.py
+src/agt_offline_assets/test/test_reverse_primitive_connector.py
+```
+
+R6B consumes only connector IDs admitted by R6A
+
+Current local primitive model:
+
+```text
+canonical MK-mini Rmin = 1.5 m
+curvature primitives    = {-1/R, 0, +1/R}
+motion direction        = FORWARD or REVERSE
+explicit zero-distance cusp action
+max cusps default       = 2
+primary maneuver family = F → R → F
+```
+
+The search is bounded in the Agricultural Aisle Graph row frame:
+
+```text
+longitudinal extent = requested Turn Zone extent + small explicit padding
+lateral extent      = current from/to aisle pair + small explicit padding
+```
+
+It does not search the whole map
+
+Every motion sample is checked against:
+
+```text
+frozen Navigation Grid
++ canonical MK-mini preview navigation footprint
++ 0.05 m default preview footprint padding
+```
+
+`OCCUPIED`, `UNKNOWN`, and out-of-grid footprint evidence all fail closed
+
+Output samples explicitly contain:
+
+```text
+x / y / z / yaw
+motion_direction = FORWARD | REVERSE
+curvature_per_m
+segment_index
+is_cusp
+```
+
+The current `z` value is only linear start/end interpolation for review; R6B is a planar route connector planner
+
+R6B requirements remain:
 
 1. respect canonical MK-mini `Rmin=1.5 m`
 2. permit true `motion_direction=REVERSE` only inside connector segments
@@ -113,22 +197,35 @@ Do not collapse R6B into R7
 ```text
 R6B
 = bounded reverse-aware connector solution for an already-known aisle pair
+= finite local primitive search
+= max cusp / path length / expansion budget
 
 R7
-= search fallback when analytic/local connector families cannot solve the pair
+= general search fallback when local connector families cannot solve the pair
+= Smac Hybrid-A* / State Lattice class backend
 ```
 
-The preferred R6B implementation is a Reeds-Shepp-compatible backend or an
-explicitly named reverse primitive backend with equivalent forward/reverse
-curvature constraints. It must not be mislabeled as analytic Reeds-Shepp if the
-implementation is only a primitive search
+The preferred long-term analytic backend may still be Reeds-Shepp / RS-CC, but
+the current R6B implementation must never be called analytic Reeds-Shepp
+
+Target fallback policy remains:
+
+```text
+R6B bounded reverse primitive
+        ↓ fail
+R7 Smac Hybrid-A* / State Lattice
+```
 
 ## 5. Current next action
 
 ```text
-local pytest for R5.6 + R6A
-→ generate reverse_fallback_admission.yaml from frozen forward_connector_candidate_audit.yaml
-→ confirm real count 13 / 1 / 3 / 0
-→ freeze R6A PASS
-→ implement R6B reverse-aware connector backend only for admitted IDs
+local pytest for R6A + R6B
+→ load frozen reverse_fallback_admission.yaml
+→ run only the 13 admitted connector IDs
+→ inspect solved / unsolved count
+→ inspect path length / reverse distance / cusp count / search expansions
+→ verify preview footprint OCCUPIED=0 / UNKNOWN=0 on every solved path
+→ inspect whether any connector hits search budget
+→ freeze R6B real-data result
+→ send only unsolved connectors to R7
 ```
