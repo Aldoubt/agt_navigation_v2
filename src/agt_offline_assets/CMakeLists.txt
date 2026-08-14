@@ -41,6 +41,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_navigation_map_derivation test/test_navigation_map_derivation.py
   )
+  ament_add_pytest_test(test_navigation_grid test/test_navigation_grid.py)
   ament_add_pytest_test(
     test_navigation_structure test/test_navigation_structure.py
   )
@@ -73,6 +74,9 @@ if(BUILD_TESTING)
   )
   ament_add_pytest_test(
     test_forward_connector_diagnostics test/test_forward_connector_diagnostics.py
+  )
+  ament_add_pytest_test(
+    test_turn_zone_refinement test/test_turn_zone_refinement.py
   )
 endif()
 
