@@ -46,13 +46,15 @@ _CORRIDOR_LAYERS = {
     "boundary_exclusion",
     "refined_aisle",
     "aisle_centerline",
+    "boundary_aisle",
+    "boundary_aisle_centerline",
 }
 _STATUS_TEXT = {
     "ACCEPTED": "接受",
     "ACCEPTED_NO_CENTERLINE": "接受，但当前安全证据未形成中心线",
     "REJECTED_TOO_NARROW": "拒绝：几何宽度不足",
-    "REJECTED_NO_LONGITUDINAL_OVERLAP": "拒绝：两垄纵向重叠不足",
-    "REJECTED_MISSING_ROW_SUPPORT": "拒绝：至少一条垄缺少有效纵向支持",
+    "REJECTED_NO_LONGITUDINAL_OVERLAP": "拒绝：两侧结构纵向重叠不足",
+    "REJECTED_MISSING_ROW_SUPPORT": "拒绝：至少一侧结构缺少有效纵向支持",
     "REJECTED_NO_SAFE_CELLS": "拒绝：Ground / 坡度 / 障碍净空后无安全栅格",
 }
 
@@ -80,8 +82,10 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._nav_layer.addItem("垄结构带（不随叶片包络变化）", "row_structural_band")
         self._nav_layer.addItem("植被 / 原始障碍包络", "vegetation_envelope")
         self._nav_layer.addItem("墙体 / 地图边界排除带", "boundary_exclusion")
-        self._nav_layer.addItem("精炼行道候选（仅两垄之间）", "refined_aisle")
-        self._nav_layer.addItem("行道中心线", "aisle_centerline")
+        self._nav_layer.addItem("边界行道候选（墙 ↔ 外侧垄）", "boundary_aisle")
+        self._nav_layer.addItem("边界行道中心线", "boundary_aisle_centerline")
+        self._nav_layer.addItem("精炼行道候选（含显式边界行道）", "refined_aisle")
+        self._nav_layer.addItem("行道中心线（含显式边界行道）", "aisle_centerline")
 
         panel = QWidget()
         panel_layout = QVBoxLayout(panel)
@@ -191,6 +195,35 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         row.addWidget(self._raw_obstacle_clearance)
         panel_layout.addLayout(row)
 
+        self._boundary_aisle_enabled = QCheckBox("识别墙 ↔ 最外侧垄边界行道")
+        self._boundary_aisle_enabled.setChecked(True)
+        panel_layout.addWidget(self._boundary_aisle_enabled)
+        boundary_note = QLabel(
+            "边界行道不是“地图边缘剩余空白”：只有检测到明确 wall/boundary anchor，"
+            "并且与最近有效垄纵向重叠、净宽、Ground、坡度和障碍净空全部满足时才生成"
+        )
+        boundary_note.setWordWrap(True)
+        panel_layout.addWidget(boundary_note)
+
+        row = QHBoxLayout()
+        self._boundary_wall_half_width = QDoubleSpinBox()
+        self._boundary_wall_half_width.setPrefix("墙体结构半宽：")
+        self._boundary_wall_half_width.setSuffix(" m")
+        self._boundary_wall_half_width.setDecimals(2)
+        self._boundary_wall_half_width.setRange(0.04, 0.60)
+        self._boundary_wall_half_width.setSingleStep(0.02)
+        self._boundary_wall_half_width.setValue(0.10)
+        self._boundary_wall_clearance = QDoubleSpinBox()
+        self._boundary_wall_clearance.setPrefix("墙侧净空：")
+        self._boundary_wall_clearance.setSuffix(" m")
+        self._boundary_wall_clearance.setDecimals(2)
+        self._boundary_wall_clearance.setRange(0.0, 1.0)
+        self._boundary_wall_clearance.setSingleStep(0.02)
+        self._boundary_wall_clearance.setValue(0.12)
+        row.addWidget(self._boundary_wall_half_width)
+        row.addWidget(self._boundary_wall_clearance)
+        panel_layout.addLayout(row)
+
         analyze = QPushButton("重新计算 Ground / Row / Corridor 证据")
         analyze.clicked.connect(self._recompute_navigation_structure)
         panel_layout.addWidget(analyze)
@@ -244,6 +277,9 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             aisle_side_clearance_m=float(self._aisle_side_clearance.value()),
             raw_obstacle_clearance_m=float(self._raw_obstacle_clearance.value()),
             minimum_row_longitudinal_span_m=float(self._row_min_length.value()),
+            enable_boundary_aisles=bool(self._boundary_aisle_enabled.isChecked()),
+            boundary_wall_half_width_m=float(self._boundary_wall_half_width.value()),
+            boundary_wall_clearance_m=float(self._boundary_wall_clearance.value()),
         )
 
     def _row_direction_for_structure(self):
@@ -327,8 +363,13 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         confident = int(np.count_nonzero(structure.ground_confidence >= 0.30))
         old_aisle = int(np.count_nonzero(structure.aisle_candidate))
         refined_aisle = int(np.count_nonzero(corridor.aisle_candidate))
+        boundary_aisle = int(np.count_nonzero(corridor.boundary_aisle_candidate))
         accepted_pairs = sum(
             diagnostic.status.startswith("ACCEPTED")
+            for diagnostic in corridor.aisle_pair_diagnostics
+        )
+        boundary_pairs = sum(
+            diagnostic.pair_kind.startswith("BOUNDARY")
             for diagnostic in corridor.aisle_pair_diagnostics
         )
         spacing = (
@@ -342,7 +383,21 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             f"名义垄距 {spacing}\n"
             f"Hybrid Row=障碍55%+地形45% | Ground Confidence≥0.30：{confident:,} | "
             f"旧行道 {old_aisle:,} → 精炼行道 {refined_aisle:,} | "
+            f"边界行道 {boundary_aisle:,} | "
             f"行道对 {accepted_pairs}/{len(corridor.aisle_pair_diagnostics)} 接受"
+            f"（其中边界对 {boundary_pairs}）"
+        )
+
+    @staticmethod
+    def _diagnostic_label(diagnostic) -> str:
+        if diagnostic.pair_kind == "BOUNDARY_LOW":
+            return f"BL | Wall-L↔Row01 | {diagnostic.status}"
+        if diagnostic.pair_kind == "BOUNDARY_HIGH":
+            return f"BR | Row-last↔Wall-R | {diagnostic.status}"
+        return (
+            f"A{diagnostic.pair_index:02d} | "
+            f"Row{diagnostic.pair_index:02d}↔Row{diagnostic.pair_index + 1:02d} | "
+            f"{diagnostic.status}"
         )
 
     def _refresh_aisle_pair_diagnostics(self) -> None:
@@ -355,9 +410,7 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         if corridor is not None:
             for diagnostic in corridor.aisle_pair_diagnostics:
                 self._aisle_diagnostic_combo.addItem(
-                    f"A{diagnostic.pair_index:02d} | "
-                    f"Row{diagnostic.pair_index:02d}↔Row{diagnostic.pair_index + 1:02d} | "
-                    f"{diagnostic.status}",
+                    self._diagnostic_label(diagnostic),
                     diagnostic.pair_index - 1,
                 )
         if self._aisle_diagnostic_combo.count() > 0:
@@ -383,7 +436,13 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             else f"{diagnostic.longitudinal_overlap_m:.2f} m"
         )
         status_text = _STATUS_TEXT.get(diagnostic.status, diagnostic.status)
+        kind_text = {
+            "ROW_ROW": "垄 ↔ 垄",
+            "BOUNDARY_LOW": "左边界/墙 ↔ 最外侧垄",
+            "BOUNDARY_HIGH": "最外侧垄 ↔ 右边界/墙",
+        }.get(diagnostic.pair_kind, diagnostic.pair_kind)
         self._aisle_diagnostic_detail.setText(
+            f"类型：{kind_text}\n"
             f"中心距 {diagnostic.center_distance_m:.2f} m | "
             f"结构占用 {diagnostic.structural_reserved_m:.2f} m | "
             f"两侧净空 {diagnostic.side_clearance_reserved_m:.2f} m\n"
@@ -413,6 +472,7 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             suffix += (
                 f" | accepted={len(corridor.accepted_row_centers_v_m)}"
                 f" | refined aisle={int(np.count_nonzero(corridor.aisle_candidate)):,}"
+                f" | boundary aisle={int(np.count_nonzero(corridor.boundary_aisle_candidate)):,}"
             )
         self._nav_status.setText(self._nav_status.text() + suffix)
 
