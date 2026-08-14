@@ -69,6 +69,7 @@ flowchart LR
   ORDER["Coverage Ordering\nvehicle filter + Boustrophedon"]
   REQUEST["Connector Requests\nLOW_U / HIGH_U"]
   FWD["Forward-first\nAnalytic Dubins → Dubins-CC"]
+  FIT["Turn-Zone Fit Diagnostic\noutward / inward / lateral deficit"]
   REV["Reverse fallback\nReeds-Shepp / RS-CC"]
   SMAC["Search fallback\nSmac Hybrid / State Lattice"]
   SWEEP["Full-footprint + kinematic\nswept validation"]
@@ -86,9 +87,11 @@ flowchart LR
   POLICY --> ORDER
   ORDER --> REQUEST
   REQUEST --> FWD
-  FWD -->|infeasible| REV
+  FWD -->|Turn Zone reject| FIT
+  FIT -->|modest expansion physically available| TURN
+  FIT -->|headland insufficient| REV
+  FWD -->|centerline accepted| SWEEP
   REV -->|infeasible| SMAC
-  FWD --> SWEEP
   REV --> SWEEP
   SMAC --> SWEEP
   NAV --> SWEEP
@@ -106,6 +109,7 @@ Aisle Graph          决定“有哪些结构化道路”
 Coverage Ordering    决定“这台车能走哪些道路、以什么顺序访问”
 Connector Request    决定“下一对道路需要在哪一侧连接”
 Connector Planner    决定“怎样满足运动学连接”
+Zone-Fit Diagnostic  决定“forward 失败是 envelope 太小还是 headland 真不足”
 Navigation Map       决定“几何上是否安全”
 Vehicle Profile      决定“这台车是否真的能通过/转过去”
 Route Asset          冻结最终可执行离线路线
@@ -144,6 +148,8 @@ Turn Zone 是 connector search envelope，不是 FREE-space truth
 它可以约束允许调头、方向切换、倒车的位置，但任何 connector 仍必须重新经过 Navigation Map 与 full-footprint feasibility
 
 首版自动派生 `turn_low_u` / `turn_high_u`，后续允许 Workbench operator 修订
+
+自动 Turn Zone 参数不是车辆事实，也不是固定场景真值；R5 zone-fit diagnostic 可以证明某个 envelope 过小，但扩大 Turn Zone 前仍必须和 Navigation Map / 真实 headland 空间核对
 
 ## 6. Vehicle Profile 是唯一车辆几何真值
 
@@ -254,19 +260,19 @@ Fields2Cover / OR-tools 可以以后替换 ordering backend，但资产合同不
 
 ## 8. Connector planning policy
 
+冻结的 backend 优先级语义
+
 ```text
-Connector Request
-    ↓
-Analytic Dubins forward-only
-    ↓ infeasible in Turn Zone
-Dubins Continuous Curvature backend candidate
-    ↓ infeasible or collision
-Reeds-Shepp / reverse-aware connector
-    ↓ infeasible or collision
+Dubins / Dubins-CC forward first
+        ↓ fail
+Reeds-Shepp reverse fallback
+        ↓ fail
 Smac Hybrid-A* / State Lattice search fallback
-    ↓
+        ↓
 Full-footprint validation
 ```
+
+当前 R5 已实现的是 classical analytic Dubins forward-only，Dubins-CC 仍是后续可替换 forward backend candidate
 
 对于 MK-mini，首个 forward connector 必须尊重 `Rmin=1.5 m`
 
@@ -302,6 +308,46 @@ formal Route READY
 ```
 
 因此 `ACCEPTED_CENTERLINE` 只代表可以进入 R8 等后续 gate，不代表车辆最终可执行
+
+### 8.1 Forward Turn-Zone fit diagnostic
+
+真实温室首轮 R5 出现 17/17 `NO_FORWARD_DUBINS_IN_TURN_ZONE`，但每个 connector 都存在 4~5 个 analytic Dubins candidate，且最佳 inside fraction 约在 0.519~0.907
+
+这不能直接解释成“必须倒车”
+
+新增独立 schema
+
+```text
+agt_forward_connector_zone_fit_diagnostic/v1
+```
+
+它不改变 R5 plan 的冻结语义，而是在 Agricultural Aisle Graph row frame 中选择“需要最少 Turn Zone 扩张”的 forward Dubins candidate，并输出
+
+```text
+required_outward_extension_m
+required_inward_extension_m
+required_lateral_low_extension_m
+required_lateral_high_extension_m
+max_required_extension_m
+```
+
+对于当前矩形 `AUTO_ENDPOINT_ENVELOPE` Turn Zone，这些是精确的 row-frame bounding-envelope deficit
+
+对于未来任意/凹多边形，它们只是 bounding-envelope diagnostic，不能替代 polygon containment
+
+决策规则
+
+```text
+如果所需扩张很小
++ Navigation Map / 真实棚头确有对应 FREE 空间
+→ 修订 Turn Zone
+→ 重跑 R5
+
+如果所需扩张很大
+或扩张区域实际是墙 / 垄 / UNKNOWN / 不可用空间
+→ forward-only 物理不可接受
+→ 将该 connector 送入 R6 reverse fallback
+```
 
 是否允许 reverse 由 Route Policy 联合 canonical Vehicle Profile 决定
 
@@ -348,7 +394,7 @@ R1  Aisle Graph deterministic export
 R2  Turn Zone derivation / authoring / export
 R3  Canonical Vehicle Profile adapter
 R4  Vehicle-aware deterministic boustrophedon ordering
-R5  Forward connector backend
+R5  Forward connector backend + Turn-Zone fit diagnostic
 R6  Reverse fallback backend
 R7  Smac search fallback adapter
 R8  Swept-footprint / kinematic feasibility
@@ -363,10 +409,12 @@ V25-12C Ground / Row / Aisle / 3D Review
   REAL-DATA OPERATOR REVIEW POSITIVE
 
 R1 Aisle Graph
-  IMPLEMENTED; GREENHOUSE REAL-DATA ACCEPTED; AUTOMATED GATE TO CONFIRM
+  IMPLEMENTED; GREENHOUSE REAL-DATA ACCEPTED; AUTOMATED GATE TO CONFIRM AFTER DOC FIX
 
 R2 Turn Zones
-  IMPLEMENTED CORE; LOCAL ACCEPTANCE PENDING
+  IMPLEMENTED CORE
+  REAL ASSET GENERATED
+  envelope geometry under R5 diagnostic
 
 R3 Canonical Vehicle Profile
   IMPLEMENTED CORE
@@ -381,8 +429,9 @@ R4 Coverage Ordering
 
 R5 Forward Connector
   IMPLEMENTED CORE
-  analytic forward-only Dubins + Turn Zone centerline gate
-  LOCAL ACCEPTANCE PENDING
+  real greenhouse: 0/17 fit current Turn Zones
+  17/17 have analytic Dubins candidates
+  Turn-Zone fit diagnostic IMPLEMENTED / LOCAL GATE PENDING
 
 R6+ reverse/search/swept feasibility/final Route Asset
   NOT YET CLAIMED IMPLEMENTED
