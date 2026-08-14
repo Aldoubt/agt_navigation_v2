@@ -1,4 +1,4 @@
-"""Qt overlay rendering for ground-relative and agricultural structure evidence."""
+"""Qt overlay rendering for ground-relative and agricultural evidence."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from agt_offline_assets import (
     FREE,
     OCCUPIED,
     UNKNOWN,
+    CorridorRefinementResult,
     NavigationMapResult,
     NavigationStructureResult,
 )
@@ -24,17 +25,28 @@ _STRUCTURE_LAYERS = {
     "row_regularized",
     "aisle_candidate",
 }
+_CORRIDOR_LAYERS = {
+    "row_centerline",
+    "row_structural_band",
+    "vegetation_envelope",
+    "boundary_exclusion",
+    "refined_aisle",
+    "aisle_centerline",
+}
 
 
 def _rgba_for_result(
     result: NavigationMapResult,
     layer: str,
     structure: NavigationStructureResult | None = None,
+    corridor: CorridorRefinementResult | None = None,
 ) -> np.ndarray:
-    if layer not in _BASE_LAYERS | _STRUCTURE_LAYERS:
+    if layer not in _BASE_LAYERS | _STRUCTURE_LAYERS | _CORRIDOR_LAYERS:
         raise ValueError(f"unsupported navigation preview layer: {layer}")
     if layer in _STRUCTURE_LAYERS and structure is None:
         raise ValueError(f"navigation structure layer requires structure result: {layer}")
+    if layer in _CORRIDOR_LAYERS and corridor is None:
+        raise ValueError(f"corridor layer requires corridor result: {layer}")
 
     height, width = result.occupancy.shape
     rgba = np.zeros((height, width, 4), dtype=np.uint8)
@@ -117,13 +129,22 @@ def _rgba_for_result(
         rgba[..., 2] = np.where(values > 0.0, 255, 0).astype(np.uint8)
         rgba[..., 3] = np.where(values > 0.0, (90 + 150 * values).astype(np.uint8), 0)
     elif layer == "row_regularized":
-        mask = structure.row_regularized_obstacle
-        rgba[mask] = (255, 80, 180, 220)
+        rgba[structure.row_regularized_obstacle] = (255, 80, 180, 220)
+    elif layer == "aisle_candidate":
+        rgba[structure.aisle_candidate] = (40, 220, 255, 180)
+    elif layer == "row_centerline":
+        rgba[corridor.row_centerline] = (255, 230, 70, 245)
+    elif layer == "row_structural_band":
+        rgba[corridor.row_structural_band] = (255, 80, 190, 210)
+    elif layer == "vegetation_envelope":
+        rgba[corridor.vegetation_envelope] = (255, 145, 40, 205)
+    elif layer == "boundary_exclusion":
+        rgba[corridor.boundary_exclusion] = (255, 65, 65, 210)
+    elif layer == "refined_aisle":
+        rgba[corridor.aisle_candidate] = (35, 225, 255, 220)
     else:
-        mask = structure.aisle_candidate
-        rgba[mask] = (40, 220, 255, 180)
+        rgba[corridor.aisle_centerline] = (90, 255, 120, 245)
 
-    # Internal result rows start at minimum world Y; QImage row 0 must be maximum Y.
     return np.flipud(rgba).copy()
 
 
@@ -131,8 +152,9 @@ def navigation_layer_pixmap(
     result: NavigationMapResult,
     layer: str,
     structure: NavigationStructureResult | None = None,
+    corridor: CorridorRefinementResult | None = None,
 ) -> QPixmap:
-    rgba = _rgba_for_result(result, layer, structure)
+    rgba = _rgba_for_result(result, layer, structure, corridor)
     height, width, _ = rgba.shape
     image = QImage(
         rgba.data,
@@ -157,8 +179,9 @@ class NavigationPreviewItem(QGraphicsPixmapItem):
         result: NavigationMapResult,
         layer: str,
         structure: NavigationStructureResult | None = None,
+        corridor: CorridorRefinementResult | None = None,
     ) -> None:
-        self.setPixmap(navigation_layer_pixmap(result, layer, structure))
+        self.setPixmap(navigation_layer_pixmap(result, layer, structure, corridor))
         maximum_y = result.origin_y_m + result.height * result.resolution_m
         self.setPos(float(result.origin_x_m), float(-maximum_y))
         self.setScale(float(result.resolution_m))
