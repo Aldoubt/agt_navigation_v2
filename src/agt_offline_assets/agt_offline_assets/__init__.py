@@ -56,6 +56,7 @@ from .navigation_map_derivation import (
     derive_ground_relative_navigation_map,
     write_navigation_map_derivation,
 )
+from .navigation_grid import NavigationGridEvidence, load_navigation_grid
 from .navigation_structure import (
     NavigationStructureConfig,
     NavigationStructureResult,
@@ -123,6 +124,16 @@ from .forward_connector_diagnostics import (
     forward_connector_zone_fit_to_dict,
     write_forward_connector_zone_fit_report,
 )
+from .turn_zone_refinement import (
+    TURN_ZONE_REFINEMENT_SCHEMA,
+    TurnZoneExpansionEvidence,
+    TurnZoneRefinementConfig,
+    TurnZoneRefinementPlan,
+    TurnZoneRefinementProposal,
+    derive_turn_zone_refinement_proposal,
+    turn_zone_refinement_to_dict,
+    write_turn_zone_refinement_proposal,
+)
 from .agricultural_route_io import (
     load_agricultural_aisle_graph,
     load_coverage_connector_requests,
@@ -130,6 +141,7 @@ from .agricultural_route_io import (
     write_agricultural_coverage_order,
     write_forward_connector_plan,
 )
+from .route_diagnostic_io import load_forward_connector_zone_fit_report
 
 __all__ = [
     "AssetContractError",
@@ -186,6 +198,8 @@ __all__ = [
     "apply_navigation_overrides",
     "derive_ground_relative_navigation_map",
     "write_navigation_map_derivation",
+    "NavigationGridEvidence",
+    "load_navigation_grid",
     "NavigationStructureConfig",
     "NavigationStructureResult",
     "RowModel",
@@ -235,6 +249,15 @@ __all__ = [
     "diagnose_forward_connector_zone_fit",
     "forward_connector_zone_fit_to_dict",
     "write_forward_connector_zone_fit_report",
+    "TURN_ZONE_REFINEMENT_SCHEMA",
+    "TurnZoneExpansionEvidence",
+    "TurnZoneRefinementConfig",
+    "TurnZoneRefinementPlan",
+    "TurnZoneRefinementProposal",
+    "derive_turn_zone_refinement_proposal",
+    "turn_zone_refinement_to_dict",
+    "write_turn_zone_refinement_proposal",
+    "load_forward_connector_zone_fit_report",
     "load_agricultural_aisle_graph",
     "load_coverage_connector_requests",
     "load_turn_zones",
