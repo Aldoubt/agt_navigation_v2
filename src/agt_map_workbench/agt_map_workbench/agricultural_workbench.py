@@ -19,8 +19,11 @@ from PyQt5.QtWidgets import (
 )
 
 from agt_offline_assets import (
+    CorridorRefinementConfig,
+    CorridorRefinementResult,
     NavigationStructureConfig,
     NavigationStructureResult,
+    derive_corridor_refinement,
     derive_navigation_structure,
 )
 
@@ -35,13 +38,22 @@ _STRUCTURE_LAYERS = {
     "row_regularized",
     "aisle_candidate",
 }
+_CORRIDOR_LAYERS = {
+    "row_centerline",
+    "row_structural_band",
+    "vegetation_envelope",
+    "boundary_exclusion",
+    "refined_aisle",
+    "aisle_centerline",
+}
 
 
 class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
-    """Adds terrain-scale and crop-row evidence without replacing the base editor."""
+    """Adds terrain, crop-row, and explicit aisle evidence to the base editor."""
 
     def __init__(self) -> None:
         self._navigation_structure_result: NavigationStructureResult | None = None
+        self._corridor_refinement_result: CorridorRefinementResult | None = None
         super().__init__()
         self.setWindowTitle("AGT 地图工作台 — V25-12C 农业结构")
 
@@ -53,15 +65,21 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._nav_layer.addItem("0.5m Robust Plane 坡度", "robust_slope")
         self._nav_layer.addItem("局部平面残差", "plane_residual")
         self._nav_layer.addItem("种植行支持强度", "row_support")
-        self._nav_layer.addItem("规则化种植行", "row_regularized")
-        self._nav_layer.addItem("行道候选", "aisle_candidate")
+        self._nav_layer.addItem("规则化种植行（旧结构证据）", "row_regularized")
+        self._nav_layer.addItem("行道候选（旧剩余区域逻辑）", "aisle_candidate")
+        self._nav_layer.addItem("垄中心线", "row_centerline")
+        self._nav_layer.addItem("垄结构带（不随叶片包络变化）", "row_structural_band")
+        self._nav_layer.addItem("植被 / 原始障碍包络", "vegetation_envelope")
+        self._nav_layer.addItem("墙体 / 地图边界排除带", "boundary_exclusion")
+        self._nav_layer.addItem("精炼行道候选（仅两垄之间）", "refined_aisle")
+        self._nav_layer.addItem("行道中心线", "aisle_centerline")
 
         panel = QWidget()
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(0, 4, 0, 0)
         title = QLabel(
-            "农业结构分析：Ground Confidence → Robust Plane Slope → "
-            "Row Structure → Aisle Candidate"
+            "农业结构：Ground Confidence → Robust Slope → Row Skeleton → "
+            "Structural Band / Vegetation Envelope → Refined Aisle"
         )
         title.setWordWrap(True)
         panel_layout.addWidget(title)
@@ -83,12 +101,24 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
 
         row = QHBoxLayout()
         self._row_half_width = QDoubleSpinBox()
-        self._row_half_width.setPrefix("垄半宽：")
+        self._row_half_width.setPrefix("检测带半宽：")
         self._row_half_width.setSuffix(" m")
         self._row_half_width.setDecimals(2)
         self._row_half_width.setRange(0.08, 0.80)
         self._row_half_width.setSingleStep(0.02)
         self._row_half_width.setValue(0.22)
+        self._row_structural_half_width = QDoubleSpinBox()
+        self._row_structural_half_width.setPrefix("结构半宽：")
+        self._row_structural_half_width.setSuffix(" m")
+        self._row_structural_half_width.setDecimals(2)
+        self._row_structural_half_width.setRange(0.08, 0.60)
+        self._row_structural_half_width.setSingleStep(0.02)
+        self._row_structural_half_width.setValue(0.20)
+        row.addWidget(self._row_half_width)
+        row.addWidget(self._row_structural_half_width)
+        panel_layout.addLayout(row)
+
+        row = QHBoxLayout()
         self._row_max_gap = QDoubleSpinBox()
         self._row_max_gap.setPrefix("短缺口：")
         self._row_max_gap.setSuffix(" m")
@@ -96,8 +126,15 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._row_max_gap.setRange(0.0, 2.0)
         self._row_max_gap.setSingleStep(0.10)
         self._row_max_gap.setValue(0.60)
-        row.addWidget(self._row_half_width)
+        self._row_min_spacing = QDoubleSpinBox()
+        self._row_min_spacing.setPrefix("最小垄距：")
+        self._row_min_spacing.setSuffix(" m")
+        self._row_min_spacing.setDecimals(2)
+        self._row_min_spacing.setRange(0.30, 3.0)
+        self._row_min_spacing.setSingleStep(0.05)
+        self._row_min_spacing.setValue(0.55)
         row.addWidget(self._row_max_gap)
+        row.addWidget(self._row_min_spacing)
         panel_layout.addLayout(row)
 
         row = QHBoxLayout()
@@ -108,18 +145,37 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._row_min_length.setRange(0.50, 10.0)
         self._row_min_length.setSingleStep(0.25)
         self._row_min_length.setValue(1.50)
-        self._row_min_spacing = QDoubleSpinBox()
-        self._row_min_spacing.setPrefix("最小垄距：")
-        self._row_min_spacing.setSuffix(" m")
-        self._row_min_spacing.setDecimals(2)
-        self._row_min_spacing.setRange(0.30, 3.0)
-        self._row_min_spacing.setSingleStep(0.05)
-        self._row_min_spacing.setValue(0.55)
+        self._boundary_exclusion = QDoubleSpinBox()
+        self._boundary_exclusion.setPrefix("边界排除：")
+        self._boundary_exclusion.setSuffix(" m")
+        self._boundary_exclusion.setDecimals(2)
+        self._boundary_exclusion.setRange(0.0, 2.0)
+        self._boundary_exclusion.setSingleStep(0.05)
+        self._boundary_exclusion.setValue(0.45)
         row.addWidget(self._row_min_length)
-        row.addWidget(self._row_min_spacing)
+        row.addWidget(self._boundary_exclusion)
         panel_layout.addLayout(row)
 
-        analyze = QPushButton("重新计算 Ground Confidence / Robust Slope / 种植行")
+        row = QHBoxLayout()
+        self._aisle_side_clearance = QDoubleSpinBox()
+        self._aisle_side_clearance.setPrefix("垄侧净空：")
+        self._aisle_side_clearance.setSuffix(" m")
+        self._aisle_side_clearance.setDecimals(2)
+        self._aisle_side_clearance.setRange(0.0, 1.0)
+        self._aisle_side_clearance.setSingleStep(0.02)
+        self._aisle_side_clearance.setValue(0.12)
+        self._raw_obstacle_clearance = QDoubleSpinBox()
+        self._raw_obstacle_clearance.setPrefix("障碍净空：")
+        self._raw_obstacle_clearance.setSuffix(" m")
+        self._raw_obstacle_clearance.setDecimals(2)
+        self._raw_obstacle_clearance.setRange(0.0, 1.0)
+        self._raw_obstacle_clearance.setSingleStep(0.02)
+        self._raw_obstacle_clearance.setValue(0.12)
+        row.addWidget(self._aisle_side_clearance)
+        row.addWidget(self._raw_obstacle_clearance)
+        panel_layout.addLayout(row)
+
+        analyze = QPushButton("重新计算 Ground / Row / Corridor 证据")
         analyze.clicked.connect(self._recompute_navigation_structure)
         panel_layout.addWidget(analyze)
 
@@ -131,7 +187,6 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._structure_status.setWordWrap(True)
         panel_layout.addWidget(self._structure_status)
 
-        # Base tab ends with a stretch; keep the extension above that stretch.
         layout.insertWidget(max(0, layout.count() - 1), panel)
         return tab
 
@@ -143,6 +198,15 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             row_max_gap_m=float(self._row_max_gap.value()),
             row_minimum_segment_length_m=float(self._row_min_length.value()),
             row_minimum_spacing_m=float(self._row_min_spacing.value()),
+        )
+
+    def _corridor_config(self) -> CorridorRefinementConfig:
+        return CorridorRefinementConfig(
+            boundary_exclusion_m=float(self._boundary_exclusion.value()),
+            row_structural_half_width_m=float(self._row_structural_half_width.value()),
+            aisle_side_clearance_m=float(self._aisle_side_clearance.value()),
+            raw_obstacle_clearance_m=float(self._raw_obstacle_clearance.value()),
+            minimum_row_longitudinal_span_m=float(self._row_min_length.value()),
         )
 
     def _row_direction_for_structure(self):
@@ -166,28 +230,40 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             return
         try:
             row_direction = self._row_direction_for_structure()
-            self._navigation_structure_result = derive_navigation_structure(
+            structure = derive_navigation_structure(
                 self._navigation_result,
                 self._structure_config(),
                 row_direction_xy=row_direction,
             )
+            corridor = derive_corridor_refinement(
+                self._navigation_result,
+                structure,
+                self._corridor_config(),
+            )
+            self._navigation_structure_result = structure
+            self._corridor_refinement_result = corridor
         except Exception as exc:
             self._navigation_structure_result = None
+            self._corridor_refinement_result = None
             self._structure_status.setText("农业结构：计算失败")
             QMessageBox.critical(self, "农业结构分析失败", str(exc))
             return
         self._refresh_structure_status()
         self._refresh_navigation_status()
         self._update_navigation_overlay()
-        self.statusBar().showMessage("农业结构分析完成：Ground Confidence / Robust Slope / Row Structure")
+        self.statusBar().showMessage(
+            "农业结构完成：Ground / Row Skeleton / Structural Band / Refined Aisle"
+        )
 
     def _navigation_finished(self, result) -> None:
         self._navigation_structure_result = None
+        self._corridor_refinement_result = None
         super()._navigation_finished(result)
         self._recompute_navigation_structure()
 
     def _clear_navigation_state(self, *, clear_overrides: bool) -> None:
         self._navigation_structure_result = None
+        self._corridor_refinement_result = None
         super()._clear_navigation_state(clear_overrides=clear_overrides)
         if hasattr(self, "_structure_status"):
             self._structure_status.setText("农业结构：等待 Ground-relative 导航图")
@@ -196,7 +272,8 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         if not hasattr(self, "_structure_status"):
             return
         structure = self._navigation_structure_result
-        if structure is None:
+        corridor = self._corridor_refinement_result
+        if structure is None or corridor is None:
             self._structure_status.setText("农业结构：等待 Ground-relative 导航图")
             return
         model = structure.row_model
@@ -207,25 +284,34 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             else "自动估计"
         )
         confident = int(np.count_nonzero(structure.ground_confidence >= 0.30))
-        aisle = int(np.count_nonzero(structure.aisle_candidate))
-        row_cells = int(np.count_nonzero(structure.row_regularized_obstacle))
+        old_aisle = int(np.count_nonzero(structure.aisle_candidate))
+        refined_aisle = int(np.count_nonzero(corridor.aisle_candidate))
+        spacing = (
+            "n/a"
+            if corridor.nominal_row_spacing_m is None
+            else f"{corridor.nominal_row_spacing_m:.2f} m"
+        )
         self._structure_status.setText(
             f"农业结构：方向={direction_source} / {model.angle_deg:.1f}° | "
-            f"识别垄 {len(model.centers_v_m)} 条 | 规则化垄栅格 {row_cells:,}\n"
-            f"Ground Confidence≥0.30：{confident:,} | 行道候选：{aisle:,} | "
-            f"Robust Slope 窗口={structure.config.robust_slope_window_m:.2f} m"
+            f"原始 Row {len(model.centers_v_m)} → 有效 Row {len(corridor.accepted_row_centers_v_m)} | "
+            f"名义垄距 {spacing}\n"
+            f"Ground Confidence≥0.30：{confident:,} | 旧行道 {old_aisle:,} → "
+            f"精炼行道 {refined_aisle:,} | 排除 Row {len(corridor.rejected_row_centers_v_m)}"
         )
 
     def _refresh_navigation_status(self) -> None:
-        # Reset the base text first so repeated refreshes never duplicate suffixes.
         MapWorkbenchWindow._refresh_navigation_status(self)
         if not hasattr(self, "_nav_status") or self._navigation_structure_result is None:
             return
         model = self._navigation_structure_result.row_model
-        self._nav_status.setText(
-            self._nav_status.text()
-            + f"\n农业结构：row angle={model.angle_deg:.1f}° | rows={len(model.centers_v_m)}"
-        )
+        suffix = f"\n农业结构：row angle={model.angle_deg:.1f}° | rows={len(model.centers_v_m)}"
+        if self._corridor_refinement_result is not None:
+            corridor = self._corridor_refinement_result
+            suffix += (
+                f" | accepted={len(corridor.accepted_row_centers_v_m)}"
+                f" | refined aisle={int(np.count_nonzero(corridor.aisle_candidate)):,}"
+            )
+        self._nav_status.setText(self._nav_status.text() + suffix)
 
     def _update_navigation_overlay(self) -> None:
         if not hasattr(self, "_nav_layer"):
@@ -244,10 +330,20 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
                 self._navigation_structure_result,
             )
             return
+        if layer in _CORRIDOR_LAYERS:
+            if self._navigation_structure_result is None or self._corridor_refinement_result is None:
+                self._navigation_preview_item.clear_result()
+                return
+            self._navigation_preview_item.set_result(
+                self._navigation_result,
+                layer,
+                self._navigation_structure_result,
+                self._corridor_refinement_result,
+            )
+            return
         self._navigation_preview_item.set_result(self._navigation_result, layer)
 
     def _update_cloud_analysis_visibility(self, checked: bool) -> None:
-        # Keep a faint base map available in normal mode; analysis-only is truly isolated.
         self._cloud_item.setOpacity(0.0 if checked else 1.0)
         self._scene.update()
 
