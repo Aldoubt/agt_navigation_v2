@@ -68,6 +68,11 @@ from .navigation_corridor import (
     CorridorRefinementResult,
     derive_corridor_refinement,
 )
+from .vehicle_corridor import (
+    VehicleCorridorConfig,
+    VehicleCorridorResult,
+    derive_vehicle_corridor,
+)
 
 __all__ = [
     "AssetContractError",
@@ -132,4 +137,7 @@ __all__ = [
     "CorridorRefinementConfig",
     "CorridorRefinementResult",
     "derive_corridor_refinement",
+    "VehicleCorridorConfig",
+    "VehicleCorridorResult",
+    "derive_vehicle_corridor",
 ]
