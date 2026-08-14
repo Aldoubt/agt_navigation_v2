@@ -31,6 +31,7 @@ def test_docs_require_diagnosis_before_reverse_fallback():
     assert "Dubins / Dubins-CC forward first" in stage
     assert "17/17" in architecture
     assert "Turn-Zone fit diagnostic" in architecture
-    assert "R6 must not start from the assumption" in stage
+    assert "only unresolved physically forward-infeasible connectors enter R6" in stage
+    assert "Reeds-Shepp reverse fallback" in stage
     assert "Navigation Map" in architecture
     assert "不是 collision truth" in stage
