@@ -7,10 +7,16 @@ from agt_offline_assets import (
     AgriculturalAisleGraph,
     CoverageOrderingConfig,
     derive_agricultural_coverage_order,
+    derive_forward_connector_plan,
+    derive_turn_zone_candidates,
     load_agricultural_aisle_graph,
     load_canonical_vehicle_profile,
+    load_coverage_connector_requests,
+    load_turn_zones,
     write_agricultural_aisle_graph,
     write_agricultural_coverage_order,
+    write_forward_connector_plan,
+    write_turn_zones,
 )
 
 
@@ -90,8 +96,25 @@ def test_exported_aisle_graph_can_be_reloaded_without_workbench(tmp_path: Path):
         vehicle,
         CoverageOrderingConfig(minimum_side_clearance_m=0.05),
     )
-    output = write_agricultural_coverage_order(order, tmp_path / "coverage_order.yaml")
-    payload = yaml.safe_load(output.read_text(encoding="utf-8"))
+    coverage_path = write_agricultural_coverage_order(order, tmp_path / "coverage_order.yaml")
+    payload = yaml.safe_load(coverage_path.read_text(encoding="utf-8"))
     assert payload["schema"] == "agt_agricultural_coverage_order/v1"
     assert payload["traversal_count"] == 2
     assert payload["connector_request_count"] == 1
+
+    frozen_requests = load_coverage_connector_requests(coverage_path)
+    assert frozen_requests == order.connector_requests
+
+    zones = derive_turn_zone_candidates(loaded)
+    zone_path = write_turn_zones(zones, tmp_path / "turn_zones.yaml")
+    frozen_zones = load_turn_zones(zone_path)
+    assert frozen_zones.frame_id == zones.frame_id
+    assert frozen_zones.row_direction_xy == zones.row_direction_xy
+    assert tuple(zone.zone_id for zone in frozen_zones.zones) == tuple(zone.zone_id for zone in zones.zones)
+
+    plan = derive_forward_connector_plan(frozen_requests, frozen_zones, vehicle)
+    plan_path = write_forward_connector_plan(plan, tmp_path / "forward_connectors.yaml")
+    plan_payload = yaml.safe_load(plan_path.read_text(encoding="utf-8"))
+    assert plan_payload["schema"] == "agt_forward_connector_plan/v1"
+    assert plan_payload["connector_count"] == 1
+    assert plan_payload["connectors"][0]["validation_scope"] == "CENTERLINE_KINEMATICS_AND_TURN_ZONE_ONLY"
