@@ -6,7 +6,7 @@
 
 ## 1. 当前实现边界
 
-截至当前 V25-12C 分支，真实温室 PCD 已经具备以下 Offline evidence
+真实温室 PCD 当前已经具备
 
 ```text
 Cleaned / processed PCD
@@ -28,11 +28,33 @@ Vehicle Corridor Review
 2D / 3D operator audit
 ```
 
-上述证据仍属于 Offline Map/Structure production，不等同于 READY Route Asset
+这些仍是 Offline Map/Structure evidence，不等同于 READY Route Asset
 
-当前没有因为中心线已经可视化就宣称 Coverage Ordering、Dubins/Reeds-Shepp connector 或 Runtime Route execution 已完成
+V25-12E 已开始把这些 evidence 升级成 Aisle Graph、Turn Zone、vehicle-aware coverage order 和后续 kinematic connector
 
-## 2. 目标生产链
+## 2. 场景与执行底盘绑定
+
+平台 identity 不再用场景名替代
+
+```text
+Greenhouse / 温室大棚
+    → canonical platform: mk_mini
+    → profiles/platforms/mk_mini.yaml
+    → Ackermann
+    → V25-12E aisle / coverage / connector route production
+
+GAAS open field / 农科院开阔场地
+    → canonical platform: bunker
+    → profiles/platforms/bunker.yaml
+    → tracked differential
+    → future GNSS / RTK truth benchmark + outdoor global navigation
+```
+
+`profiles/platforms/greenhouse_ackermann.yaml` 仅保留为历史兼容 profile，新 V25-12E 温室 Route Asset 不再绑定这个场景命名的通用 profile
+
+底盘差异进入 canonical Vehicle Profile，不进入 Mission / BT 业务语义
+
+## 3. 目标生产链
 
 ```mermaid
 flowchart LR
@@ -44,8 +66,8 @@ flowchart LR
   TURN["Turn Zones\nturn_zones.yaml"]
   PROFILE["Canonical Vehicle Profile\nprofiles/platforms/<platform>.yaml"]
   POLICY["Route Policy\npolicy.yaml"]
-  ORDER["Coverage Ordering Backend\nBoustrophedon / Fields2Cover / OR-tools"]
-  CONNECT["Connector Planner Policy"]
+  ORDER["Coverage Ordering\nvehicle filter + Boustrophedon"]
+  REQUEST["Connector Requests\nLOW_U / HIGH_U"]
   FWD["Forward-first\nDubins / Dubins-CC"]
   REV["Reverse fallback\nReeds-Shepp / RS-CC"]
   SMAC["Search fallback\nSmac Hybrid / State Lattice"]
@@ -62,8 +84,8 @@ flowchart LR
   TURN --> ORDER
   PROFILE --> ORDER
   POLICY --> ORDER
-  ORDER --> CONNECT
-  CONNECT --> FWD
+  ORDER --> REQUEST
+  REQUEST --> FWD
   FWD -->|infeasible| REV
   REV -->|infeasible| SMAC
   FWD --> SWEEP
@@ -80,165 +102,160 @@ flowchart LR
 核心语义
 
 ```text
-Aisle Graph 决定“有哪些结构化道路”
-Coverage Ordering 决定“以什么顺序访问”
-Connector Planner 决定“相邻道路之间怎样满足运动学连接”
-Navigation Map 决定“几何上是否安全”
-Vehicle Profile 决定“这台车是否真的能通过”
-Route Asset 冻结最终可执行离线路线
+Aisle Graph          决定“有哪些结构化道路”
+Coverage Ordering    决定“这台车能走哪些道路、以什么顺序访问”
+Connector Request    决定“下一对道路需要在哪一侧连接”
+Connector Planner    决定“怎样满足运动学连接”
+Navigation Map       决定“几何上是否安全”
+Vehicle Profile      决定“这台车是否真的能通过/转过去”
+Route Asset          冻结最终可执行离线路线
 ```
 
-## 3. Navigation Map 与 Aisle Graph 分工
+## 4. Navigation Map 与 Aisle Graph 分工
 
-Navigation Map 继续导出
+Navigation Map
 
 ```text
 navigation_map.pgm
 navigation_map.yaml
 ```
 
-职责
+负责 Occupied / Free / Unknown、footprint collision、clearance、Nav2 static/global costmap 和 connector fallback search 的安全约束
 
-- Occupied / Free / Unknown 静态几何约束
-- footprint collision / clearance validation
-- Nav2 static/global costmap 输入
-- connector search 与 fallback planner 的安全约束
-
-Aisle Graph 新增导出
+Aisle Graph
 
 ```text
 aisle_graph.yaml
 ```
 
-职责
+负责 Interior / Boundary aisle identity、centerline XYZ、start/end pose、宽度、相邻垄/墙和诊断 evidence
 
-- Interior aisle / Boundary aisle identity
-- centerline XYZ polyline
-- start/end pose
-- aisle width / minimum safe width
-- adjacent crop-row or boundary references
-- Ground / Slope / obstacle evidence summary
-- forward/reverse permission metadata
-- topology edges / legal connection endpoints
-
-因此不再要求 PGM 本身表达“第几条行道先走”
-
-## 4. Aisle Graph contract
-
-首版 schema
-
-```text
-agt_agricultural_aisle_graph/v1
-```
-
-建议结构
-
-```yaml
-schema: agt_agricultural_aisle_graph/v1
-frame_id: map
-source:
-  navigation_map_content_sha256: sha256:...
-  corridor_evidence_sha256: sha256:...
-row_direction_xy: [0.99, 0.10]
-nominal_row_spacing_m: 1.80
-aisles:
-  - aisle_id: aisle_001
-    kind: interior
-    pair_kind: ROW_ROW
-    centerline_xyz:
-      - [1.0, 2.0, -1.2]
-      - [1.1, 2.0, -1.2]
-    start_pose: {x: 1.0, y: 2.0, z: -1.2, yaw: 0.10}
-    end_pose: {x: 25.0, y: 4.4, z: -1.0, yaw: 0.10}
-    geometric_width_m: 0.96
-    minimum_required_width_m: 0.45
-    length_m: 25.08
-    adjacent_structure:
-      left: row_01
-      right: row_02
-```
-
-Boundary aisle 使用同一结构，但 `kind=boundary`，一侧引用 `wall/boundary`
-
-Aisle Graph 是 DRAFT/derived asset，不取代既有 Semantic Map 或 READY Route Asset
+PGM 不再承担“第几条行道先走”的任务语义
 
 ## 5. Turn Zone contract
 
-连接器不能在任意位置掉头或倒车
-
 ```text
 turn_zones.yaml
-```
-
-最低语义
-
-```yaml
 schema: agt_turn_zones/v1
-frame_id: map
-zones:
-  - zone_id: headland_north
-    polygon_xy: [[...], [...]]
-    allowed_motions:
-      forward_turn: true
-      reverse: true
-      direction_change: true
-    minimum_clearance_m: 0.15
 ```
 
-Turn Zone 可以来自
+Turn Zone 是 connector search envelope，不是 FREE-space truth
 
-- Semantic Map 已标注 `headland_zone`
-- Workbench operator polygon authoring
-- 后续自动从 aisle endpoint 与 free-space geometry 派生的候选
+它可以约束允许调头、方向切换、倒车的位置，但任何 connector 仍必须重新经过 Navigation Map 与 full-footprint feasibility
 
-自动候选必须经过 operator review 后才能成为 READY Route 的正式约束
+首版自动派生 `turn_low_u` / `turn_high_u`，后续允许 Workbench operator 修订
 
 ## 6. Vehicle Profile 是唯一车辆几何真值
 
-不新增第二份 `vehicle_profile.yaml` 复制已有平台参数
-
-正式来源继续是
+正式来源只有
 
 ```text
 profiles/platforms/<platform>.yaml
 ```
 
-Route production 读取至少
+Route production 至少读取
 
 ```text
 navigation footprint
 physical width / length
-wheelbase
+wheelbase / track when available
 minimum turning radius
+steering interface limit when available
 reverse capability / policy
-speed / steering limits when available
+operational speed limits
 ```
 
-Workbench 中临时输入的车宽/安全余量只属于 Preview 参数，不成为 READY Route 的 canonical vehicle truth
+Workbench 临时车宽只属于 Preview 参数
 
-## 7. Coverage ordering
+### MK-mini greenhouse baseline
 
-第一条基线保持确定性 Boustrophedon / snake ordering
+厂家手册已经冻结
 
 ```text
-aisle_01 forward
-aisle_02 reverse_orientation
-aisle_03 forward
-...
+overall envelope          0.840 x 0.600 x 0.310 m
+wheelbase                 0.600 m
+track                     0.517 m
+wheel diameter            0.240 m
+ground clearance          0.111 m
+minimum turning radius    1.500 m
+VCU steering soft limit   +/-34 deg
 ```
 
-Fields2Cover 作为可替换 ordering/path backend，而不是资产合同 owner
+`minimum turning radius=1.5 m` 是 route connector 的 canonical vehicle-level curvature constraint
 
-Fields2Cover 可消费由真实点云恢复出的 aisle/swath geometry；系统不要求它重新从理想 field polygon 生成一套与现场结构不同的 swath
+VCU `+/-34 deg` 不直接反推 bicycle-model turning radius，因为厂家手册没有证明二者采用相同 steering-angle reference
 
-未来 OR-tools / task-aware ordering 可以替换顺序算法，但输出仍进入相同 Route Asset lineage
+厂家 overall envelope 已可用于 offline planning preview，但实际 `base_footprint` 在外包络中的参考位置和最终搭载后的 navigation envelope 仍需上车测量，所以正式 Route READY promotion 继续 fail-closed
+
+### BUNKER open-field baseline
+
+BUNKER 不参与当前温室 Aisle Route 的车辆过滤
+
+它保留给农科院开阔场地，并在后续阶段绑定 GNSS / RTK 作为 global truth / accuracy benchmark，同时继续评估 FAST-LIVO2 / odometry / global correction 的误差
+
+## 7. Coverage Ordering contract
+
+首版 schema
+
+```text
+agt_agricultural_coverage_order/v1
+```
+
+R4 输入
+
+```text
+Aisle Graph
++ Canonical Vehicle Profile
++ route-policy side clearance
+```
+
+首先进行车辆宽度过滤
+
+```text
+required_width = max(
+  aisle.minimum_required_width,
+  vehicle.navigation_width + 2 * policy_side_clearance
+)
+```
+
+然后按照 row-normal lateral coordinate 做 deterministic sort，并执行 Boustrophedon / snake
+
+重要语义
+
+```text
+WITH_ROW_DIRECTION
+AGAINST_ROW_DIRECTION
+```
+
+只描述 aisle polyline 的遍历方向
+
+两者默认都是
+
+```text
+motion_direction = FORWARD
+```
+
+不能把 `AGAINST_ROW_DIRECTION` 错写成倒车
+
+真正的 `motion_direction=REVERSE` 只允许后续 reverse-aware connector fallback 产生
+
+R4 不伪造连接曲线，只生成
+
+```text
+connector_001
+from aisle_x
+→ turn_high_u / turn_low_u
+→ aisle_y
+```
+
+供 R5/R6/R7 求解
+
+Fields2Cover / OR-tools 可以以后替换 ordering backend，但资产合同不绑定 backend 名称
 
 ## 8. Connector planning policy
 
-连接器采用 forward-first fallback chain
-
 ```text
-Connector request
+Connector Request
     ↓
 Dubins / Dubins Continuous Curvature
     ↓ infeasible or collision
@@ -249,9 +266,11 @@ Smac Hybrid-A* / State Lattice search fallback
 Full-footprint validation
 ```
 
-是否允许 reverse 由 Route Policy + canonical Vehicle Profile 联合决定
+对于 MK-mini，首个 forward connector 必须尊重 `Rmin=1.5 m`
 
-单纯解析曲线满足最小转弯半径仍不足以 READY；必须通过完整 footprint swept collision / unknown / semantic / turn-zone gate
+是否允许 reverse 由 Route Policy 联合 canonical Vehicle Profile 决定
+
+解析曲线满足曲率仍不足以 READY，必须经过完整 footprint swept collision / unknown / semantic / turn-zone gate
 
 ## 9. Route Asset 保持既有合同
 
@@ -266,31 +285,13 @@ runtime/maps/<map_id>/versions/<map_version_id>/routes/<route_id>/<revision>/
   preview.geojson
 ```
 
-本架构只新增上游结构化 aisle/turn evidence，不重新定义 Route Asset schema
-
-Route CSV 继续冻结
-
-```text
-seq
-segment_id
-x
-y
-yaw
-direction F/R
-v_ref
-curvature
-clearance
-semantic_ref
-event_ref
-```
-
-可额外在生成器内部保留 `segment_type=aisle/connector`，如需进入正式 CSV 必须单独版本化 route contract
+本架构只增加上游农业 aisle/turn/order/connector evidence，不创建第二个 Route truth owner
 
 ## 10. 2D / 3D review
 
-正式 Route Preview 应复用 V25-12C 已验证的 2D/3D review substrate
+正式 Route Preview 复用 V25-12C 已验证的 2D/3D substrate
 
-至少可叠加
+至少叠加
 
 ```text
 PCD
@@ -298,24 +299,20 @@ Ground Surface
 Row Structural Band
 Aisle Graph
 Turn Zones
-Route centerline
-Forward / Reverse segments
-Vehicle swept footprint
-Conflict envelope
-Invalid poses
+ordered aisle traversal
+connector candidates
+Forward / Reverse motion
+vehicle swept footprint
+conflict / invalid poses
 ```
-
-3D review 是审查客户端，不拥有 Route truth
-
-READY Route preview 是冻结证据；修改路线必须产生新 revision 并重新 feasibility
 
 ## 11. 实现顺序
 
 ```text
 R1  Aisle Graph deterministic export
-R2  Turn Zone authoring / export
+R2  Turn Zone derivation / authoring / export
 R3  Canonical Vehicle Profile adapter
-R4  Deterministic boustrophedon ordering
+R4  Vehicle-aware deterministic boustrophedon ordering
 R5  Forward connector backend
 R6  Reverse fallback backend
 R7  Smac search fallback adapter
@@ -324,17 +321,27 @@ R9  route.yaml + route.csv + preview export
 R10 Workbench 2D/3D Route Preview acceptance
 ```
 
-每个增量必须有独立 unit/contract test，且更新本文件与阶段文档状态
-
-## 12. 当前状态标记
+## 12. 当前状态
 
 ```text
-Ground-relative / Hybrid Row / Aisle / Vehicle Corridor / 3D Review
-  IMPLEMENTED, REAL-DATA OPERATOR REVIEW POSITIVE
+V25-12C Ground / Row / Aisle / 3D Review
+  REAL-DATA OPERATOR REVIEW POSITIVE
 
-Aisle Graph export
-  NEXT IMPLEMENTATION INCREMENT
+R1 Aisle Graph
+  IMPLEMENTED; GREENHOUSE REAL-DATA ACCEPTED; AUTOMATED GATE TO CONFIRM
 
-Turn Zone / Coverage Ordering / Connector / Route export
-  TARGET, NOT YET CLAIMED IMPLEMENTED
+R2 Turn Zones
+  IMPLEMENTED CORE; LOCAL ACCEPTANCE PENDING
+
+R3 Canonical Vehicle Profile
+  IMPLEMENTED CORE
+  MK-mini MANUFACTURER SPEC FROZEN
+  greenhouse canonical platform corrected to mk_mini
+
+R4 Coverage Ordering
+  IMPLEMENTED CORE
+  LOCAL ACCEPTANCE PENDING
+
+R5+ Connector / swept feasibility / final Route Asset
+  NOT YET CLAIMED IMPLEMENTED
 ```
