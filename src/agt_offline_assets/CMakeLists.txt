@@ -60,6 +60,9 @@ if(BUILD_TESTING)
     test_vehicle_profile test/test_vehicle_profile.py
   )
   ament_add_pytest_test(
+    test_mk_mini_canonical_profile test/test_mk_mini_canonical_profile.py
+  )
+  ament_add_pytest_test(
     test_agricultural_coverage_ordering test/test_agricultural_coverage_ordering.py
   )
 endif()
