@@ -54,6 +54,12 @@ def _config(**updates):
         padding_m=0.0,
         ground_quantile=0.10,
         minimum_cell_points=3,
+        ground_seed_support_band_m=0.05,
+        minimum_ground_seed_support_points=2,
+        ground_continuity_radius_m=0.60,
+        ground_reference_percentile=20.0,
+        ground_seed_max_rise_m=0.10,
+        ground_seed_max_drop_m=0.15,
         maximum_ground_fill_distance_m=0.15,
         ground_smoothing_radius_cells=1,
         ground_tolerance_m=0.05,
@@ -101,6 +107,55 @@ def test_raised_step_is_not_treated_as_new_flat_free_ground():
     assert np.count_nonzero(result.occupancy == OCCUPIED) > 0
 
 
+def test_overhead_frame_without_ground_returns_cannot_become_ground():
+    points = []
+    bridge_columns = {9, 10}
+    for ix in range(20):
+        for iy in range(12):
+            x = 0.05 + ix * 0.10
+            y = 0.05 + iy * 0.10
+            if ix not in bridge_columns:
+                for dz in (-0.01, 0.0, 0.01, 0.015):
+                    points.append((x, y, dz))
+            else:
+                for dz in (2.98, 3.00, 3.02, 3.03):
+                    points.append((x, y, dz))
+    result = derive_ground_relative_navigation_map(
+        _cloud(points),
+        _config(maximum_ground_fill_distance_m=0.25, obstacle_max_height_m=1.0),
+    )
+    row = 5
+    column = 9
+    assert result.ground_height_m[row, column] < 0.20
+    assert result.obstacle_count[row, column] == 0
+    assert result.occupancy[row, column] != OCCUPIED
+    assert result.ground_seed_rejected_count > 0
+
+
+def test_occluding_vegetation_is_obstacle_not_ground_surface():
+    points = []
+    vegetation_columns = {9, 10}
+    for ix in range(20):
+        for iy in range(12):
+            x = 0.05 + ix * 0.10
+            y = 0.05 + iy * 0.10
+            if ix not in vegetation_columns:
+                for dz in (-0.01, 0.0, 0.01, 0.015):
+                    points.append((x, y, dz))
+            else:
+                for dz in (0.42, 0.45, 0.48, 0.52):
+                    points.append((x, y, dz))
+    result = derive_ground_relative_navigation_map(
+        _cloud(points),
+        _config(maximum_ground_fill_distance_m=0.25, obstacle_max_height_m=0.80),
+    )
+    row = 5
+    column = 9
+    assert result.ground_height_m[row, column] < 0.20
+    assert result.obstacle_count[row, column] >= 2
+    assert result.occupancy[row, column] == OCCUPIED
+
+
 def test_unobserved_padding_stays_unknown():
     result = derive_ground_relative_navigation_map(
         _sloped_ground(), _config(padding_m=0.50, maximum_ground_fill_distance_m=0.10)
@@ -140,6 +195,7 @@ def test_export_writes_nav2_pgm_yaml_and_evidence(tmp_path):
     assert record["schema"] == "agt_ground_relative_navigation_map/v1"
     assert record["source_asset"] == "synthetic.pcd"
     assert set(record["counts"]) == {"free", "occupied", "unknown"}
+    assert set(record["ground_seeds"]) == {"candidate", "trusted", "rejected"}
     for name in (
         "ground_height.npy",
         "slope_deg.npy",
