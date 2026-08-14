@@ -6,6 +6,8 @@ This layer keeps three concepts separate:
 * vegetation envelope: observed raw obstacle evidence around plants
 * aisle candidate: corridor that exists only between adjacent valid rows
 
+Aisles exist only between adjacent valid crop rows.
+
 It deliberately does not mutate the final OccupancyGrid. The output is review
 evidence for the later explicit navigation fusion policy.
 """
