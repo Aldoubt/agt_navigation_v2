@@ -134,6 +134,16 @@ from .forward_connector_navigation_gate import (
     forward_connector_navigation_gate_to_dict,
     write_forward_connector_navigation_gate,
 )
+from .forward_connector_candidate_audit import (
+    FORWARD_CONNECTOR_CANDIDATE_AUDIT_SCHEMA,
+    ForwardCandidateAuditItem,
+    ForwardConnectorCandidateAuditConfig,
+    ForwardConnectorCandidateAuditPlan,
+    ForwardConnectorCandidateAuditResult,
+    derive_forward_connector_candidate_audit,
+    forward_connector_candidate_audit_to_dict,
+    write_forward_connector_candidate_audit,
+)
 from .turn_zone_refinement import (
     TURN_ZONE_REFINEMENT_SCHEMA,
     TurnZoneExpansionEvidence,
@@ -144,6 +154,15 @@ from .turn_zone_refinement import (
     turn_zone_refinement_to_dict,
     write_turn_zone_refinement_proposal,
 )
+from .reverse_fallback_admission import (
+    REVERSE_FALLBACK_ADMISSION_SCHEMA,
+    ReverseFallbackAdmissionConfig,
+    ReverseFallbackAdmissionItem,
+    ReverseFallbackAdmissionPlan,
+    derive_reverse_fallback_admission,
+    reverse_fallback_admission_to_dict,
+    write_reverse_fallback_admission,
+)
 from .agricultural_route_io import (
     load_agricultural_aisle_graph,
     load_coverage_connector_requests,
@@ -151,7 +170,10 @@ from .agricultural_route_io import (
     write_agricultural_coverage_order,
     write_forward_connector_plan,
 )
-from .route_diagnostic_io import load_forward_connector_zone_fit_report
+from .route_diagnostic_io import (
+    load_forward_connector_candidate_audit,
+    load_forward_connector_zone_fit_report,
+)
 
 __all__ = [
     "AssetContractError",
@@ -267,6 +289,14 @@ __all__ = [
     "derive_forward_connector_navigation_gate",
     "forward_connector_navigation_gate_to_dict",
     "write_forward_connector_navigation_gate",
+    "FORWARD_CONNECTOR_CANDIDATE_AUDIT_SCHEMA",
+    "ForwardCandidateAuditItem",
+    "ForwardConnectorCandidateAuditConfig",
+    "ForwardConnectorCandidateAuditPlan",
+    "ForwardConnectorCandidateAuditResult",
+    "derive_forward_connector_candidate_audit",
+    "forward_connector_candidate_audit_to_dict",
+    "write_forward_connector_candidate_audit",
     "TURN_ZONE_REFINEMENT_SCHEMA",
     "TurnZoneExpansionEvidence",
     "TurnZoneRefinementConfig",
@@ -275,6 +305,14 @@ __all__ = [
     "derive_turn_zone_refinement_proposal",
     "turn_zone_refinement_to_dict",
     "write_turn_zone_refinement_proposal",
+    "REVERSE_FALLBACK_ADMISSION_SCHEMA",
+    "ReverseFallbackAdmissionConfig",
+    "ReverseFallbackAdmissionItem",
+    "ReverseFallbackAdmissionPlan",
+    "derive_reverse_fallback_admission",
+    "reverse_fallback_admission_to_dict",
+    "write_reverse_fallback_admission",
+    "load_forward_connector_candidate_audit",
     "load_forward_connector_zone_fit_report",
     "load_agricultural_aisle_graph",
     "load_coverage_connector_requests",
