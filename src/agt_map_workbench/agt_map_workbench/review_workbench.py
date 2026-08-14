@@ -31,9 +31,9 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         if not isinstance(splitter, QSplitter):
             raise RuntimeError("3D Review expects the Workbench central QSplitter")
 
-        # Do not use QSplitter.replaceWidget() here.  On some Qt5 builds the
-        # replacement inherits a collapsed/zero splitter size, leaving the
-        # controls visible while the whole 2D/3D review plane appears missing.
+        # Avoid replacing the splitter child in place.  On some Qt5 builds an
+        # in-place replacement inherits a collapsed/zero splitter size, leaving
+        # the controls visible while the whole 2D/3D review plane appears missing.
         old_sizes = splitter.sizes()
         old_view = splitter.widget(0)
         if old_view is None:
