@@ -1,12 +1,15 @@
 """Refine agricultural row evidence into explicit crop-row and aisle geometry.
 
-This layer keeps three concepts separate:
+This layer keeps four concepts separate:
 
 * row centerline / structural band: nominal crop-row geometry
 * vegetation envelope: observed raw obstacle evidence around plants
-* aisle candidate: corridor that exists only between adjacent valid rows
+* interior aisle candidate: corridor between adjacent valid crop rows
+* boundary aisle candidate: explicit wall/boundary-anchor to nearest crop row
 
-Aisles exist only between adjacent valid crop rows.
+Interior aisles exist only between adjacent valid crop rows.
+Boundary aisles require an explicit boundary anchor and are never inferred from
+leftover free space near the map edge.
 
 It deliberately does not mutate the final OccupancyGrid. The output is review
 evidence for the later explicit navigation fusion policy.
@@ -35,6 +38,14 @@ class CorridorRefinementConfig:
     minimum_row_longitudinal_span_m: float = 1.50
     minimum_ground_confidence: float = 0.30
 
+    # Boundary aisles stay opt-in in the offline core. The Workbench enables
+    # them explicitly for greenhouse review so existing batch semantics remain
+    # conservative unless the caller asks for wall-to-row corridors.
+    enable_boundary_aisles: bool = False
+    boundary_anchor_max_distance_m: float = 0.80
+    boundary_wall_half_width_m: float = 0.10
+    boundary_wall_clearance_m: float = 0.12
+
     def validate(self) -> None:
         if self.boundary_exclusion_m < 0.0:
             raise ValueError("boundary_exclusion_m must be >= 0")
@@ -54,11 +65,17 @@ class CorridorRefinementConfig:
             raise ValueError("minimum_row_longitudinal_span_m must be > 0")
         if not 0.0 <= self.minimum_ground_confidence <= 1.0:
             raise ValueError("minimum_ground_confidence must be in [0, 1]")
+        if self.boundary_anchor_max_distance_m <= 0.0:
+            raise ValueError("boundary_anchor_max_distance_m must be > 0")
+        if self.boundary_wall_half_width_m <= 0.0:
+            raise ValueError("boundary_wall_half_width_m must be > 0")
+        if self.boundary_wall_clearance_m < 0.0:
+            raise ValueError("boundary_wall_clearance_m must be >= 0")
 
 
 @dataclass(frozen=True)
 class AislePairDiagnostic:
-    """Auditable reason why one adjacent crop-row pair did or did not form an aisle."""
+    """Auditable reason why one corridor pair did or did not form an aisle."""
 
     pair_index: int
     left_row_center_v_m: float
@@ -73,6 +90,7 @@ class AislePairDiagnostic:
     safe_cell_count: int
     centerline_cell_count: int
     status: str
+    pair_kind: str = "ROW_ROW"
 
 
 @dataclass(frozen=True)
@@ -83,6 +101,8 @@ class CorridorRefinementResult:
     boundary_exclusion: np.ndarray
     aisle_candidate: np.ndarray
     aisle_centerline: np.ndarray
+    boundary_aisle_candidate: np.ndarray
+    boundary_aisle_centerline: np.ndarray
     accepted_row_centers_v_m: tuple[float, ...]
     rejected_row_centers_v_m: tuple[float, ...]
     nominal_row_spacing_m: float | None
@@ -159,6 +179,51 @@ def _filter_row_centers(
     return accepted, np.sort(np.asarray(rejected, dtype=np.float64)), nominal
 
 
+def _support_u_range(
+    support_mask: np.ndarray,
+    uu: np.ndarray,
+    vv: np.ndarray,
+    *,
+    center_v_m: float,
+    half_width_m: float,
+    minimum_span_m: float,
+) -> tuple[float, float] | None:
+    support = support_mask & (np.abs(vv - float(center_v_m)) <= float(half_width_m))
+    if not np.any(support):
+        return None
+    u_min = float(np.min(uu[support]))
+    u_max = float(np.max(uu[support]))
+    if u_max - u_min < float(minimum_span_m):
+        return None
+    return u_min, u_max
+
+
+def _boundary_anchor(
+    centers: np.ndarray,
+    *,
+    side: str,
+    first_row: float,
+    last_row: float,
+    v_min: float,
+    v_max: float,
+    maximum_distance_m: float,
+) -> float | None:
+    values = np.sort(np.asarray(centers, dtype=np.float64))
+    if side == "low":
+        candidates = values[values < first_row - 1e-6]
+        if candidates.size == 0:
+            return None
+        anchor = float(candidates[np.argmin(np.abs(candidates - v_min))])
+        return anchor if abs(anchor - v_min) <= maximum_distance_m else None
+    if side == "high":
+        candidates = values[values > last_row + 1e-6]
+        if candidates.size == 0:
+            return None
+        anchor = float(candidates[np.argmin(np.abs(candidates - v_max))])
+        return anchor if abs(anchor - v_max) <= maximum_distance_m else None
+    raise ValueError(f"unknown boundary side: {side}")
+
+
 def _safest_centerline_within_pair(
     safe: np.ndarray,
     geometry: np.ndarray,
@@ -172,14 +237,7 @@ def _safest_centerline_within_pair(
     resolution_m: float,
     half_width_m: float,
 ) -> np.ndarray:
-    """Choose a safe cross-section ridge instead of forcing the exact midpoint.
-
-    For each longitudinal grid slice, the selected lateral position maximizes
-    clearance to both raw obstacles and the structural corridor edges. A small
-    centrality/continuity preference keeps the result smooth when multiple cells
-    have equal clearance. If a complete cross-section has no safe cell, the
-    centerline remains broken there rather than crossing an unsafe obstacle.
-    """
+    """Choose a safe cross-section ridge instead of forcing the exact midpoint."""
     output = np.zeros(safe.shape, dtype=bool)
     if not np.any(safe) or not np.any(geometry):
         return output
@@ -232,6 +290,7 @@ def derive_corridor_refinement(
     vv = xx * perpendicular[0] + yy * perpendicular[1]
 
     observed = np.asarray(navigation.point_count) > 0
+    ground_valid = np.asarray(navigation.ground_valid, dtype=bool)
     if np.any(observed):
         v_min = float(np.min(vv[observed]))
         v_max = float(np.max(vv[observed]))
@@ -269,17 +328,18 @@ def derive_corridor_refinement(
         float(cfg.row_structural_half_width_m),
     )
     for center in accepted:
-        source_band = np.abs(vv - center) <= source_half_width
-        support = source_band & source_rows
-        if np.any(support):
-            u_min = float(np.min(uu[support]))
-            u_max = float(np.max(uu[support]))
-        else:
-            row_u_ranges.append(None)
+        support_range = _support_u_range(
+            source_rows,
+            uu,
+            vv,
+            center_v_m=float(center),
+            half_width_m=source_half_width,
+            minimum_span_m=float(cfg.minimum_row_longitudinal_span_m),
+        )
+        row_u_ranges.append(support_range)
+        if support_range is None:
             continue
-        if u_max - u_min < cfg.minimum_row_longitudinal_span_m:
-            row_u_ranges.append(None)
-            continue
+        u_min, u_max = support_range
         active_u = (uu >= u_min) & (uu <= u_max)
         row_centerline |= active_u & (
             np.abs(vv - center) <= max(navigation.resolution_m * 0.55, 0.03)
@@ -287,7 +347,6 @@ def derive_corridor_refinement(
         row_structural_band |= active_u & (
             np.abs(vv - center) <= float(cfg.row_structural_half_width_m)
         )
-        row_u_ranges.append((u_min, u_max))
 
     obstacle_distance = (
         ndimage.distance_transform_edt(~raw_obstacle) * navigation.resolution_m
@@ -300,122 +359,253 @@ def derive_corridor_refinement(
     slope_ok = np.isfinite(structure.robust_slope_deg) & (
         structure.robust_slope_deg <= navigation.config.maximum_slope_deg
     )
-    safe_base = (
-        confident_ground
+    safe_common = (
+        ground_valid
+        & confident_ground
         & slope_ok
         & clear_of_raw_obstacle
-        & ~boundary_exclusion
         & ~row_structural_band
     )
+    interior_safe_base = safe_common & ~boundary_exclusion
+    boundary_safe_base = safe_common
 
     aisle_candidate = np.zeros(navigation.occupancy.shape, dtype=bool)
     aisle_centerline = np.zeros(navigation.occupancy.shape, dtype=bool)
+    boundary_aisle_candidate = np.zeros(navigation.occupancy.shape, dtype=bool)
+    boundary_aisle_centerline = np.zeros(navigation.occupancy.shape, dtype=bool)
     diagnostics: list[AislePairDiagnostic] = []
 
-    for index in range(max(0, accepted.size - 1)):
-        left = float(accepted[index])
-        right = float(accepted[index + 1])
-        center_distance = right - left
-        structural_reserved = 2.0 * float(cfg.row_structural_half_width_m)
-        side_reserved = 2.0 * float(cfg.aisle_side_clearance_m)
-        available_width = center_distance - structural_reserved - side_reserved
-        left_range = row_u_ranges[index] if index < len(row_u_ranges) else None
-        right_range = row_u_ranges[index + 1] if index + 1 < len(row_u_ranges) else None
-
+    def evaluate_corridor(
+        *,
+        left_v: float,
+        right_v: float,
+        left_range: tuple[float, float] | None,
+        right_range: tuple[float, float] | None,
+        structural_reserved_m: float,
+        side_reserved_m: float,
+        corridor_min: float,
+        corridor_max: float,
+        safe_base: np.ndarray,
+        pair_kind: str,
+    ) -> tuple[np.ndarray, np.ndarray, AislePairDiagnostic]:
+        pair_index = len(diagnostics) + 1
+        center_distance = float(right_v - left_v)
+        available_width = float(corridor_max - corridor_min)
         base_kwargs = dict(
-            pair_index=index + 1,
-            left_row_center_v_m=left,
-            right_row_center_v_m=right,
+            pair_index=pair_index,
+            left_row_center_v_m=float(left_v),
+            right_row_center_v_m=float(right_v),
             center_distance_m=center_distance,
-            structural_reserved_m=structural_reserved,
-            side_clearance_reserved_m=side_reserved,
+            structural_reserved_m=float(structural_reserved_m),
+            side_clearance_reserved_m=float(side_reserved_m),
             geometric_available_width_m=available_width,
             minimum_required_width_m=float(cfg.aisle_minimum_width_m),
+            pair_kind=pair_kind,
         )
+        empty = np.zeros(navigation.occupancy.shape, dtype=bool)
 
         if left_range is None or right_range is None:
-            diagnostics.append(
-                AislePairDiagnostic(
-                    **base_kwargs,
-                    longitudinal_overlap_m=None,
-                    geometric_cell_count=0,
-                    safe_cell_count=0,
-                    centerline_cell_count=0,
-                    status="REJECTED_MISSING_ROW_SUPPORT",
-                )
+            return empty, empty, AislePairDiagnostic(
+                **base_kwargs,
+                longitudinal_overlap_m=None,
+                geometric_cell_count=0,
+                safe_cell_count=0,
+                centerline_cell_count=0,
+                status="REJECTED_MISSING_ROW_SUPPORT",
             )
-            continue
 
         overlap_min = max(left_range[0], right_range[0])
         overlap_max = min(left_range[1], right_range[1])
         overlap_length = max(0.0, overlap_max - overlap_min)
 
         if available_width < cfg.aisle_minimum_width_m:
-            diagnostics.append(
-                AislePairDiagnostic(
-                    **base_kwargs,
-                    longitudinal_overlap_m=overlap_length,
-                    geometric_cell_count=0,
-                    safe_cell_count=0,
-                    centerline_cell_count=0,
-                    status="REJECTED_TOO_NARROW",
-                )
+            return empty, empty, AislePairDiagnostic(
+                **base_kwargs,
+                longitudinal_overlap_m=overlap_length,
+                geometric_cell_count=0,
+                safe_cell_count=0,
+                centerline_cell_count=0,
+                status="REJECTED_TOO_NARROW",
             )
-            continue
-
         if overlap_length < cfg.minimum_row_longitudinal_span_m:
-            diagnostics.append(
-                AislePairDiagnostic(
-                    **base_kwargs,
-                    longitudinal_overlap_m=overlap_length,
-                    geometric_cell_count=0,
-                    safe_cell_count=0,
-                    centerline_cell_count=0,
-                    status="REJECTED_NO_LONGITUDINAL_OVERLAP",
-                )
+            return empty, empty, AislePairDiagnostic(
+                **base_kwargs,
+                longitudinal_overlap_m=overlap_length,
+                geometric_cell_count=0,
+                safe_cell_count=0,
+                centerline_cell_count=0,
+                status="REJECTED_NO_LONGITUDINAL_OVERLAP",
             )
-            continue
 
-        corridor_min = left + cfg.row_structural_half_width_m + cfg.aisle_side_clearance_m
-        corridor_max = right - cfg.row_structural_half_width_m - cfg.aisle_side_clearance_m
         longitudinal = (uu >= overlap_min) & (uu <= overlap_max)
         geometry = longitudinal & (vv >= corridor_min) & (vv <= corridor_max)
         safe = geometry & safe_base
-        midpoint = 0.5 * (left + right)
-        safe_centerline = _safest_centerline_within_pair(
+        midpoint = 0.5 * (corridor_min + corridor_max)
+        centerline = _safest_centerline_within_pair(
             safe,
             geometry,
             uu,
             vv,
-            corridor_min=corridor_min,
-            corridor_max=corridor_max,
-            midpoint=midpoint,
+            corridor_min=float(corridor_min),
+            corridor_max=float(corridor_max),
+            midpoint=float(midpoint),
             obstacle_distance=obstacle_distance,
             resolution_m=navigation.resolution_m,
             half_width_m=float(cfg.aisle_centerline_half_width_m),
         )
-
-        aisle_candidate |= safe
-        aisle_centerline |= safe_centerline
-
         safe_count = int(np.count_nonzero(safe))
-        centerline_count = int(np.count_nonzero(safe_centerline))
+        centerline_count = int(np.count_nonzero(centerline))
         if safe_count == 0:
             status = "REJECTED_NO_SAFE_CELLS"
         elif centerline_count == 0:
             status = "ACCEPTED_NO_CENTERLINE"
         else:
             status = "ACCEPTED"
-        diagnostics.append(
-            AislePairDiagnostic(
-                **base_kwargs,
-                longitudinal_overlap_m=overlap_length,
-                geometric_cell_count=int(np.count_nonzero(geometry)),
-                safe_cell_count=safe_count,
-                centerline_cell_count=centerline_count,
-                status=status,
-            )
+        diagnostic = AislePairDiagnostic(
+            **base_kwargs,
+            longitudinal_overlap_m=overlap_length,
+            geometric_cell_count=int(np.count_nonzero(geometry)),
+            safe_cell_count=safe_count,
+            centerline_cell_count=centerline_count,
+            status=status,
         )
+        return safe, centerline, diagnostic
+
+    # Interior row-to-row corridors remain the normal conservative path.
+    for index in range(max(0, accepted.size - 1)):
+        left = float(accepted[index])
+        right = float(accepted[index + 1])
+        corridor_min = left + cfg.row_structural_half_width_m + cfg.aisle_side_clearance_m
+        corridor_max = right - cfg.row_structural_half_width_m - cfg.aisle_side_clearance_m
+        safe, centerline, diagnostic = evaluate_corridor(
+            left_v=left,
+            right_v=right,
+            left_range=row_u_ranges[index] if index < len(row_u_ranges) else None,
+            right_range=row_u_ranges[index + 1] if index + 1 < len(row_u_ranges) else None,
+            structural_reserved_m=2.0 * float(cfg.row_structural_half_width_m),
+            side_reserved_m=2.0 * float(cfg.aisle_side_clearance_m),
+            corridor_min=float(corridor_min),
+            corridor_max=float(corridor_max),
+            safe_base=interior_safe_base,
+            pair_kind="ROW_ROW",
+        )
+        diagnostics.append(diagnostic)
+        aisle_candidate |= safe
+        aisle_centerline |= centerline
+
+    # Explicit wall-to-nearest-row corridors. They are never generated merely
+    # because there is leftover space at the map boundary: a rejected row-like
+    # boundary anchor must exist close to the observed edge and have longitudinal
+    # support overlapping the nearest accepted crop row.
+    if cfg.enable_boundary_aisles and accepted.size > 0:
+        boundary_source = raw_obstacle | source_rows
+        wall_support_half_width = max(
+            float(cfg.boundary_wall_half_width_m) + float(cfg.raw_obstacle_clearance_m),
+            2.0 * float(navigation.resolution_m),
+        )
+
+        low_anchor = _boundary_anchor(
+            centers,
+            side="low",
+            first_row=float(accepted[0]),
+            last_row=float(accepted[-1]),
+            v_min=v_min,
+            v_max=v_max,
+            maximum_distance_m=float(cfg.boundary_anchor_max_distance_m),
+        )
+        if low_anchor is not None:
+            wall_range = _support_u_range(
+                boundary_source,
+                uu,
+                vv,
+                center_v_m=low_anchor,
+                half_width_m=wall_support_half_width,
+                minimum_span_m=float(cfg.minimum_row_longitudinal_span_m),
+            )
+            corridor_min = (
+                low_anchor
+                + cfg.boundary_wall_half_width_m
+                + cfg.boundary_wall_clearance_m
+            )
+            corridor_max = (
+                float(accepted[0])
+                - cfg.row_structural_half_width_m
+                - cfg.aisle_side_clearance_m
+            )
+            safe, centerline, diagnostic = evaluate_corridor(
+                left_v=low_anchor,
+                right_v=float(accepted[0]),
+                left_range=wall_range,
+                right_range=row_u_ranges[0] if row_u_ranges else None,
+                structural_reserved_m=(
+                    float(cfg.boundary_wall_half_width_m)
+                    + float(cfg.row_structural_half_width_m)
+                ),
+                side_reserved_m=(
+                    float(cfg.boundary_wall_clearance_m)
+                    + float(cfg.aisle_side_clearance_m)
+                ),
+                corridor_min=float(corridor_min),
+                corridor_max=float(corridor_max),
+                safe_base=boundary_safe_base,
+                pair_kind="BOUNDARY_LOW",
+            )
+            diagnostics.append(diagnostic)
+            boundary_aisle_candidate |= safe
+            boundary_aisle_centerline |= centerline
+
+        high_anchor = _boundary_anchor(
+            centers,
+            side="high",
+            first_row=float(accepted[0]),
+            last_row=float(accepted[-1]),
+            v_min=v_min,
+            v_max=v_max,
+            maximum_distance_m=float(cfg.boundary_anchor_max_distance_m),
+        )
+        if high_anchor is not None:
+            wall_range = _support_u_range(
+                boundary_source,
+                uu,
+                vv,
+                center_v_m=high_anchor,
+                half_width_m=wall_support_half_width,
+                minimum_span_m=float(cfg.minimum_row_longitudinal_span_m),
+            )
+            corridor_min = (
+                float(accepted[-1])
+                + cfg.row_structural_half_width_m
+                + cfg.aisle_side_clearance_m
+            )
+            corridor_max = (
+                high_anchor
+                - cfg.boundary_wall_half_width_m
+                - cfg.boundary_wall_clearance_m
+            )
+            safe, centerline, diagnostic = evaluate_corridor(
+                left_v=float(accepted[-1]),
+                right_v=high_anchor,
+                left_range=row_u_ranges[-1] if row_u_ranges else None,
+                right_range=wall_range,
+                structural_reserved_m=(
+                    float(cfg.row_structural_half_width_m)
+                    + float(cfg.boundary_wall_half_width_m)
+                ),
+                side_reserved_m=(
+                    float(cfg.aisle_side_clearance_m)
+                    + float(cfg.boundary_wall_clearance_m)
+                ),
+                corridor_min=float(corridor_min),
+                corridor_max=float(corridor_max),
+                safe_base=boundary_safe_base,
+                pair_kind="BOUNDARY_HIGH",
+            )
+            diagnostics.append(diagnostic)
+            boundary_aisle_candidate |= safe
+            boundary_aisle_centerline |= centerline
+
+    aisle_candidate |= boundary_aisle_candidate
+    aisle_centerline |= boundary_aisle_centerline
 
     return CorridorRefinementResult(
         row_centerline=row_centerline,
@@ -424,6 +614,8 @@ def derive_corridor_refinement(
         boundary_exclusion=boundary_exclusion,
         aisle_candidate=aisle_candidate,
         aisle_centerline=aisle_centerline,
+        boundary_aisle_candidate=boundary_aisle_candidate,
+        boundary_aisle_centerline=boundary_aisle_centerline,
         accepted_row_centers_v_m=tuple(float(v) for v in accepted),
         rejected_row_centers_v_m=tuple(float(v) for v in rejected),
         nominal_row_spacing_m=nominal_spacing,
