@@ -1,6 +1,6 @@
 # V25-12E Agricultural Route Production
 
-Status: STARTED — R1/R4 REAL-DATA ACCEPTED; R2-R3 IMPLEMENTED CORE; R5 REAL-DATA TURN-ZONE DIAGNOSTIC IN PROGRESS
+Status: STARTED — R1/R4 REAL-DATA ACCEPTED; R2-R3 IMPLEMENTED CORE; R5 REAL-DATA ZONE-FIT RECORDED / EVIDENCE-GATED REFINEMENT IMPLEMENTED
 
 Date: 2026-08-14
 
@@ -12,6 +12,7 @@ Date: 2026-08-14
 - `docs/architecture/agricultural_route_production.md`
 - `docs/interfaces/mk_mini_chassis_route_profile.md`
 - `docs/interfaces/route_asset_contract.md`
+- `docs/experiments/v25_12e_r5_turn_zone_fit_20260814.md`
 - 本文件
 
 ## 1. V25-12C handoff baseline
@@ -67,10 +68,17 @@ Vehicle-compatible Coverage Ordering
 Connector Requests
         ↓
 Forward Connector
-        ↓ fail
-Reverse-aware Fallback
-        ↓ fail
-Smac Search Fallback
+        ↓ Turn Zone reject
+Zone-Fit Diagnostic
+        ↓
+Turn-Zone Refinement Proposal
++ frozen Navigation Grid evidence
+        ↓
+  ┌─────┴─────┐
+revised       Reverse-aware
+Turn Zone     Fallback
+  ↓             ↓ fail
+rerun R5      Smac Search Fallback
         ↓
 Full-footprint Feasibility
         ↓
@@ -87,6 +95,8 @@ Existing READY Route Asset
 
 静态 occupancy / collision / unknown / clearance 约束
 
+冻结 PGM/YAML 可通过 `NavigationGridEvidence` 轻量重新读取，不需要重新处理原始 PCD
+
 ### Agricultural Aisle Graph
 
 `aisle_graph.yaml`
@@ -100,6 +110,12 @@ Existing READY Route Asset
 `turn_zones.yaml`
 
 只定义 connector search / turn / reverse / direction-change envelope，不是 FREE-space truth
+
+### Turn Zone Refinement Proposal
+
+`agt_turn_zone_refinement_proposal/v1`
+
+只提出 revised envelope 几何和新增区域 Navigation Grid evidence，不原地修改 Turn Zone，不是 drive permission
 
 ### Vehicle Profile
 
@@ -282,23 +298,113 @@ connector requests        17
 ACCEPTED_CENTERLINE        0
 NO_FORWARD_DUBINS_IN_TURN_ZONE 17
 analytic candidates       4 or 5 per connector
-best observed inside fraction range approximately 0.519 .. 0.907
 ```
 
-This is not yet evidence that reverse motion is mandatory
+Every connector had analytic forward Dubins candidates, but none were fully contained by the original auto Turn Zone envelopes
 
-Every connector had analytic forward Dubins candidates, but none were fully contained by the current auto Turn Zone envelopes
+This was not treated as evidence that reverse motion is mandatory
 
-The next gate must distinguish
+### 6.4 R5 real Turn-Zone fit diagnostic
+
+Operator real-data result
 
 ```text
-A. Turn Zone outward/inward/lateral envelope is simply too conservative
-B. forward-only geometry with Rmin=1.5 m genuinely requires more headland than the greenhouse provides
+connectors                17
+fits current zone          0
+need expansion            17
+inside fraction mean       0.682
+inside fraction median     0.695
+inside fraction range      0.404 .. 0.906
 ```
 
-Therefore R6 must not start from the assumption that all 17 connectors require reverse
+Aggregate row-frame deficits
 
-The dedicated row-frame zone-fit diagnostic quantifies the minimum envelope expansion needed by the easiest forward candidate before we decide whether to expand Turn Zones or invoke reverse fallback
+```text
+outward mean              0.433 m
+outward median            0.468 m
+outward maximum           0.700 m
+inward median             0.000 m
+inward maximum            0.846 m
+maximum one-axis deficit median  0.470 m
+maximum one-axis deficit P90     0.686 m
+```
+
+HIGH_U is predominantly outward-limited
+
+```text
+max outward               0.700 m
+max inward                0.055 m
+max lateral-low           0.277 m
+```
+
+LOW_U is also mostly outward-limited, except one major inward outlier
+
+```text
+max outward               0.589 m
+max inward                0.846 m
+```
+
+Key diagnostic drivers
+
+```text
+connector_001
+HIGH_U
+RLR
+outward                   0.677 m
+lateral-low               0.277 m
+
+connector_016
+LOW_U
+RSR
+outward                   0.361 m
+inward                    0.846 m
+```
+
+Interpretation
+
+- most connectors support the hypothesis that original `outward_extension_m=0.80` is conservative
+- `connector_016` cannot be hidden by one global outward-only increase because it drives a large inward expansion
+- `connector_001` also requires explicit lateral review
+- do not overwrite current Turn Zones yet
+
+Full record
+
+`docs/experiments/v25_12e_r5_turn_zone_fit_20260814.md`
+
+### 6.5 Evidence-gated Turn Zone refinement
+
+Implemented pipeline
+
+```text
+forward_connector_zone_fit.yaml
++ turn_zones.yaml
++ navigation_map.pgm/yaml
+        ↓
+agt_turn_zone_refinement_proposal/v1
+```
+
+The proposal aggregates each shared zone's required outward/inward/lateral expansion and adds a small explicit margin only on dimensions with non-zero deficit
+
+If frozen Navigation Grid evidence is supplied, it measures only newly added cells
+
+```text
+FREE
+OCCUPIED
+UNKNOWN
+estimated grid coverage
+```
+
+Default decision statuses
+
+```text
+EVIDENCE_SUPPORTS_EXPANSION
+NAVIGATION_EVIDENCE_REQUIRED
+REVIEW_REQUIRED_OUT_OF_GRID
+REVIEW_REQUIRED_NAVIGATION_CONFLICT
+NO_EXPANSION_REQUIRED
+```
+
+No proposal is drive permission and no proposal automatically overwrites `turn_zones.yaml`
 
 ## 7. Planner policy
 
@@ -345,13 +451,13 @@ R5 deliberately stops at centerline kinematics + Turn Zone containment
 
 ### R1 — Aisle Graph deterministic export
 
-Status: IMPLEMENTED / REAL-DATA ACCEPTANCE PASS / AUTOMATED GATE PENDING FINAL DOC RERUN
+Status: IMPLEMENTED / REAL-DATA ACCEPTANCE PASS / AUTOMATED GATE PENDING FINAL RERUN
 
 Schema: `agt_agricultural_aisle_graph/v1`
 
 ### R2 — Turn Zone core
 
-Status: IMPLEMENTED CORE / REAL ASSET GENERATED / GEOMETRY POLICY UNDER R5 DIAGNOSTIC
+Status: IMPLEMENTED CORE / REAL ASSET GENERATED / EVIDENCE-GATED REFINEMENT IN PROGRESS
 
 ```text
 src/agt_offline_assets/agt_offline_assets/turn_zones.py
@@ -383,7 +489,7 @@ Current behavior
 
 ### R4 — Vehicle-aware deterministic coverage ordering
 
-Status: IMPLEMENTED CORE / GREENHOUSE REAL-DATA SMOKE PASS / AUTOMATED GATE PENDING FINAL DOC RERUN
+Status: IMPLEMENTED CORE / GREENHOUSE REAL-DATA SMOKE PASS / AUTOMATED GATE PENDING FINAL RERUN
 
 ```text
 src/agt_offline_assets/agt_offline_assets/agricultural_coverage_ordering.py
@@ -403,16 +509,16 @@ Current behavior
 - emits `turn_low_u` / `turn_high_u` ConnectorRequest objects
 - does not synthesize connector curves
 
-### R5 — Forward connector
+### R5 — Forward connector + Turn Zone decision gate
 
-Status: IMPLEMENTED CORE / GREENHOUSE REAL-DATA 0 OF 17 CURRENT-ZONE ACCEPTED / ZONE-FIT DIAGNOSTIC IMPLEMENTED, LOCAL GATE PENDING
+Status: IMPLEMENTED CORE / GREENHOUSE REAL-DATA ZONE-FIT RECORDED / REFINEMENT LOCAL ACCEPTANCE PENDING
 
 ```text
 src/agt_offline_assets/agt_offline_assets/forward_connector.py
 src/agt_offline_assets/agt_offline_assets/forward_connector_diagnostics.py
-src/agt_offline_assets/test/test_forward_connector.py
-src/agt_offline_assets/test/test_forward_connector_diagnostics.py
-tests/test_v25_12e_forward_connector_contract.py
+src/agt_offline_assets/agt_offline_assets/navigation_grid.py
+src/agt_offline_assets/agt_offline_assets/turn_zone_refinement.py
+src/agt_offline_assets/agt_offline_assets/route_diagnostic_io.py
 ```
 
 Schemas
@@ -420,22 +526,25 @@ Schemas
 ```text
 agt_forward_connector_plan/v1
 agt_forward_connector_zone_fit_diagnostic/v1
+agt_turn_zone_refinement_proposal/v1
 ```
 
 Current behavior
 
 - Ackermann forward-only analytic Dubins backend
 - enumerates LSL / RSR / LSR / RSL / RLR / LRL
-- selects shortest candidate fully contained in requested Turn Zone when one exists
 - uses canonical MK-mini `Rmin=1.5 m`
-- keeps all connector samples `motion_direction=FORWARD`
-- current real Turn Zones reject all 17 connector requests
-- separate diagnostic selects the candidate requiring the least row-frame zone expansion and reports outward / inward / lateral deficit
-- neither R5 asset performs full-footprint or Navigation Map collision validation
+- current original Turn Zones reject all 17 connector requests
+- real deficit distribution is now frozen in experiment record
+- frozen navigation PGM/YAML can be loaded without rerunning PCD
+- separate refinement proposal preserves connector identities that drive each zone expansion dimension
+- only newly added Turn Zone cells are evaluated against Navigation Grid evidence
+- no automatic Turn Zone mutation
+- no full-footprint safety claim
 
 ### R6 — Reverse fallback
 
-Status: NOT STARTED — WAITING FOR R5 ZONE-FIT DIAGNOSTIC
+Status: NOT STARTED — WAITING FOR EVIDENCE-GATED TURN ZONE REFINEMENT
 
 ### R7 — Smac search fallback adapter
 
@@ -467,10 +576,12 @@ Status: 3D REVIEW SUBSTRATE EXISTS, ROUTE OVERLAY NOT WIRED
 ## 10. Current next action
 
 ```text
-Rerun R1-R5 + zone-fit automated tests
-→ run forward_connector_zone_fit_diagnostic against frozen greenhouse coverage_order.yaml + turn_zones.yaml
-→ inspect required outward / inward / lateral expansion for all 17 connectors
-→ compare those required expansions with actual Navigation Map/headland free space
-→ if modest expansion is physically available: regenerate/revise Turn Zones and rerun R5
-→ otherwise: implement R6 Reeds-Shepp reverse fallback only for the physically forward-infeasible connectors
+Run navigation-grid + turn-zone-refinement automated tests
+→ load frozen greenhouse navigation_map.pgm/yaml
+→ load turn_zones.yaml + forward_connector_zone_fit.yaml
+→ generate turn_zone_refinement_proposal.yaml
+→ inspect LOW_U/HIGH_U added FREE/OCCUPIED/UNKNOWN evidence
+→ pay special attention to connector_016 inward +0.846 m and connector_001 lateral-low +0.277 m
+→ if evidence supports expansion: create operator-approved revised DRAFT Turn Zones and rerun R5
+→ only unresolved physically forward-infeasible connectors enter R6 Reeds-Shepp reverse fallback
 ```
