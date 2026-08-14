@@ -73,6 +73,15 @@ from .vehicle_corridor import (
     VehicleCorridorResult,
     derive_vehicle_corridor,
 )
+from .agricultural_aisle_graph import (
+    AISLE_GRAPH_SCHEMA,
+    AisleGraphConfig,
+    AislePrimitive,
+    AgriculturalAisleGraph,
+    aisle_graph_to_dict,
+    derive_agricultural_aisle_graph,
+    write_agricultural_aisle_graph,
+)
 
 __all__ = [
     "AssetContractError",
@@ -140,4 +149,11 @@ __all__ = [
     "VehicleCorridorConfig",
     "VehicleCorridorResult",
     "derive_vehicle_corridor",
+    "AISLE_GRAPH_SCHEMA",
+    "AisleGraphConfig",
+    "AislePrimitive",
+    "AgriculturalAisleGraph",
+    "aisle_graph_to_dict",
+    "derive_agricultural_aisle_graph",
+    "write_agricultural_aisle_graph",
 ]
