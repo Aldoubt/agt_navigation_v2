@@ -74,9 +74,7 @@ reverse_fallback_admission.yaml
 schema agt_reverse_fallback_admission/v1
 ```
 
-## R6B
-
-Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
+## R6B first real smoke
 
 Backend:
 
@@ -84,47 +82,113 @@ Backend:
 BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP
 ```
 
-Core files:
+Observed on the 13 admitted connectors:
 
 ```text
-src/agt_offline_assets/agt_offline_assets/reverse_primitive_connector.py
-src/agt_offline_assets/agt_offline_assets/reverse_route_io.py
-src/agt_offline_assets/test/test_reverse_primitive_connector.py
+1  REVERSE_PRIMITIVE_PREVIEW_FREE
+11 R6B_START_FOOTPRINT_NOT_FREE
+1  NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION
 ```
 
-Focused architecture:
+Solved regression baseline:
 
 ```text
-docs/architecture/agricultural_route_r6_reverse_fallback.md
-docs/v2.5/V25_12E_R6_REVERSE_FALLBACK.md
+connector_015
+FORWARD → REVERSE → FORWARD
+2 cusps
+4.499 m total
+3.899 m forward
+0.600 m reverse
+1490 expansions
+0.154 m / 8.11 deg goal error
+footprint FREE=1.000 OCC=0 UNKNOWN=0 coverage=1.000
 ```
 
-R6B policy:
+Unsolved-after-search baseline:
 
 ```text
-R6A admitted IDs only
-bounded local row-frame search
-Ackermann curvature {-1/R, 0, +1/R}
-FORWARD / REVERSE
-explicit cusp
-max 2 cusps by default
-OCCUPIED / UNKNOWN / out-of-grid fail closed
-MK-mini preview footprint + 0.05 m padding
+connector_017
+NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION
+67 expansions
 ```
 
-R6B is preview-only because the real `base_footprint` reference / final mounted envelope are not yet physically measured
+The eleven start-footprint failures did not enter search
+
+## Connector anchor finding
+
+Root cause:
+
+```text
+R4 ConnectorRequest
+currently uses raw Aisle Graph endpoint pose
+
+but
+
+raw structural centerline endpoint
+!= guaranteed full-vehicle-safe connector anchor
+```
+
+Do not relax R6B occupancy / footprint gates
+
+New derived asset:
+
+```text
+connector_anchors.yaml
+schema agt_connector_anchor_plan/v1
+```
+
+Implementation:
+
+```text
+src/agt_offline_assets/agt_offline_assets/connector_anchors.py
+src/agt_offline_assets/test/test_connector_anchors.py
+```
+
+Policy:
+
+```text
+R6A admitted connector only
+raw endpoint
+→ walk inward on the same aisle centerline
+→ nearest stable MK-mini preview-footprint FREE pose
+→ freeze retreat distance
+→ adjusted ConnectorRequest
+→ R6B
+```
+
+Aisle Graph and Navigation Map remain immutable evidence
+
+Later Route assembly must trim aisle traversal to the selected connector anchor
+rather than driving through the unsafe raw endpoint tail
+
+## Current architecture boundary
+
+```text
+R5.6 Forward Candidate Audit
+↓
+R6A Admission 13 / 1 / 3 / 0
+↓
+Safe Connector Anchor Preparation
+↓
+R6B bounded local F/R/F primitive search
+├─ solved → later R8
+└─ valid-anchor unsolved → R7 Smac Hybrid-A* / State Lattice
+```
+
+Held R6A connectors still do not enter anchor preparation or R6B automatically
+
+R6B remains preview-only because the real `base_footprint` reference / final mounted envelope are not yet physically measured
 
 ## Next gate
 
 ```text
-1. local pytest R6A + R6B
-2. load frozen coverage_order.yaml
-3. load reverse_fallback_admission.yaml
-4. run only 13 admitted connectors
-5. report solved / unsolved
-6. inspect reverse distance / cusp count / expansions / footprint evidence
-7. R6B solved → later R8
-8. R6B unsolved → R7 Smac Hybrid-A* / State Lattice
+1. local pytest connector anchor + R6 contracts
+2. derive connector_anchors.yaml from aisle_graph.yaml + R6A admission
+3. inspect start/goal retreat distances for all 13 admitted connectors
+4. apply READY anchor-adjusted ConnectorRequests
+5. rerun R6B
+6. preserve connector_015 regression
+7. only valid-anchor unsolved connectors may move to R7
 ```
 
 Do not reopen Ground / Row / Aisle tuning unless a new real-data failure directly points back to those layers
