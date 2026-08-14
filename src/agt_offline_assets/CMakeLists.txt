@@ -93,6 +93,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_connector_anchors test/test_connector_anchors.py
   )
+  ament_add_pytest_test(
+    test_vehicle_safe_lane test/test_vehicle_safe_lane.py
+  )
 endif()
 
 ament_package()
