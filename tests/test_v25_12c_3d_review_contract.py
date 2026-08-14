@@ -28,6 +28,18 @@ def test_3d_review_is_separate_from_2d_authoring_authority():
     assert "rclpy" not in review
 
 
+def test_3d_review_splitter_cannot_collapse_the_visual_plane():
+    app = _read(REVIEW_APP)
+    assert "replaceWidget(" not in app
+    assert "old_view.setParent(None)" in app
+    assert "splitter.insertWidget(0, tabs)" in app
+    assert "tabs.setMinimumWidth(640)" in app
+    assert "splitter.setCollapsible(0, False)" in app
+    assert "splitter.setCollapsible(1, False)" in app
+    assert "splitter.setSizes([1040, 480])" in app
+    assert "tabs.setCurrentIndex(0)" in app
+
+
 def test_3d_review_uses_deterministic_sample_and_mouse_camera_controls():
     review = _read(REVIEW_3D)
     for token in (
