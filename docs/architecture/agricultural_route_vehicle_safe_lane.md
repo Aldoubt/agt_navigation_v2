@@ -122,9 +122,7 @@ inside frozen Navigation Grid
 and every covered cell == FREE
 ```
 
-A lateral change larger than the configured per-sample continuity limit breaks
-the lane segment. The implementation must never teleport laterally from one
-sample to the next
+A lateral change larger than the configured per-sample continuity limit breaks the lane segment. The implementation must never teleport laterally from one sample to the next
 
 The longest contiguous safe segment is retained as route-production evidence
 
