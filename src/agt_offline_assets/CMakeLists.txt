@@ -79,6 +79,9 @@ if(BUILD_TESTING)
     test_forward_connector_navigation_gate test/test_forward_connector_navigation_gate.py
   )
   ament_add_pytest_test(
+    test_forward_connector_candidate_audit test/test_forward_connector_candidate_audit.py
+  )
+  ament_add_pytest_test(
     test_turn_zone_refinement test/test_turn_zone_refinement.py
   )
 endif()
