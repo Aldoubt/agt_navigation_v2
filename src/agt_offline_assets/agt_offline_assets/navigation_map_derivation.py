@@ -1,15 +1,16 @@
 """Deterministic ground-relative 2D navigation-map derivation from a static PCD.
 
-The derivation intentionally avoids one global absolute-Z obstacle slice.  It
-estimates a local ground elevation surface, classifies point evidence relative
-to that surface, and keeps unsupported cells UNKNOWN.  The result is suitable
-for Workbench preview and for later immutable Navigation Map materialization.
+The derivation intentionally avoids one global absolute-Z obstacle slice. It
+estimates a locally continuous ground elevation surface, rejects unsupported or
+elevated false-ground seeds, classifies point evidence relative to that surface,
+and keeps unsupported cells UNKNOWN. The result is suitable for Workbench
+preview and for later immutable Navigation Map materialization.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from math import ceil, floor
+from math import ceil, floor, tan, radians
 from pathlib import Path
 from typing import Iterable, Mapping, Sequence
 
@@ -32,6 +33,12 @@ class GroundRelativeNavigationConfig:
     padding_m: float = 0.30
     ground_quantile: float = 0.10
     minimum_cell_points: int = 3
+    ground_seed_support_band_m: float = 0.08
+    minimum_ground_seed_support_points: int = 2
+    ground_continuity_radius_m: float = 0.80
+    ground_reference_percentile: float = 20.0
+    ground_seed_max_rise_m: float = 0.12
+    ground_seed_max_drop_m: float = 0.20
     maximum_ground_fill_distance_m: float = 0.35
     ground_smoothing_radius_cells: int = 2
     ground_tolerance_m: float = 0.10
@@ -52,6 +59,18 @@ class GroundRelativeNavigationConfig:
             raise ValueError("ground_quantile must be in [0, 1]")
         if self.minimum_cell_points < 1:
             raise ValueError("minimum_cell_points must be >= 1")
+        if self.ground_seed_support_band_m <= 0.0:
+            raise ValueError("ground_seed_support_band_m must be > 0")
+        if self.minimum_ground_seed_support_points < 1:
+            raise ValueError("minimum_ground_seed_support_points must be >= 1")
+        if self.ground_continuity_radius_m <= 0.0:
+            raise ValueError("ground_continuity_radius_m must be > 0")
+        if not 0.0 <= self.ground_reference_percentile <= 100.0:
+            raise ValueError("ground_reference_percentile must be in [0, 100]")
+        if self.ground_seed_max_rise_m < 0.0:
+            raise ValueError("ground_seed_max_rise_m must be >= 0")
+        if self.ground_seed_max_drop_m < 0.0:
+            raise ValueError("ground_seed_max_drop_m must be >= 0")
         if self.maximum_ground_fill_distance_m < 0.0:
             raise ValueError("maximum_ground_fill_distance_m must be >= 0")
         if self.ground_smoothing_radius_cells < 0:
@@ -90,6 +109,9 @@ class NavigationMapResult:
     step_m: np.ndarray
     occupancy: np.ndarray
     config: GroundRelativeNavigationConfig
+    ground_seed_candidate_count: int = 0
+    ground_seed_trusted_count: int = 0
+    ground_seed_rejected_count: int = 0
 
     def pgm_image(self) -> np.ndarray:
         """Return PGM row order: top row is maximum world Y."""
@@ -108,6 +130,13 @@ class NavigationMapResult:
             "free": int(np.count_nonzero(self.occupancy == FREE)),
             "occupied": int(np.count_nonzero(self.occupancy == OCCUPIED)),
             "unknown": int(np.count_nonzero(self.occupancy == UNKNOWN)),
+        }
+
+    def ground_seed_counts(self) -> dict[str, int]:
+        return {
+            "candidate": int(self.ground_seed_candidate_count),
+            "trusted": int(self.ground_seed_trusted_count),
+            "rejected": int(self.ground_seed_rejected_count),
         }
 
 
@@ -151,7 +180,71 @@ def _low_quantile_per_cell(
     return seed, counts
 
 
-def _polygon_inside(x: np.ndarray, y: np.ndarray, polygon_xy: Sequence[Sequence[float]]) -> np.ndarray:
+def _trusted_ground_seeds(
+    *,
+    seed: np.ndarray,
+    point_count: np.ndarray,
+    cell_ids: np.ndarray,
+    z: np.ndarray,
+    cfg: GroundRelativeNavigationConfig,
+    ndimage,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Reject false ground caused by canopy, overhead frames, or isolated noise.
+
+    A seed must have real point support near its selected height and remain
+    consistent with a lower-envelope neighborhood reference. The neighborhood
+    reference is intentionally broader than the smoothing kernel so a narrow
+    overhead frame cannot become a valid terrain island merely because it is the
+    lowest return inside one XY cell.
+    """
+    seed_flat = seed.reshape(-1)
+    seed_at_point = seed_flat[cell_ids]
+    near_seed = (
+        np.isfinite(seed_at_point)
+        & (np.abs(z - seed_at_point) <= cfg.ground_seed_support_band_m)
+    )
+    support_flat = np.bincount(
+        cell_ids[near_seed], minlength=seed_flat.size
+    ).astype(np.int32)
+    support = support_flat.reshape(seed.shape)
+    candidate = (
+        np.isfinite(seed)
+        & (point_count >= cfg.minimum_cell_points)
+        & (support >= cfg.minimum_ground_seed_support_points)
+    )
+    if not np.any(candidate):
+        raise ValueError("no locally supported ground seed candidates were found")
+
+    _, nearest_candidate_indices = ndimage.distance_transform_edt(
+        ~candidate, return_indices=True
+    )
+    candidate_surface = seed[tuple(nearest_candidate_indices)]
+    radius_cells = max(1, int(ceil(cfg.ground_continuity_radius_m / cfg.resolution_m)))
+    size = 2 * radius_cells + 1
+    reference = ndimage.percentile_filter(
+        candidate_surface,
+        percentile=float(cfg.ground_reference_percentile),
+        size=size,
+        mode="nearest",
+    )
+
+    slope_allowance = tan(radians(float(cfg.maximum_slope_deg))) * float(
+        cfg.ground_continuity_radius_m
+    )
+    maximum_rise = float(cfg.ground_seed_max_rise_m) + slope_allowance
+    trusted = (
+        candidate
+        & (seed <= reference + maximum_rise)
+        & (seed >= reference - float(cfg.ground_seed_max_drop_m))
+    )
+    if not np.any(trusted):
+        raise ValueError("all ground seed candidates were rejected by continuity checks")
+    return trusted, candidate, support
+
+
+def _polygon_inside(
+    x: np.ndarray, y: np.ndarray, polygon_xy: Sequence[Sequence[float]]
+) -> np.ndarray:
     polygon = np.asarray(polygon_xy, dtype=np.float64)
     if polygon.ndim != 2 or polygon.shape[0] < 3 or polygon.shape[1] != 2:
         raise ValueError("override polygon_xy requires at least three [x, y] vertices")
@@ -215,12 +308,16 @@ def derive_ground_relative_navigation_map(
         raise ValueError("navigation-map derivation requires at least three finite XYZ points")
 
     if rotation_map_from_source is not None or translation_map_from_source_m is not None:
-        rotation = np.eye(3, dtype=np.float64) if rotation_map_from_source is None else np.asarray(
-            rotation_map_from_source, dtype=np.float64
-        ).reshape(3, 3)
-        translation = np.zeros(3, dtype=np.float64) if translation_map_from_source_m is None else np.asarray(
-            translation_map_from_source_m, dtype=np.float64
-        ).reshape(3)
+        rotation = (
+            np.eye(3, dtype=np.float64)
+            if rotation_map_from_source is None
+            else np.asarray(rotation_map_from_source, dtype=np.float64).reshape(3, 3)
+        )
+        translation = (
+            np.zeros(3, dtype=np.float64)
+            if translation_map_from_source_m is None
+            else np.asarray(translation_map_from_source_m, dtype=np.float64).reshape(3)
+        )
         xyz = xyz @ rotation.T + translation
 
     x, y, z = xyz[:, 0], xyz[:, 1], xyz[:, 2]
@@ -244,20 +341,28 @@ def derive_ground_relative_navigation_map(
     )
     seed = seed_flat.reshape(height, width)
     point_count = point_count_flat.reshape(height, width)
-    seed_valid = np.isfinite(seed) & (point_count >= cfg.minimum_cell_points)
-    if not np.any(seed_valid):
-        raise ValueError("no grid cells contain enough points for ground estimation")
 
     ndimage = _require_scipy()
+    trusted_seed, candidate_seed, _ = _trusted_ground_seeds(
+        seed=seed,
+        point_count=point_count,
+        cell_ids=cell_ids,
+        z=z,
+        cfg=cfg,
+        ndimage=ndimage,
+    )
+
     distance_cells, nearest_indices = ndimage.distance_transform_edt(
-        ~seed_valid, return_indices=True
+        ~trusted_seed, return_indices=True
     )
     nearest_ground = seed[tuple(nearest_indices)]
     ground_valid = distance_cells * resolution <= cfg.maximum_ground_fill_distance_m
     radius = int(cfg.ground_smoothing_radius_cells)
     filter_size = 2 * radius + 1
     if filter_size > 1:
-        smooth_ground = ndimage.median_filter(nearest_ground, size=filter_size, mode="nearest")
+        smooth_ground = ndimage.median_filter(
+            nearest_ground, size=filter_size, mode="nearest"
+        )
     else:
         smooth_ground = nearest_ground.copy()
     ground_height = np.where(ground_valid, smooth_ground, np.nan)
@@ -265,8 +370,12 @@ def derive_ground_relative_navigation_map(
     dz_dy, dz_dx = np.gradient(smooth_ground, resolution, resolution)
     slope_deg = np.degrees(np.arctan(np.hypot(dz_dx, dz_dy)))
     if filter_size > 1:
-        local_max = ndimage.maximum_filter(nearest_ground, size=filter_size, mode="nearest")
-        local_min = ndimage.minimum_filter(nearest_ground, size=filter_size, mode="nearest")
+        local_max = ndimage.maximum_filter(
+            smooth_ground, size=filter_size, mode="nearest"
+        )
+        local_min = ndimage.minimum_filter(
+            smooth_ground, size=filter_size, mode="nearest"
+        )
         step_m = local_max - local_min
     else:
         step_m = np.zeros_like(smooth_ground)
@@ -278,7 +387,9 @@ def derive_ground_relative_navigation_map(
     relative_height = np.full(z.shape, np.nan, dtype=np.float64)
     relative_height[classifiable] = z[classifiable] - ground_at_point[classifiable]
 
-    ground_evidence = classifiable & (np.abs(relative_height) <= cfg.ground_tolerance_m)
+    ground_evidence = classifiable & (
+        np.abs(relative_height) <= cfg.ground_tolerance_m
+    )
     obstacle_evidence = (
         classifiable
         & (relative_height >= cfg.obstacle_min_height_m)
@@ -301,7 +412,9 @@ def derive_ground_relative_navigation_map(
     padding_cells = int(ceil(cfg.obstacle_padding_m / resolution))
     if padding_cells > 0:
         occupied = ndimage.maximum_filter(
-            occupied.astype(np.uint8), size=2 * padding_cells + 1, mode="constant"
+            occupied.astype(np.uint8),
+            size=2 * padding_cells + 1,
+            mode="constant",
         ).astype(bool)
 
     free = (
@@ -313,6 +426,8 @@ def derive_ground_relative_navigation_map(
     occupancy[free] = FREE
     occupancy[occupied] = OCCUPIED
 
+    candidate_count = int(np.count_nonzero(candidate_seed))
+    trusted_count = int(np.count_nonzero(trusted_seed))
     base = NavigationMapResult(
         resolution_m=resolution,
         origin_x_m=minimum_x,
@@ -328,6 +443,9 @@ def derive_ground_relative_navigation_map(
         step_m=step_m,
         occupancy=occupancy,
         config=cfg,
+        ground_seed_candidate_count=candidate_count,
+        ground_seed_trusted_count=trusted_count,
+        ground_seed_rejected_count=candidate_count - trusted_count,
     )
     if overrides:
         occupancy = apply_navigation_overrides(base, overrides)
@@ -339,7 +457,10 @@ def _write_pgm(path: Path, image: np.ndarray) -> None:
     image = np.asarray(image, dtype=np.uint8)
     if image.ndim != 2:
         raise ValueError("PGM image must be 2D")
-    header = f"P5\n# AGT ground-relative navigation map\n{image.shape[1]} {image.shape[0]}\n255\n"
+    header = (
+        f"P5\n# AGT ground-relative navigation map\n"
+        f"{image.shape[1]} {image.shape[0]}\n255\n"
+    )
     path.write_bytes(header.encode("ascii") + image.tobytes(order="C"))
 
 
@@ -369,7 +490,9 @@ def write_navigation_map_derivation(
         "occupied_thresh": 0.65,
         "free_thresh": 0.196,
     }
-    yaml_path.write_text(yaml.safe_dump(nav_yaml, sort_keys=False), encoding="utf-8")
+    yaml_path.write_text(
+        yaml.safe_dump(nav_yaml, sort_keys=False), encoding="utf-8"
+    )
     np.save(output_dir / "ground_height.npy", result.ground_height_m)
     np.save(output_dir / "slope_deg.npy", result.slope_deg)
     np.save(output_dir / "step_m.npy", result.step_m)
@@ -388,6 +511,7 @@ def write_navigation_map_derivation(
             "bounds_m": [float(v) for v in result.bounds_m()],
         },
         "counts": result.counts(),
+        "ground_seeds": result.ground_seed_counts(),
         "overrides": list(overrides or []),
         "outputs": {
             "pgm": pgm_path.name,
