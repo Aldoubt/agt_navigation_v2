@@ -56,7 +56,7 @@ Real greenhouse acceptance:
 
 ```text
 connector count             17
-eligible reverse fallback   13
+eligible reverse fallback 13
 hold map review              1
 hold mixed evidence          3
 keep forward                 0
@@ -261,18 +261,17 @@ its connector anchors. It must not drive through the unsafe raw structural tail
 
 ```text
 R6B
-= vehicle-safe-lane / safe-anchor adjusted bounded reverse-aware connector
+= vehicle-safe-lane / anchor adjusted bounded reverse-aware connector solution
 
 R7
-= Smac Hybrid-A* / State Lattice search fallback for connectors that remain
-  unsolved after valid vehicle-safe lane and anchors exist
+= general search fallback for connectors that remain unsolved after valid vehicle-safe lane and anchors
 
 R8
 = formal vehicle footprint / kinematic feasibility and Route READY gate
 ```
 
-A connector without a valid vehicle-safe lane/anchor is held upstream. It is not
-handed to R7 unchanged
+A connector that has no valid vehicle-safe lane/anchor is held for upstream
+route/map review. It is not handed to R7 unchanged
 
 R6B remains preview-only until the real vehicle `base_footprint` reference and
 final mounted envelope are physically measured
@@ -280,11 +279,11 @@ final mounted envelope are physically measured
 ## 9. Current next action
 
 ```text
-restore repository contract wording
-→ derive vehicle-pose-free lane from frozen Navigation Grid + MK-mini profile
-→ keep Aisle Graph immutable
-→ derive safe anchors from the vehicle-safe lane rather than raw structural centerline
-→ rerun the 13 admitted connectors
+local pytest vehicle-safe-lane + R6 contracts
+→ derive vehicle_safe_aisles.yaml on the real greenhouse
+→ inspect READY/PARTIAL/UNAVAILABLE aisle counts
+→ inspect coverage fraction and LOW_U/HIGH_U retreat
+→ inspect whether lateral shift can recover configuration-space FREE lanes
 → preserve connector_015 as solved regression baseline
 → only valid-lane / valid-anchor unsolved connectors may move to R7
 ```
