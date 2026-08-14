@@ -3,7 +3,6 @@ import pytest
 
 from agt_offline_assets import (
     FREE,
-    UNKNOWN,
     GroundRelativeNavigationConfig,
     NavigationMapResult,
     NavigationStructureConfig,
@@ -18,12 +17,16 @@ def _result(
     resolution=0.10,
     slope_x=0.0,
     obstacle_rows=(),
+    terrain_rows=(),
     sparse_patch=False,
 ):
     columns = np.arange(width, dtype=np.float64)
     rows = np.arange(height, dtype=np.float64)
     xx, yy = np.meshgrid((columns + 0.5) * resolution, (rows + 0.5) * resolution)
     ground = slope_x * xx
+    for row in terrain_rows:
+        center_y = (float(row) + 0.5) * resolution
+        ground += 0.14 * np.exp(-((yy - center_y) ** 2) / (2.0 * 0.14**2))
     # One sharp cell should not dominate the scene-scale plane estimate.
     ground[height // 2, width // 2] += 0.12
     valid = np.ones((height, width), dtype=bool)
@@ -104,11 +107,31 @@ def test_row_regularization_repairs_short_gaps_without_filling_whole_scene():
         row_direction_xy=(1.0, 0.0),
     )
     assert len(structure.row_model.centers_v_m) >= 2
-    # The synthetic three-cell gap lies inside a detected row and should close.
     assert np.any(structure.row_regularized_obstacle[14:17, 28:31])
     assert np.any(structure.row_regularized_obstacle[29:32, 28:31])
-    # Space midway between the rows remains outside the regularized crop rows.
     assert not np.any(structure.row_regularized_obstacle[21:25, 20:60])
+
+
+def test_bare_terrain_ridges_are_detected_without_vegetation_obstacles():
+    terrain_rows = (8, 18, 28, 38)
+    result = _result(terrain_rows=terrain_rows)
+    structure = derive_navigation_structure(
+        result,
+        NavigationStructureConfig(
+            row_direction_mode="provided",
+            row_minimum_spacing_m=0.70,
+            row_minimum_prominence_ratio=0.05,
+            row_terrain_background_sigma_m=0.45,
+            row_terrain_prominence_scale_m=0.08,
+        ),
+        row_direction_xy=(1.0, 0.0),
+    )
+    centers = np.asarray(structure.row_model.centers_v_m, dtype=np.float64)
+    assert centers.size >= len(terrain_rows)
+    for row in terrain_rows:
+        expected_y = (float(row) + 0.5) * result.resolution_m
+        assert np.min(np.abs(centers - expected_y)) < 0.25
+        assert np.any(structure.row_regularized_obstacle[max(0, row - 2):row + 3, 10:70])
 
 
 def test_aisle_candidate_requires_confident_ground_and_no_row_or_raw_obstacle():
