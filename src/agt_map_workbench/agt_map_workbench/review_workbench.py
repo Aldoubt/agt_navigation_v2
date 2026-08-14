@@ -92,6 +92,25 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
             self._corridor_refinement_result,
             self._vehicle_corridor_result,
         )
+        vehicle = self._vehicle_corridor_result
+        navigation = self._navigation_result
+        if vehicle is not None and navigation is not None:
+            # Review the complete requested vehicle envelope, not only the part
+            # clipped by the refined aisle.  This makes geometric intrusion
+            # visible instead of hiding the unsafe part of the requested width.
+            self._review_3d.canvas.set_layer_xyz(
+                "vehicle_corridor",
+                self._review_3d._grid_xyz(
+                    navigation,
+                    vehicle.required_envelope_mask,
+                    z_offset_m=0.10,
+                ),
+            )
+            self._review_3d.vehicle_status.setText(
+                f"要求宽度：{vehicle.required_width_m:.2f} m | "
+                f"安全 {vehicle.corridor_cells:,} cells | "
+                f"冲突 {vehicle.conflict_cells:,} cells"
+            )
 
     def _recompute_navigation_structure(self) -> None:
         super()._recompute_navigation_structure()
