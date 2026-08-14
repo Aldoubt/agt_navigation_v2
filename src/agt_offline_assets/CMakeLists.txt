@@ -90,6 +90,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_reverse_primitive_connector test/test_reverse_primitive_connector.py
   )
+  ament_add_pytest_test(
+    test_connector_anchors test/test_connector_anchors.py
+  )
 endif()
 
 ament_package()
