@@ -30,7 +30,7 @@ Vehicle Corridor Review
 
 这些仍是 Offline Map/Structure evidence，不等同于 READY Route Asset
 
-V25-12E 已开始把这些 evidence 升级成 Aisle Graph、Turn Zone、vehicle-aware coverage order 和后续 kinematic connector
+V25-12E 已开始把这些 evidence 升级成 Aisle Graph、Turn Zone、vehicle-aware coverage order 和 kinematic connector evidence
 
 ## 2. 场景与执行底盘绑定
 
@@ -68,7 +68,7 @@ flowchart LR
   POLICY["Route Policy\npolicy.yaml"]
   ORDER["Coverage Ordering\nvehicle filter + Boustrophedon"]
   REQUEST["Connector Requests\nLOW_U / HIGH_U"]
-  FWD["Forward-first\nDubins / Dubins-CC"]
+  FWD["Forward-first\nAnalytic Dubins → Dubins-CC"]
   REV["Reverse fallback\nReeds-Shepp / RS-CC"]
   SMAC["Search fallback\nSmac Hybrid / State Lattice"]
   SWEEP["Full-footprint + kinematic\nswept validation"]
@@ -257,7 +257,9 @@ Fields2Cover / OR-tools 可以以后替换 ordering backend，但资产合同不
 ```text
 Connector Request
     ↓
-Dubins / Dubins Continuous Curvature
+Analytic Dubins forward-only
+    ↓ infeasible in Turn Zone
+Dubins Continuous Curvature backend candidate
     ↓ infeasible or collision
 Reeds-Shepp / reverse-aware connector
     ↓ infeasible or collision
@@ -267,6 +269,39 @@ Full-footprint validation
 ```
 
 对于 MK-mini，首个 forward connector 必须尊重 `Rmin=1.5 m`
+
+R5 schema
+
+```text
+agt_forward_connector_plan/v1
+```
+
+R5 首版枚举标准 Dubins 六类
+
+```text
+LSL / RSR / LSR / RSL / RLR / LRL
+```
+
+按路径长度排序，并选择整条采样 centerline 都处于请求 Turn Zone 的最短 forward-only candidate
+
+R5 只验证
+
+```text
+forward-only curvature
++ canonical minimum turning radius
++ Turn Zone centerline containment
+```
+
+R5 明确不验证
+
+```text
+full footprint swept collision
+Navigation Map occupancy / UNKNOWN
+vegetation semantic collision
+formal Route READY
+```
+
+因此 `ACCEPTED_CENTERLINE` 只代表可以进入 R8 等后续 gate，不代表车辆最终可执行
 
 是否允许 reverse 由 Route Policy 联合 canonical Vehicle Profile 决定
 
@@ -337,11 +372,18 @@ R3 Canonical Vehicle Profile
   IMPLEMENTED CORE
   MK-mini MANUFACTURER SPEC FROZEN
   greenhouse canonical platform corrected to mk_mini
+  operator adapter output confirmed
 
 R4 Coverage Ordering
   IMPLEMENTED CORE
+  GREENHOUSE REAL-DATA SMOKE PASS
+  19 input → 18 accepted / 1 width-rejected → 17 connector requests
+
+R5 Forward Connector
+  IMPLEMENTED CORE
+  analytic forward-only Dubins + Turn Zone centerline gate
   LOCAL ACCEPTANCE PENDING
 
-R5+ Connector / swept feasibility / final Route Asset
+R6+ reverse/search/swept feasibility/final Route Asset
   NOT YET CLAIMED IMPLEMENTED
 ```
