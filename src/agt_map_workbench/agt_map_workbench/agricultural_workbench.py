@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -48,7 +49,7 @@ _CORRIDOR_LAYERS = {
 }
 _STATUS_TEXT = {
     "ACCEPTED": "接受",
-    "ACCEPTED_NO_CENTERLINE": "接受，但几何中线被安全证据切断",
+    "ACCEPTED_NO_CENTERLINE": "接受，但当前安全证据未形成中心线",
     "REJECTED_TOO_NARROW": "拒绝：几何宽度不足",
     "REJECTED_NO_LONGITUDINAL_OVERLAP": "拒绝：两垄纵向重叠不足",
     "REJECTED_MISSING_ROW_SUPPORT": "拒绝：至少一条垄缺少有效纵向支持",
@@ -72,7 +73,7 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._nav_layer.addItem("Ground Confidence", "ground_confidence")
         self._nav_layer.addItem("0.5m Robust Plane 坡度", "robust_slope")
         self._nav_layer.addItem("局部平面残差", "plane_residual")
-        self._nav_layer.addItem("种植行支持强度", "row_support")
+        self._nav_layer.addItem("混合垄支持（植被 + 地形）", "row_support")
         self._nav_layer.addItem("规则化种植行（旧结构证据）", "row_regularized")
         self._nav_layer.addItem("行道候选（旧剩余区域逻辑）", "aisle_candidate")
         self._nav_layer.addItem("垄中心线", "row_centerline")
@@ -86,11 +87,17 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(0, 4, 0, 0)
         title = QLabel(
-            "农业结构：Ground Confidence → Robust Slope → Row Skeleton → "
+            "农业结构：Ground Confidence → Robust Slope → Hybrid Row Skeleton → "
             "Structural Band / Vegetation Envelope → Refined Aisle"
         )
         title.setWordWrap(True)
         panel_layout.addWidget(title)
+        evidence_note = QLabel(
+            "垄检测默认融合：植被/障碍证据 55% + 地形隆起证据 45%；"
+            "裸垄只要 Ground Surface 仍保留隆起，也可进入 Row Support"
+        )
+        evidence_note.setWordWrap(True)
+        panel_layout.addWidget(evidence_note)
 
         row = QHBoxLayout()
         self._structure_slope_window = QDoubleSpinBox()
@@ -209,7 +216,15 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         panel_layout.addWidget(self._aisle_diagnostic_detail)
 
         layout.insertWidget(max(0, layout.count() - 1), panel)
-        return tab
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(tab)
+        wrapper = QWidget()
+        wrapper_layout = QVBoxLayout(wrapper)
+        wrapper_layout.setContentsMargins(0, 0, 0, 0)
+        wrapper_layout.addWidget(scroll)
+        return wrapper
 
     def _structure_config(self) -> NavigationStructureConfig:
         return NavigationStructureConfig(
@@ -275,7 +290,7 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._refresh_navigation_status()
         self._update_navigation_overlay()
         self.statusBar().showMessage(
-            "农业结构完成：Ground / Row Skeleton / Structural Band / Refined Aisle"
+            "农业结构完成：Ground / Hybrid Row / Structural Band / Refined Aisle"
         )
 
     def _navigation_finished(self, result) -> None:
@@ -324,8 +339,9 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             f"农业结构：方向={direction_source} / {model.angle_deg:.1f}° | "
             f"原始 Row {len(model.centers_v_m)} → 有效 Row {len(corridor.accepted_row_centers_v_m)} | "
             f"名义垄距 {spacing}\n"
-            f"Ground Confidence≥0.30：{confident:,} | 旧行道 {old_aisle:,} → "
-            f"精炼行道 {refined_aisle:,} | 行道对 {accepted_pairs}/{len(corridor.aisle_pair_diagnostics)} 接受"
+            f"Hybrid Row=障碍55%+地形45% | Ground Confidence≥0.30：{confident:,} | "
+            f"旧行道 {old_aisle:,} → 精炼行道 {refined_aisle:,} | "
+            f"行道对 {accepted_pairs}/{len(corridor.aisle_pair_diagnostics)} 接受"
         )
 
     def _refresh_aisle_pair_diagnostics(self) -> None:
