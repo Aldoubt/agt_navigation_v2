@@ -62,6 +62,11 @@ from .navigation_structure import (
     RowModel,
     derive_navigation_structure,
 )
+from .navigation_corridor import (
+    CorridorRefinementConfig,
+    CorridorRefinementResult,
+    derive_corridor_refinement,
+)
 
 __all__ = [
     "AssetContractError",
@@ -122,4 +127,7 @@ __all__ = [
     "NavigationStructureResult",
     "RowModel",
     "derive_navigation_structure",
+    "CorridorRefinementConfig",
+    "CorridorRefinementResult",
+    "derive_corridor_refinement",
 ]
