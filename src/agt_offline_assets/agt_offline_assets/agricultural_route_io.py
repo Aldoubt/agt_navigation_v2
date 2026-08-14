@@ -13,10 +13,14 @@ from .agricultural_aisle_graph import (
     AgriculturalAisleGraph,
 )
 from .agricultural_coverage_ordering import (
+    COVERAGE_ORDER_SCHEMA,
     AgriculturalCoverageOrder,
+    ConnectorRequest,
     coverage_order_to_dict,
 )
 from .contracts import AssetContractError
+from .forward_connector import ForwardConnectorPlan, forward_connector_plan_to_dict
+from .turn_zones import TURN_ZONE_SCHEMA, TurnZone, TurnZoneSet
 
 
 def _mapping(value: Any, field: str) -> Mapping[str, Any]:
@@ -111,6 +115,89 @@ def load_agricultural_aisle_graph(path: str | Path) -> AgriculturalAisleGraph:
     )
 
 
+def load_turn_zones(path: str | Path) -> TurnZoneSet:
+    """Load frozen R2 turn-zone search envelopes."""
+    source_path = Path(path).expanduser().resolve()
+    raw = yaml.safe_load(source_path.read_text(encoding="utf-8")) or {}
+    payload = _mapping(raw, "turn_zones")
+    schema = str(payload.get("schema", ""))
+    if schema != TURN_ZONE_SCHEMA:
+        raise AssetContractError(
+            "turn_zone_schema_mismatch",
+            f"expected {TURN_ZONE_SCHEMA}, got {schema or '<empty>'}",
+        )
+    direction = payload.get("row_direction_xy")
+    if not isinstance(direction, (list, tuple)) or len(direction) != 2:
+        raise AssetContractError("turn_zone_direction_invalid", "row_direction_xy must be [x, y]")
+    zones: list[TurnZone] = []
+    for index, raw_zone in enumerate(payload.get("zones") or []):
+        zone = _mapping(raw_zone, f"zones[{index}]")
+        polygon = zone.get("polygon_xy") or []
+        if not isinstance(polygon, list) or len(polygon) < 3:
+            raise AssetContractError("turn_zone_polygon_invalid", f"zones[{index}].polygon_xy is invalid")
+        permissions = _mapping(zone.get("permissions") or {}, f"zones[{index}].permissions")
+        free_fraction = zone.get("free_fraction")
+        zones.append(
+            TurnZone(
+                zone_id=str(zone["zone_id"]),
+                side=str(zone["side"]),
+                polygon_xy=tuple((float(p[0]), float(p[1])) for p in polygon),
+                supported_aisle_ids=tuple(str(v) for v in zone.get("supported_aisle_ids") or []),
+                endpoint_count=int(zone.get("endpoint_count", 0)),
+                free_fraction=float("nan") if free_fraction is None else float(free_fraction),
+                allow_turn=bool(permissions.get("turn", True)),
+                allow_reverse=bool(permissions.get("reverse", True)),
+                allow_direction_change=bool(permissions.get("direction_change", True)),
+                source_kind=str(zone.get("source_kind", "AUTO_ENDPOINT_ENVELOPE")),
+            )
+        )
+    declared = payload.get("zone_count")
+    if declared is not None and int(declared) != len(zones):
+        raise AssetContractError("turn_zone_count_mismatch", f"declared zone_count={declared}, parsed={len(zones)}")
+    return TurnZoneSet(
+        frame_id=str(payload.get("frame_id", "map")),
+        row_direction_xy=(float(direction[0]), float(direction[1])),
+        zones=tuple(zones),
+        source=dict(payload.get("source") or {}),
+        schema=schema,
+        status=str(payload.get("status", "DRAFT")),
+    )
+
+
+def load_coverage_connector_requests(path: str | Path) -> tuple[ConnectorRequest, ...]:
+    """Load only the frozen R4 connector requests needed by R5 without duplicating aisle geometry."""
+    source_path = Path(path).expanduser().resolve()
+    raw = yaml.safe_load(source_path.read_text(encoding="utf-8")) or {}
+    payload = _mapping(raw, "coverage_order")
+    schema = str(payload.get("schema", ""))
+    if schema != COVERAGE_ORDER_SCHEMA:
+        raise AssetContractError(
+            "coverage_order_schema_mismatch",
+            f"expected {COVERAGE_ORDER_SCHEMA}, got {schema or '<empty>'}",
+        )
+    requests: list[ConnectorRequest] = []
+    for index, raw_request in enumerate(payload.get("connector_requests") or []):
+        request = _mapping(raw_request, f"connector_requests[{index}]")
+        requests.append(
+            ConnectorRequest(
+                connector_id=str(request["connector_id"]),
+                from_aisle_id=str(request["from_aisle_id"]),
+                to_aisle_id=str(request["to_aisle_id"]),
+                turn_zone_id=str(request["turn_zone_id"]),
+                side=str(request["side"]),
+                start_pose=_pose(request["start_pose"], f"connector_requests[{index}].start_pose"),
+                goal_pose=_pose(request["goal_pose"], f"connector_requests[{index}].goal_pose"),
+            )
+        )
+    declared = payload.get("connector_request_count")
+    if declared is not None and int(declared) != len(requests):
+        raise AssetContractError(
+            "coverage_connector_count_mismatch",
+            f"declared connector_request_count={declared}, parsed={len(requests)}",
+        )
+    return tuple(requests)
+
+
 def write_agricultural_coverage_order(
     order: AgriculturalCoverageOrder,
     path: str | Path,
@@ -120,6 +207,17 @@ def write_agricultural_coverage_order(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
         yaml.safe_dump(coverage_order_to_dict(order), sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    return output
+
+
+def write_forward_connector_plan(plan: ForwardConnectorPlan, path: str | Path) -> Path:
+    """Write DRAFT R5 centerline kinematic evidence; this is not a READY route."""
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        yaml.safe_dump(forward_connector_plan_to_dict(plan), sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
     return output
