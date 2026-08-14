@@ -1,6 +1,6 @@
 # V25-12E Agricultural Route Production
 
-Status: STARTED — R1/R4 REAL-DATA ACCEPTED; R2-R3 IMPLEMENTED CORE; R5 IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
+Status: STARTED — R1/R4 REAL-DATA ACCEPTED; R2-R3 IMPLEMENTED CORE; R5 REAL-DATA TURN-ZONE DIAGNOSTIC IN PROGRESS
 
 Date: 2026-08-14
 
@@ -123,6 +123,14 @@ R5 只冻结 forward-only Dubins centerline kinematic + Turn Zone evidence
 
 它不是 footprint-safe route，也不能直接用于 READY promotion
 
+### Forward Connector Zone-Fit Diagnostic
+
+`agt_forward_connector_zone_fit_diagnostic/v1`
+
+当 R5 因 Turn Zone 拒绝 forward candidate 时，量化最容易容纳的 Dubins candidate 在农业 row frame 中还需要多少 outward / inward / lateral envelope
+
+这是 Turn Zone 几何诊断，不是 collision truth
+
 ### Route Asset
 
 继续使用既有
@@ -177,7 +185,9 @@ planning preview          allowed
 formal vehicle READY      fail-closed until reference measurement
 ```
 
-## 6. Real greenhouse R1 acceptance record
+## 6. Real greenhouse acceptance records
+
+### 6.1 R1 Aisle Graph
 
 ```text
 schema                    agt_agricultural_aisle_graph/v1
@@ -215,11 +225,9 @@ status                    ACCEPTED
 
 Operator confirms exported channel count matches Workbench review
 
-R1 real-data acceptance PASS; automated regression still waits explicit confirmation
-
 `centerline_xyz` remains structural route evidence, not final controller path; downstream Route must regularize/smooth and validate footprint
 
-### 6.1 Real greenhouse R4 coverage-order smoke
+### 6.2 R4 coverage-order smoke
 
 Canonical vehicle adapter operator output
 
@@ -263,7 +271,34 @@ surplus                    0.058 m
 
 The stable aisle ID gap is intentional; coverage topology may connect `aisle_003 → aisle_006` after rejected structural pairs without renumbering asset identities
 
-R4 real-data smoke PASS for filtering / deterministic snake / connector-request generation; automated regression remains an explicit local gate
+R4 real-data smoke PASS for filtering / deterministic snake / connector-request generation
+
+### 6.3 R5 forward-only greenhouse smoke
+
+Real MK-mini result with canonical `Rmin=1.5 m`
+
+```text
+connector requests        17
+ACCEPTED_CENTERLINE        0
+NO_FORWARD_DUBINS_IN_TURN_ZONE 17
+analytic candidates       4 or 5 per connector
+best observed inside fraction range approximately 0.519 .. 0.907
+```
+
+This is not yet evidence that reverse motion is mandatory
+
+Every connector had analytic forward Dubins candidates, but none were fully contained by the current auto Turn Zone envelopes
+
+The next gate must distinguish
+
+```text
+A. Turn Zone outward/inward/lateral envelope is simply too conservative
+B. forward-only geometry with Rmin=1.5 m genuinely requires more headland than the greenhouse provides
+```
+
+Therefore R6 must not start from the assumption that all 17 connectors require reverse
+
+The dedicated row-frame zone-fit diagnostic quantifies the minimum envelope expansion needed by the easiest forward candidate before we decide whether to expand Turn Zones or invoke reverse fallback
 
 ## 7. Planner policy
 
@@ -288,17 +323,19 @@ graph_orientation =
 
 True `REVERSE` is reserved for R6 connector fallback
 
-Connector fallback target
+Frozen planner fallback wording
 
 ```text
-Analytic Dubins forward-only
-        ↓ fail Turn Zone / later footprint gate
-Dubins-CC backend candidate
+Dubins / Dubins-CC forward first
         ↓ fail
 Reeds-Shepp reverse fallback
         ↓ fail
 Smac Hybrid-A* / State Lattice search fallback
 ```
+
+Current R5 implementation is analytic classical Dubins forward-only
+
+Dubins-CC remains a replaceable forward backend candidate and is not claimed implemented by the current R5 core
 
 Every candidate must eventually pass full-footprint / occupancy / semantic / turn-zone / kinematic gates
 
@@ -308,13 +345,13 @@ R5 deliberately stops at centerline kinematics + Turn Zone containment
 
 ### R1 — Aisle Graph deterministic export
 
-Status: IMPLEMENTED / REAL-DATA ACCEPTANCE PASS / AUTOMATED GATE PENDING
+Status: IMPLEMENTED / REAL-DATA ACCEPTANCE PASS / AUTOMATED GATE PENDING FINAL DOC RERUN
 
 Schema: `agt_agricultural_aisle_graph/v1`
 
 ### R2 — Turn Zone core
 
-Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
+Status: IMPLEMENTED CORE / REAL ASSET GENERATED / GEOMETRY POLICY UNDER R5 DIAGNOSTIC
 
 ```text
 src/agt_offline_assets/agt_offline_assets/turn_zones.py
@@ -346,7 +383,7 @@ Current behavior
 
 ### R4 — Vehicle-aware deterministic coverage ordering
 
-Status: IMPLEMENTED CORE / GREENHOUSE REAL-DATA SMOKE PASS / AUTOMATED GATE PENDING
+Status: IMPLEMENTED CORE / GREENHOUSE REAL-DATA SMOKE PASS / AUTOMATED GATE PENDING FINAL DOC RERUN
 
 ```text
 src/agt_offline_assets/agt_offline_assets/agricultural_coverage_ordering.py
@@ -368,31 +405,37 @@ Current behavior
 
 ### R5 — Forward connector
 
-Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
+Status: IMPLEMENTED CORE / GREENHOUSE REAL-DATA 0 OF 17 CURRENT-ZONE ACCEPTED / ZONE-FIT DIAGNOSTIC IMPLEMENTED, LOCAL GATE PENDING
 
 ```text
 src/agt_offline_assets/agt_offline_assets/forward_connector.py
+src/agt_offline_assets/agt_offline_assets/forward_connector_diagnostics.py
 src/agt_offline_assets/test/test_forward_connector.py
+src/agt_offline_assets/test/test_forward_connector_diagnostics.py
 tests/test_v25_12e_forward_connector_contract.py
 ```
 
-Schema: `agt_forward_connector_plan/v1`
+Schemas
+
+```text
+agt_forward_connector_plan/v1
+agt_forward_connector_zone_fit_diagnostic/v1
+```
 
 Current behavior
 
 - Ackermann forward-only analytic Dubins backend
 - enumerates LSL / RSR / LSR / RSL / RLR / LRL
-- sorts candidates by path length and selects the shortest candidate fully contained in requested Turn Zone
+- selects shortest candidate fully contained in requested Turn Zone when one exists
 - uses canonical MK-mini `Rmin=1.5 m`
-- samples centerline at configurable spacing
-- keeps all samples `motion_direction=FORWARD`
-- exports DRAFT connector evidence
-- does not perform full-footprint or Navigation Map collision validation
-- failure status `NO_FORWARD_DUBINS_IN_TURN_ZONE` intentionally routes into future R6/R7 fallback
+- keeps all connector samples `motion_direction=FORWARD`
+- current real Turn Zones reject all 17 connector requests
+- separate diagnostic selects the candidate requiring the least row-frame zone expansion and reports outward / inward / lateral deficit
+- neither R5 asset performs full-footprint or Navigation Map collision validation
 
 ### R6 — Reverse fallback
 
-Status: NOT STARTED
+Status: NOT STARTED — WAITING FOR R5 ZONE-FIT DIAGNOSTIC
 
 ### R7 — Smac search fallback adapter
 
@@ -424,11 +467,10 @@ Status: 3D REVIEW SUBSTRATE EXISTS, ROUTE OVERLAY NOT WIRED
 ## 10. Current next action
 
 ```text
-Run R1-R5 automated tests
-→ derive / load greenhouse turn_zones.yaml
-→ load frozen coverage_order.yaml connector requests
-→ run R5 with mk_mini Rmin=1.5 m
-→ inspect ACCEPTED_CENTERLINE vs NO_FORWARD_DUBINS_IN_TURN_ZONE
-→ record which end-of-row connections truly fit forward-only geometry
-→ then implement R6 reverse-aware fallback only for R5 failures
+Rerun R1-R5 + zone-fit automated tests
+→ run forward_connector_zone_fit_diagnostic against frozen greenhouse coverage_order.yaml + turn_zones.yaml
+→ inspect required outward / inward / lateral expansion for all 17 connectors
+→ compare those required expansions with actual Navigation Map/headland free space
+→ if modest expansion is physically available: regenerate/revise Turn Zones and rerun R5
+→ otherwise: implement R6 Reeds-Shepp reverse fallback only for the physically forward-infeasible connectors
 ```
