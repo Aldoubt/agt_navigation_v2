@@ -56,6 +56,12 @@ from .navigation_map_derivation import (
     derive_ground_relative_navigation_map,
     write_navigation_map_derivation,
 )
+from .navigation_structure import (
+    NavigationStructureConfig,
+    NavigationStructureResult,
+    RowModel,
+    derive_navigation_structure,
+)
 
 __all__ = [
     "AssetContractError",
@@ -112,4 +118,8 @@ __all__ = [
     "apply_navigation_overrides",
     "derive_ground_relative_navigation_map",
     "write_navigation_map_derivation",
+    "NavigationStructureConfig",
+    "NavigationStructureResult",
+    "RowModel",
+    "derive_navigation_structure",
 ]
