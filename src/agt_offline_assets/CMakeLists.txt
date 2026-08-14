@@ -53,6 +53,12 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_agricultural_aisle_graph test/test_agricultural_aisle_graph.py
   )
+  ament_add_pytest_test(
+    test_turn_zones test/test_turn_zones.py
+  )
+  ament_add_pytest_test(
+    test_vehicle_profile test/test_vehicle_profile.py
+  )
 endif()
 
 ament_package()
