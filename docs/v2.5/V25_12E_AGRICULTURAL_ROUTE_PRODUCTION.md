@@ -1,6 +1,6 @@
 # V25-12E Agricultural Route Production
 
-Status: STARTED — R1 REAL-DATA ACCEPTED / AUTOMATED GATE PENDING; R2-R4 IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
+Status: STARTED — R1/R4 REAL-DATA ACCEPTED; R2-R3 IMPLEMENTED CORE; R5 IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
 
 Date: 2026-08-14
 
@@ -115,6 +115,14 @@ Workbench 临时车宽只用于 Review
 
 职责：vehicle filtering + deterministic traversal order + connector request，不生成曲线
 
+### Forward Connector Plan
+
+`agt_forward_connector_plan/v1`
+
+R5 只冻结 forward-only Dubins centerline kinematic + Turn Zone evidence
+
+它不是 footprint-safe route，也不能直接用于 READY promotion
+
 ### Route Asset
 
 继续使用既有
@@ -211,6 +219,52 @@ R1 real-data acceptance PASS; automated regression still waits explicit confirma
 
 `centerline_xyz` remains structural route evidence, not final controller path; downstream Route must regularize/smooth and validate footprint
 
+### 6.1 Real greenhouse R4 coverage-order smoke
+
+Canonical vehicle adapter operator output
+
+```text
+platform                  mk_mini
+kinematics                ackermann
+navigation width          0.600 m
+wheelbase                 0.600 m
+minimum turning radius    1.500 m
+steering limit            34 deg
+planning preview ready    true
+formal route ready        false
+```
+
+Real Aisle Graph ordering
+
+```text
+input aisles              19
+accepted                  18
+rejected                   1
+connector requests        17
+```
+
+Rejected aisle
+
+```text
+aisle_005
+geometric width           0.658 m
+required width            0.700 m
+reason                    VEHICLE_WIDTH_INFEASIBLE
+```
+
+Narrow accepted aisle requiring later R8 attention
+
+```text
+aisle_002
+geometric width           0.758 m
+required width            0.700 m
+surplus                    0.058 m
+```
+
+The stable aisle ID gap is intentional; coverage topology may connect `aisle_003 → aisle_006` after rejected structural pairs without renumbering asset identities
+
+R4 real-data smoke PASS for filtering / deterministic snake / connector-request generation; automated regression remains an explicit local gate
+
 ## 7. Planner policy
 
 Coverage baseline
@@ -237,14 +291,18 @@ True `REVERSE` is reserved for R6 connector fallback
 Connector fallback target
 
 ```text
-Dubins / Dubins-CC forward first
+Analytic Dubins forward-only
+        ↓ fail Turn Zone / later footprint gate
+Dubins-CC backend candidate
         ↓ fail
 Reeds-Shepp reverse fallback
         ↓ fail
 Smac Hybrid-A* / State Lattice search fallback
 ```
 
-Every candidate must pass full-footprint / occupancy / semantic / turn-zone / kinematic gates
+Every candidate must eventually pass full-footprint / occupancy / semantic / turn-zone / kinematic gates
+
+R5 deliberately stops at centerline kinematics + Turn Zone containment
 
 ## 8. Implementation ledger
 
@@ -269,7 +327,7 @@ LOW_U / HIGH_U endpoint envelopes are search envelopes, not free-space truth
 
 ### R3 — Canonical Vehicle Profile adapter
 
-Status: IMPLEMENTED CORE / MK-MINI MANUFACTURER SPEC FROZEN / LOCAL ACCEPTANCE PENDING
+Status: IMPLEMENTED CORE / MK-MINI MANUFACTURER SPEC FROZEN / REAL ADAPTER OUTPUT CONFIRMED
 
 ```text
 profiles/platforms/mk_mini.yaml
@@ -288,7 +346,7 @@ Current behavior
 
 ### R4 — Vehicle-aware deterministic coverage ordering
 
-Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
+Status: IMPLEMENTED CORE / GREENHOUSE REAL-DATA SMOKE PASS / AUTOMATED GATE PENDING
 
 ```text
 src/agt_offline_assets/agt_offline_assets/agricultural_coverage_ordering.py
@@ -310,9 +368,27 @@ Current behavior
 
 ### R5 — Forward connector
 
-Status: NOT STARTED
+Status: IMPLEMENTED CORE / LOCAL ACCEPTANCE PENDING
 
-Must use MK-mini `Rmin=1.5 m` in greenhouse
+```text
+src/agt_offline_assets/agt_offline_assets/forward_connector.py
+src/agt_offline_assets/test/test_forward_connector.py
+tests/test_v25_12e_forward_connector_contract.py
+```
+
+Schema: `agt_forward_connector_plan/v1`
+
+Current behavior
+
+- Ackermann forward-only analytic Dubins backend
+- enumerates LSL / RSR / LSR / RSL / RLR / LRL
+- sorts candidates by path length and selects the shortest candidate fully contained in requested Turn Zone
+- uses canonical MK-mini `Rmin=1.5 m`
+- samples centerline at configurable spacing
+- keeps all samples `motion_direction=FORWARD`
+- exports DRAFT connector evidence
+- does not perform full-footprint or Navigation Map collision validation
+- failure status `NO_FORWARD_DUBINS_IN_TURN_ZONE` intentionally routes into future R6/R7 fallback
 
 ### R6 — Reverse fallback
 
@@ -348,10 +424,11 @@ Status: 3D REVIEW SUBSTRATE EXISTS, ROUTE OVERLAY NOT WIRED
 ## 10. Current next action
 
 ```text
-Run R1-R4 automated tests
-→ inspect mk_mini canonical adapter output
-→ derive greenhouse Turn Zones
-→ run R4 against real greenhouse aisle_graph
-→ inspect eligible/rejected aisle list + snake order + connector requests
-→ then start R5 forward connector
+Run R1-R5 automated tests
+→ derive / load greenhouse turn_zones.yaml
+→ load frozen coverage_order.yaml connector requests
+→ run R5 with mk_mini Rmin=1.5 m
+→ inspect ACCEPTED_CENTERLINE vs NO_FORWARD_DUBINS_IN_TURN_ZONE
+→ record which end-of-row connections truly fit forward-only geometry
+→ then implement R6 reverse-aware fallback only for R5 failures
 ```
