@@ -43,14 +43,17 @@ class VehicleCorridorConfig:
 
 @dataclass(frozen=True)
 class VehicleCorridorResult:
-    """Review ribbon around the currently accepted aisle centerlines."""
+    """Full vehicle review envelope plus the part supported by refined aisle evidence."""
 
+    required_envelope_mask: np.ndarray
     corridor_mask: np.ndarray
+    conflict_mask: np.ndarray
     centerline_mask: np.ndarray
     required_width_m: float
     required_half_width_m: float
     covered_centerline_cells: int
     corridor_cells: int
+    conflict_cells: int
     config: VehicleCorridorConfig
 
 
@@ -67,13 +70,12 @@ def derive_vehicle_corridor(
     corridor: CorridorRefinementResult,
     config: VehicleCorridorConfig | None = None,
 ) -> VehicleCorridorResult:
-    """Buffer accepted centerlines by vehicle width, clipped to refined aisles.
+    """Buffer accepted centerlines by vehicle width and retain review conflicts.
 
-    This is a visualization/inspection envelope rather than the final collision
-    model.  The mask is deliberately clipped to ``aisle_candidate`` so the 3D
-    reviewer never paints a vehicle ribbon through cells already rejected by
-    Ground Confidence, robust slope, raw-obstacle clearance, row geometry, or
-    map-boundary evidence.
+    ``required_envelope_mask`` is the complete vehicle-width ribbon around the
+    current aisle centerline. ``corridor_mask`` is the portion already supported
+    by refined-aisle evidence. ``conflict_mask`` is the requested envelope that
+    falls outside that evidence.  None of these masks mutate the final map.
     """
 
     cfg = config or VehicleCorridorConfig()
@@ -84,20 +86,25 @@ def derive_vehicle_corridor(
         raise ValueError("corridor masks must match the navigation grid shape")
 
     if not np.any(centerline):
-        mask = np.zeros(centerline.shape, dtype=bool)
+        required = np.zeros(centerline.shape, dtype=bool)
     else:
         ndimage = _require_scipy()
         distance_m = (
             ndimage.distance_transform_edt(~centerline) * float(navigation.resolution_m)
         )
-        mask = aisle & (distance_m <= float(cfg.required_half_width_m))
+        required = distance_m <= float(cfg.required_half_width_m)
 
+    safe = required & aisle
+    conflict = required & ~aisle
     return VehicleCorridorResult(
-        corridor_mask=mask,
+        required_envelope_mask=required,
+        corridor_mask=safe,
+        conflict_mask=conflict,
         centerline_mask=centerline.copy(),
         required_width_m=float(cfg.required_width_m),
         required_half_width_m=float(cfg.required_half_width_m),
-        covered_centerline_cells=int(np.count_nonzero(centerline & mask)),
-        corridor_cells=int(np.count_nonzero(mask)),
+        covered_centerline_cells=int(np.count_nonzero(centerline & safe)),
+        corridor_cells=int(np.count_nonzero(safe)),
+        conflict_cells=int(np.count_nonzero(conflict)),
         config=cfg,
     )
