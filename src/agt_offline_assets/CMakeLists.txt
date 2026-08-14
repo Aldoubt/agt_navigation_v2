@@ -65,6 +65,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_agricultural_coverage_ordering test/test_agricultural_coverage_ordering.py
   )
+  ament_add_pytest_test(
+    test_agricultural_route_io test/test_agricultural_route_io.py
+  )
 endif()
 
 ament_package()
