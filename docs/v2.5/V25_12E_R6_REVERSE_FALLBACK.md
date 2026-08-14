@@ -1,6 +1,6 @@
 # V25-12E R6 Reverse Fallback
 
-Status: R6A REAL-DATA PASS; R6B CORE IMPLEMENTED; SAFE CONNECTOR ANCHOR RETEST PENDING
+Status: R6A REAL-DATA PASS; R6B CORE IMPLEMENTED; VEHICLE-SAFE LANE PREPARATION REQUIRED
 
 Date: 2026-08-14
 
@@ -9,6 +9,7 @@ connector planning. Read it together with:
 
 - `docs/v2.5/V25_12E_CURRENT_STATE.md`
 - `docs/architecture/agricultural_route_r6_reverse_fallback.md`
+- `docs/architecture/agricultural_route_connector_anchors.md`
 - `docs/experiments/v25_12e_r5_6_forward_candidate_audit_20260814.md`
 - `profiles/platforms/mk_mini.yaml`
 
@@ -90,6 +91,8 @@ connector_013 → HOLD_MIXED_EVIDENCE
 
 R6A real-data acceptance PASS
 
+R6B shall consume only connector IDs admitted by R6A
+
 ## 3. R6B backend boundary
 
 Long-term policy wording remains:
@@ -97,7 +100,7 @@ Long-term policy wording remains:
 ```text
 Reeds-Shepp / reverse-aware local connector
         ↓ fail
-Smac Hybrid-A* / State Lattice
+Smac Hybrid-A* / State Lattice search fallback
 ```
 
 Current implemented backend is deliberately named:
@@ -123,6 +126,10 @@ primary maneuver family = F → R → F
 Every motion sample is checked against the frozen Navigation Grid using the
 canonical MK-mini preview navigation footprint. `OCCUPIED`, `UNKNOWN`, and
 out-of-grid evidence fail closed
+
+R7 Smac Hybrid-A* / State Lattice remains the general search fallback after a
+connector has a valid vehicle-safe lane/anchor but the bounded R6B solver still
+cannot solve it
 
 ## 4. First real R6B smoke
 
@@ -165,93 +172,119 @@ search expansions 67
 The other eleven connectors did not enter search at all because the preview
 footprint was not FREE at the raw ConnectorRequest start pose
 
-## 5. Root cause: raw aisle endpoint is not a vehicle-safe anchor
+## 5. Root cause: raw aisle endpoint is not a vehicle-safe route lane
 
 R4 currently forms ConnectorRequest poses directly from Aisle Graph endpoint
 poses
 
 ```text
-Aisle Graph raw endpoint
+raw structural centerline endpoint
 ≠ guaranteed vehicle-safe connector anchor
+≠ guaranteed vehicle-pose-free route lane
 ```
 
-The Aisle Graph endpoint is structural centerline evidence. It was never a
-contract that placing the full 0.84 x 0.60 m MK-mini preview footprint exactly
-at the extreme centerline cell remains FREE
+The Aisle Graph endpoint and centerline are structural corridor evidence. The
+corridor `safe_common` contract uses ground validity/confidence, slope, raw
+obstacle clearance, and row-structural exclusion, but it does not require the
+final Navigation Map cell to be `FREE`
 
-Therefore the R6B start-footprint gate is kept strict. We do not relax occupancy
+The frozen Navigation Map additionally applies obstacle padding and
+`geometry_bad`, and its `FREE` state also requires sufficient ground support
+
+Therefore the R6B start-footprint gate remains strict. We do not relax occupancy
 or footprint checks
 
-## 6. Safe Connector Anchor Preparation
+## 6. First Safe Connector Anchor smoke
 
-New schema:
+The initial anchor implementation walked inward only on the existing structural
+centerline for at most 1.50 m and required 0.30 m of stable FREE preview
+footprint support
 
-```text
-agt_connector_anchor_plan/v1
-```
-
-Implementation:
+Real greenhouse result:
 
 ```text
-src/agt_offline_assets/agt_offline_assets/connector_anchors.py
-src/agt_offline_assets/test/test_connector_anchors.py
+13 admitted connectors
+2  READY_FOR_LOCAL_CONNECTOR
+11 HOLD_ANCHOR_REVIEW
 ```
 
-Policy:
+READY:
 
 ```text
-raw start/goal endpoint
-↓
-walk inward on that same aisle centerline
-↓
-find nearest pose where MK-mini preview footprint is stably FREE
-↓
-freeze retreat distance + adjusted pose
-↓
-adjust ConnectorRequest only
+connector_015
+connector_017
 ```
 
-The default stable-free check also verifies a short inward span rather than one
-isolated FREE pose
-
-Important boundary:
+Notable partial result:
 
 ```text
-Aisle Graph is immutable evidence
-Navigation Map occupancy is immutable evidence
-Connector Anchor is a derived route-production asset
+connector_014 start anchor retreat 0.650 m
+but goal anchor was not found within the bounded limit
 ```
 
-Later Route assembly must trim each aisle traversal to the selected safe anchor;
-it must not drive through an unsafe raw endpoint and then start the connector
+Some raw endpoints were individually FREE (`connector_006` goal and
+`connector_010` goal) but still failed the short stable-FREE-span requirement,
+which confirms that one isolated FREE pose is not enough to define a route lane
 
-## 7. R6B / R7 / R8 boundary
+This result invalidates the assumption that increasing `maximum_retreat_m`
+alone is the correct repair
+
+## 7. Required upstream refinement: vehicle-pose-free lane
+
+Next route-production layer:
+
+```text
+Aisle Graph structural centerline
++ frozen Navigation Grid
++ canonical MK-mini preview footprint
+        ↓
+vehicle-pose-free configuration-space mask at row heading
+        ↓
+continuous vehicle-safe aisle lane near the structural aisle
+        ↓
+vehicle-safe connector anchors
+        ↓
+R6B
+```
+
+The structural Aisle Graph remains immutable evidence
+
+The new lane may shift laterally within the accepted aisle when the structural
+centerline is not vehicle-pose-free. The shift must stay bounded by aisle
+geometry and Navigation Grid evidence; it must never force OCCUPIED/UNKNOWN to
+FREE
+
+Later Route assembly must use the vehicle-safe lane and trim aisle traversal to
+its connector anchors. It must not drive through the unsafe raw structural tail
+
+## 8. R6B / R7 / R8 boundary
 
 ```text
 R6B
-= safe-anchor-adjusted bounded reverse-aware connector solution
+= vehicle-safe-lane / safe-anchor adjusted bounded reverse-aware connector
 
 R7
-= general search fallback for connectors that remain unsolved after valid safe anchors
+= Smac Hybrid-A* / State Lattice search fallback for connectors that remain
+  unsolved after valid vehicle-safe lane and anchors exist
 
 R8
 = formal vehicle footprint / kinematic feasibility and Route READY gate
 ```
 
-A connector that has no stable FREE anchor within the bounded inward-retreat
-limit is held for anchor/map review. It is not handed to R7 unchanged
+A connector without a valid vehicle-safe lane/anchor is held upstream. It is not
+handed to R7 unchanged
 
 R6B remains preview-only until the real vehicle `base_footprint` reference and
 final mounted envelope are physically measured
 
-## 8. Current next action
+## 9. Current next action
 
 ```text
-local pytest connector-anchor + R6 contracts
-→ derive connector_anchors.yaml for the 13 admitted connectors
-→ inspect start/goal retreat distances
-→ apply only READY anchors to ConnectorRequests
-→ rerun R6B
-→ preserve connector_015 as a solved regression baseline
-→ only valid-anchor unsolved connectors may move to R7
+restore repository contract wording
+→ derive vehicle-pose-free lane from frozen Navigation Grid + MK-mini profile
+→ keep Aisle Graph immutable
+→ derive safe anchors from the vehicle-safe lane rather than raw structural centerline
+→ rerun the 13 admitted connectors
+→ preserve connector_015 as solved regression baseline
+→ only valid-lane / valid-anchor unsolved connectors may move to R7
 ```
