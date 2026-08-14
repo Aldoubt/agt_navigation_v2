@@ -39,6 +39,8 @@ def _fixture():
         boundary_exclusion=np.zeros(shape, dtype=bool),
         aisle_candidate=aisle,
         aisle_centerline=centerline,
+        boundary_aisle_candidate=np.zeros(shape, dtype=bool),
+        boundary_aisle_centerline=np.zeros(shape, dtype=bool),
         accepted_row_centers_v_m=(0.8, 2.2),
         rejected_row_centers_v_m=(),
         nominal_row_spacing_m=1.4,
