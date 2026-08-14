@@ -46,6 +46,14 @@ _CORRIDOR_LAYERS = {
     "refined_aisle",
     "aisle_centerline",
 }
+_STATUS_TEXT = {
+    "ACCEPTED": "接受",
+    "ACCEPTED_NO_CENTERLINE": "接受，但几何中线被安全证据切断",
+    "REJECTED_TOO_NARROW": "拒绝：几何宽度不足",
+    "REJECTED_NO_LONGITUDINAL_OVERLAP": "拒绝：两垄纵向重叠不足",
+    "REJECTED_MISSING_ROW_SUPPORT": "拒绝：至少一条垄缺少有效纵向支持",
+    "REJECTED_NO_SAFE_CELLS": "拒绝：Ground / 坡度 / 障碍净空后无安全栅格",
+}
 
 
 class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
@@ -187,6 +195,19 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._structure_status.setWordWrap(True)
         panel_layout.addWidget(self._structure_status)
 
+        diagnostic_row = QHBoxLayout()
+        diagnostic_row.addWidget(QLabel("行道对诊断："))
+        self._aisle_diagnostic_combo = QComboBox()
+        self._aisle_diagnostic_combo.currentIndexChanged.connect(
+            self._refresh_aisle_pair_detail
+        )
+        diagnostic_row.addWidget(self._aisle_diagnostic_combo, 1)
+        panel_layout.addLayout(diagnostic_row)
+
+        self._aisle_diagnostic_detail = QLabel("暂无行道对诊断")
+        self._aisle_diagnostic_detail.setWordWrap(True)
+        panel_layout.addWidget(self._aisle_diagnostic_detail)
+
         layout.insertWidget(max(0, layout.count() - 1), panel)
         return tab
 
@@ -246,9 +267,11 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             self._navigation_structure_result = None
             self._corridor_refinement_result = None
             self._structure_status.setText("农业结构：计算失败")
+            self._refresh_aisle_pair_diagnostics()
             QMessageBox.critical(self, "农业结构分析失败", str(exc))
             return
         self._refresh_structure_status()
+        self._refresh_aisle_pair_diagnostics()
         self._refresh_navigation_status()
         self._update_navigation_overlay()
         self.statusBar().showMessage(
@@ -267,6 +290,8 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         super()._clear_navigation_state(clear_overrides=clear_overrides)
         if hasattr(self, "_structure_status"):
             self._structure_status.setText("农业结构：等待 Ground-relative 导航图")
+        if hasattr(self, "_aisle_diagnostic_combo"):
+            self._refresh_aisle_pair_diagnostics()
 
     def _refresh_structure_status(self) -> None:
         if not hasattr(self, "_structure_status"):
@@ -286,6 +311,10 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         confident = int(np.count_nonzero(structure.ground_confidence >= 0.30))
         old_aisle = int(np.count_nonzero(structure.aisle_candidate))
         refined_aisle = int(np.count_nonzero(corridor.aisle_candidate))
+        accepted_pairs = sum(
+            diagnostic.status.startswith("ACCEPTED")
+            for diagnostic in corridor.aisle_pair_diagnostics
+        )
         spacing = (
             "n/a"
             if corridor.nominal_row_spacing_m is None
@@ -296,8 +325,65 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
             f"原始 Row {len(model.centers_v_m)} → 有效 Row {len(corridor.accepted_row_centers_v_m)} | "
             f"名义垄距 {spacing}\n"
             f"Ground Confidence≥0.30：{confident:,} | 旧行道 {old_aisle:,} → "
-            f"精炼行道 {refined_aisle:,} | 排除 Row {len(corridor.rejected_row_centers_v_m)}"
+            f"精炼行道 {refined_aisle:,} | 行道对 {accepted_pairs}/{len(corridor.aisle_pair_diagnostics)} 接受"
         )
+
+    def _refresh_aisle_pair_diagnostics(self) -> None:
+        if not hasattr(self, "_aisle_diagnostic_combo"):
+            return
+        previous = self._aisle_diagnostic_combo.currentIndex()
+        self._aisle_diagnostic_combo.blockSignals(True)
+        self._aisle_diagnostic_combo.clear()
+        corridor = self._corridor_refinement_result
+        if corridor is not None:
+            for diagnostic in corridor.aisle_pair_diagnostics:
+                self._aisle_diagnostic_combo.addItem(
+                    f"A{diagnostic.pair_index:02d} | "
+                    f"Row{diagnostic.pair_index:02d}↔Row{diagnostic.pair_index + 1:02d} | "
+                    f"{diagnostic.status}",
+                    diagnostic.pair_index - 1,
+                )
+        if self._aisle_diagnostic_combo.count() > 0:
+            self._aisle_diagnostic_combo.setCurrentIndex(
+                min(max(previous, 0), self._aisle_diagnostic_combo.count() - 1)
+            )
+        self._aisle_diagnostic_combo.blockSignals(False)
+        self._refresh_aisle_pair_detail()
+
+    def _refresh_aisle_pair_detail(self) -> None:
+        if not hasattr(self, "_aisle_diagnostic_detail"):
+            return
+        corridor = self._corridor_refinement_result
+        index = self._aisle_diagnostic_combo.currentIndex()
+        if corridor is None or index < 0 or index >= len(corridor.aisle_pair_diagnostics):
+            self._aisle_diagnostic_detail.setText("暂无行道对诊断")
+            self._aisle_diagnostic_detail.setStyleSheet("")
+            return
+        diagnostic = corridor.aisle_pair_diagnostics[index]
+        overlap = (
+            "n/a"
+            if diagnostic.longitudinal_overlap_m is None
+            else f"{diagnostic.longitudinal_overlap_m:.2f} m"
+        )
+        status_text = _STATUS_TEXT.get(diagnostic.status, diagnostic.status)
+        self._aisle_diagnostic_detail.setText(
+            f"中心距 {diagnostic.center_distance_m:.2f} m | "
+            f"结构占用 {diagnostic.structural_reserved_m:.2f} m | "
+            f"两侧净空 {diagnostic.side_clearance_reserved_m:.2f} m\n"
+            f"几何剩余 {diagnostic.geometric_available_width_m:.2f} m / "
+            f"最小要求 {diagnostic.minimum_required_width_m:.2f} m | "
+            f"纵向重叠 {overlap}\n"
+            f"栅格：几何 {diagnostic.geometric_cell_count:,} | "
+            f"安全 {diagnostic.safe_cell_count:,} | "
+            f"中心线 {diagnostic.centerline_cell_count:,}\n"
+            f"状态：{status_text}（{diagnostic.status}）"
+        )
+        if diagnostic.status == "ACCEPTED":
+            self._aisle_diagnostic_detail.setStyleSheet("color: #2e8b57;")
+        elif diagnostic.status.startswith("ACCEPTED"):
+            self._aisle_diagnostic_detail.setStyleSheet("color: #b8860b;")
+        else:
+            self._aisle_diagnostic_detail.setStyleSheet("color: #b22222;")
 
     def _refresh_navigation_status(self) -> None:
         MapWorkbenchWindow._refresh_navigation_status(self)
