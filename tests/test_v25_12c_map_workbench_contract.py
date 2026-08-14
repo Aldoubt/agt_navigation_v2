@@ -7,7 +7,9 @@ OFFLINE = ROOT / "src/agt_offline_assets"
 MODEL = PACKAGE / "agt_map_workbench/model.py"
 FRAME = PACKAGE / "agt_map_workbench/frame_calibration.py"
 NAV_PREVIEW = PACKAGE / "agt_map_workbench/navigation_preview.py"
+AGRICULTURAL_APP = PACKAGE / "agt_map_workbench/agricultural_workbench.py"
 NAV_DERIVATION = OFFLINE / "agt_offline_assets/navigation_map_derivation.py"
+NAV_STRUCTURE = OFFLINE / "agt_offline_assets/navigation_structure.py"
 APP = PACKAGE / "agt_map_workbench/app.py"
 VIEW = PACKAGE / "agt_map_workbench/view.py"
 PACKAGE_XML = PACKAGE / "package.xml"
@@ -24,11 +26,14 @@ def _read(path: Path) -> str:
 def test_workbench_is_pure_offline_package():
     package_xml = _read(PACKAGE_XML)
     app = _read(APP)
+    agricultural = _read(AGRICULTURAL_APP)
     assert "agt_offline_assets" in package_xml
     assert "python3-pyqt5" in package_xml
     assert "rclpy" not in package_xml
     assert "rclpy" not in app
+    assert "rclpy" not in agricultural
     assert "cmd_vel" not in app
+    assert "cmd_vel" not in agricultural
 
 
 def test_visual_polygon_serializes_existing_processing_contract():
@@ -171,6 +176,8 @@ def test_ground_relative_navigation_derivation_is_not_absolute_z_slice():
         "maximum_step_m",
         "UNKNOWN",
         "minimum_ground_support_points",
+        "ground_seed_max_rise_m",
+        "ground_seed_rejected_count",
     ):
         assert token in nav
     assert "height_range" not in nav
@@ -199,6 +206,63 @@ def test_navigation_map_editor_previews_evidence_and_exports_nav2_assets():
     assert "result.resolution_m" in preview
 
 
+def test_agricultural_structure_is_offline_evidence_not_gui_private_algorithm():
+    structure = _read(NAV_STRUCTURE)
+    agricultural = _read(AGRICULTURAL_APP)
+    for token in (
+        "NavigationStructureConfig",
+        "NavigationStructureResult",
+        "robust_slope_window_m",
+        "ground_confidence",
+        "robust_slope_deg",
+        "row_support",
+        "row_regularized_obstacle",
+        "aisle_candidate",
+        "derive_navigation_structure",
+    ):
+        assert token in structure
+    assert "derive_navigation_structure" in agricultural
+    assert "scipy" not in agricultural
+    assert "np.linalg.solve" not in agricultural
+    assert "find_peaks" not in agricultural
+
+
+def test_agricultural_workbench_exposes_independent_structure_layers():
+    agricultural = _read(AGRICULTURAL_APP)
+    preview = _read(NAV_PREVIEW)
+    for token in (
+        "Ground Confidence",
+        "Robust Plane 坡度",
+        "局部平面残差",
+        "种植行支持强度",
+        "规则化种植行",
+        "行道候选",
+        "仅看分析层（隐藏点云底图）",
+        "优先使用标定 +X（无标定则自动）",
+    ):
+        assert token in agricultural
+    for machine_layer in (
+        "ground_confidence",
+        "robust_slope",
+        "plane_residual",
+        "row_support",
+        "row_regularized",
+        "aisle_candidate",
+    ):
+        assert machine_layer in preview
+    assert "obstacle" in preview
+    assert "row_regularized" in preview
+
+
+def test_row_structure_preserves_raw_obstacle_evidence_boundary():
+    structure = _read(NAV_STRUCTURE)
+    assert "result.obstacle_count" in structure
+    assert "raw_obstacle" in structure
+    assert "row_regularized_obstacle" in structure
+    assert "aisle_candidate" in structure
+    assert "result.occupancy =" not in structure
+
+
 def test_navigation_override_is_world_polygon_not_pixel_paint():
     app = _read(APP)
     nav = _read(NAV_DERIVATION)
@@ -216,10 +280,12 @@ def test_navigation_override_is_world_polygon_not_pixel_paint():
     assert "no_go" in nav
 
 
-def test_navigation_derivation_unit_tests_are_registered():
+def test_navigation_derivation_and_structure_unit_tests_are_registered():
     cmake = _read(OFFLINE_CMAKE)
     assert "test_navigation_map_derivation" in cmake
     assert "test/test_navigation_map_derivation.py" in cmake
+    assert "test_navigation_structure" in cmake
+    assert "test/test_navigation_structure.py" in cmake
 
 
 def test_operator_ui_is_chinese_but_machine_contract_remains_stable():
@@ -240,7 +306,9 @@ def test_operator_ui_is_chinese_but_machine_contract_remains_stable():
 
 def test_workbench_does_not_hardcode_user_workspace_path():
     app = _read(APP)
+    agricultural = _read(AGRICULTURAL_APP)
     assert "/home/yangxuan" not in app
+    assert "/home/yangxuan" not in agricultural
     assert 'Path.cwd() / "runtime" / "maps"' in app
 
 
@@ -256,7 +324,7 @@ def test_ros2_run_launcher_is_executable_and_does_not_shadow_python_package():
     assert "RENAME agt_map_workbench" in cmake
     assert 'file(REMOVE "${AGT_MAP_WORKBENCH_CLI_DIR}/agt_map_workbench.py")' in cmake
     assert LAUNCHER.name != "agt_map_workbench.py"
-    assert "from agt_map_workbench.app import main" in launcher
+    assert "from agt_map_workbench.agricultural_workbench import main" in launcher
     assert not (PACKAGE / "scripts/agt_map_workbench.py").exists()
 
 
