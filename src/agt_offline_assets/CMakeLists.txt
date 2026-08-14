@@ -59,6 +59,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_vehicle_profile test/test_vehicle_profile.py
   )
+  ament_add_pytest_test(
+    test_agricultural_coverage_ordering test/test_agricultural_coverage_ordering.py
+  )
 endif()
 
 ament_package()
