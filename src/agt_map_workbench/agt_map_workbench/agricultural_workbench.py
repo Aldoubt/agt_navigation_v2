@@ -93,7 +93,8 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         title.setWordWrap(True)
         panel_layout.addWidget(title)
         evidence_note = QLabel(
-            "垄检测默认融合：植被/障碍证据 55% + 地形隆起证据 45%；"
+            "原“种植行支持强度”已升级为混合垄支持："
+            "植被/障碍证据 55% + 地形隆起证据 45%；"
             "裸垄只要 Ground Surface 仍保留隆起，也可进入 Row Support"
         )
         evidence_note.setWordWrap(True)
