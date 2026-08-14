@@ -1,7 +1,6 @@
 import numpy as np
 
 from agt_offline_assets import (
-    FREE,
     UNKNOWN,
     CorridorRefinementConfig,
     GroundRelativeNavigationConfig,
@@ -22,14 +21,15 @@ def _fixture():
     obstacle_count = np.zeros(shape, dtype=np.int32)
 
     # Two wall-like elongated obstacle bands at the outer Y boundary plus three
-    # interior crop rows.  Vegetation is intentionally wider than the nominal
+    # interior crop rows. Vegetation is intentionally wider than the nominal
     # structural row width.
     y_centers = [0.20, 1.00, 2.00, 3.00, 4.80]
     for center in y_centers:
         row = int(center / resolution)
         obstacle_count[max(0, row - 2):min(height, row + 3), 5:55] = 5
 
-    # Independent obstacle inside the aisle between y=1 and y=2.
+    # Independent obstacle inside the aisle between y=1 and y=2. It blocks the
+    # exact mathematical midpoint but leaves safe cells on either side.
     obstacle_count[14:17, 28:31] = 8
 
     nav_config = GroundRelativeNavigationConfig(
@@ -77,6 +77,17 @@ def _fixture():
     return navigation, structure
 
 
+def _feasible_config(**kwargs):
+    values = dict(
+        row_structural_half_width_m=0.15,
+        aisle_side_clearance_m=0.05,
+        raw_obstacle_clearance_m=0.05,
+        aisle_minimum_width_m=0.35,
+    )
+    values.update(kwargs)
+    return CorridorRefinementConfig(**values)
+
+
 def test_boundary_wall_peaks_are_not_crop_rows():
     navigation, structure = _fixture()
     result = derive_corridor_refinement(
@@ -96,8 +107,6 @@ def test_structural_row_band_is_independent_from_vegetation_envelope_width():
         structure,
         CorridorRefinementConfig(row_structural_half_width_m=0.15),
     )
-    # Vegetation spans roughly five 10-cm rows while the structural band is
-    # intentionally narrower and should therefore occupy fewer cells.
     assert np.count_nonzero(result.vegetation_envelope) > np.count_nonzero(
         result.row_structural_band
     )
@@ -106,18 +115,7 @@ def test_structural_row_band_is_independent_from_vegetation_envelope_width():
 
 def test_refined_aisle_exists_only_between_adjacent_crop_rows():
     navigation, structure = _fixture()
-    result = derive_corridor_refinement(
-        navigation,
-        structure,
-        CorridorRefinementConfig(
-            row_structural_half_width_m=0.15,
-            aisle_side_clearance_m=0.05,
-            raw_obstacle_clearance_m=0.05,
-            aisle_minimum_width_m=0.35,
-        ),
-    )
-    # Interior aisle y=1.5 has candidates, but wall-row exterior y=0.6 and
-    # outside the last row y=3.8 do not.
+    result = derive_corridor_refinement(navigation, structure, _feasible_config())
     assert np.count_nonzero(result.aisle_candidate[15, :]) > 0
     assert np.count_nonzero(result.aisle_candidate[6, :]) == 0
     assert np.count_nonzero(result.aisle_candidate[38, :]) == 0
@@ -128,12 +126,7 @@ def test_raw_obstacle_clearance_cuts_hole_in_aisle_candidate():
     result = derive_corridor_refinement(
         navigation,
         structure,
-        CorridorRefinementConfig(
-            row_structural_half_width_m=0.15,
-            aisle_side_clearance_m=0.05,
-            raw_obstacle_clearance_m=0.15,
-            aisle_minimum_width_m=0.35,
-        ),
+        _feasible_config(raw_obstacle_clearance_m=0.15),
     )
     assert not result.aisle_candidate[15, 29]
     assert np.count_nonzero(result.aisle_candidate[15, 10:20]) > 0
@@ -142,9 +135,6 @@ def test_raw_obstacle_clearance_cuts_hole_in_aisle_candidate():
 def test_default_safety_width_rejects_fixture_aisle_that_is_too_narrow():
     navigation, structure = _fixture()
     result = derive_corridor_refinement(navigation, structure)
-    # Default geometry leaves only 0.36 m between adjacent 1.00 m rows:
-    # 1.00 - 2*0.20 structural half-width - 2*0.12 side clearance.
-    # That is intentionally below the default 0.45 m minimum aisle width.
     assert np.count_nonzero(result.aisle_candidate) == 0
     assert np.count_nonzero(result.aisle_centerline) == 0
     assert len(result.aisle_pair_diagnostics) == 2
@@ -161,16 +151,7 @@ def test_default_safety_width_rejects_fixture_aisle_that_is_too_narrow():
 
 def test_aisle_centerline_is_subset_of_refined_aisle_when_corridor_is_feasible():
     navigation, structure = _fixture()
-    result = derive_corridor_refinement(
-        navigation,
-        structure,
-        CorridorRefinementConfig(
-            row_structural_half_width_m=0.15,
-            aisle_side_clearance_m=0.05,
-            raw_obstacle_clearance_m=0.05,
-            aisle_minimum_width_m=0.35,
-        ),
-    )
+    result = derive_corridor_refinement(navigation, structure, _feasible_config())
     assert np.all(~result.aisle_centerline | result.aisle_candidate)
     assert np.count_nonzero(result.aisle_candidate) > 0
     assert np.count_nonzero(result.aisle_centerline) > 0
@@ -182,3 +163,14 @@ def test_aisle_centerline_is_subset_of_refined_aisle_when_corridor_is_feasible()
         assert diagnostic.centerline_cell_count > 0
         assert diagnostic.longitudinal_overlap_m is not None
         assert diagnostic.longitudinal_overlap_m >= 1.5
+
+
+def test_aisle_centerline_shifts_around_midpoint_obstacle_when_side_clearance_exists():
+    navigation, structure = _fixture()
+    result = derive_corridor_refinement(navigation, structure, _feasible_config())
+    # Never traverse the physical obstacle cells.
+    assert not np.any(result.aisle_centerline[14:17, 28:31])
+    # The same longitudinal slices still retain a safe centerline on a lateral
+    # side instead of losing the entire segment at the mathematical midpoint.
+    assert np.any(result.aisle_centerline[12:19, 28:31])
+    assert np.all(~result.aisle_centerline | result.aisle_candidate)
