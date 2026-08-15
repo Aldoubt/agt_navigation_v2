@@ -21,6 +21,9 @@ from agt_offline_assets.vehicle_feasible_segment import (
     INTERIOR_BLOCKED_END,
     LOW_U_HEADLAND,
     derive_vehicle_feasible_segment_plan,
+    load_vehicle_feasible_segment_plan,
+    vehicle_feasible_segment_plan_to_dict,
+    write_vehicle_feasible_segment_plan,
 )
 from agt_offline_assets.vehicle_lane_feasibility import (
     derive_vehicle_lane_feasibility_trace,
@@ -388,3 +391,47 @@ def test_repeated_derivation_is_deterministic():
         "aisle_001.segment_001",
         "aisle_001.segment_002",
     ]
+
+
+def test_segment_yaml_round_trip_is_deterministic(tmp_path):
+    plan = derive_vehicle_feasible_segment_plan(
+        _graph(length_m=5.0),
+        _navigation_with_blocked_x_ranges(((2.20, 2.80),)),
+        _vehicle(),
+        _config(minimum_contiguous_span_m=1.0),
+    )
+    payload = vehicle_feasible_segment_plan_to_dict(plan)
+    assert tuple(payload) == (
+        "schema",
+        "status",
+        "frame_id",
+        "platform_id",
+        "platform_profile_sha256",
+        "row_direction_xy",
+        "source",
+        "configuration",
+        "summary",
+        "aisles",
+    )
+
+    first = write_vehicle_feasible_segment_plan(plan, tmp_path / "first.yaml")
+    second = write_vehicle_feasible_segment_plan(plan, tmp_path / "second.yaml")
+    assert first.read_bytes() == second.read_bytes()
+    assert load_vehicle_feasible_segment_plan(first) == plan
+
+
+def test_segment_yaml_writer_refuses_implicit_overwrite(tmp_path):
+    plan = derive_vehicle_feasible_segment_plan(
+        _graph(length_m=5.0),
+        _navigation_with_blocked_x_ranges(((2.20, 2.80),)),
+        _vehicle(),
+        _config(minimum_contiguous_span_m=1.0),
+    )
+    output = tmp_path / "vehicle_feasible_segments.yaml"
+    write_vehicle_feasible_segment_plan(plan, output)
+
+    with pytest.raises(FileExistsError):
+        write_vehicle_feasible_segment_plan(plan, output)
+
+    rewritten = write_vehicle_feasible_segment_plan(plan, output, overwrite=True)
+    assert rewritten == output.resolve()
