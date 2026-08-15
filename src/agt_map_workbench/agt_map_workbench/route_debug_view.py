@@ -10,10 +10,10 @@ from PyQt5.QtGui import QColor, QBrush, QImage, QPainterPath, QPen, QPixmap, QPo
 from PyQt5.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
-    QGraphicsItemGroup,
     QGraphicsPathItem,
     QGraphicsPixmapItem,
     QGraphicsPolygonItem,
+    QGraphicsRectItem,
     QGraphicsScene,
     QGraphicsSimpleTextItem,
 )
@@ -81,21 +81,26 @@ class RouteDebugSceneController(QObject):
         self._overlay: Mapping[str, Any] | None = None
         self._active = False
         self._failure_focus = False
-        self._groups: dict[str, QGraphicsItemGroup] = {}
+        self._groups: dict[str, QGraphicsRectItem] = {}
         self._layer_visible = {key: True for key in ROUTE_DEBUG_LAYER_KEYS}
         self._feature_items: dict[str, QGraphicsItem] = {}
         self._owned_items: list[QGraphicsItem] = []
         self._selection_outline: QGraphicsPolygonItem | None = None
         self._scene.selectionChanged.connect(self._on_scene_selection_changed)
 
-    def _group(self, layer_key: str) -> QGraphicsItemGroup:
+    def _group(self, layer_key: str) -> QGraphicsRectItem:
         group = self._groups.get(layer_key)
         if group is None:
-            group = QGraphicsItemGroup()
-            # QGraphicsItemGroup handles child events by default in Qt5. Route
-            # Debug keeps each concrete child selectable so the Inspector can
-            # receive the feature_id and frozen evidence stored on that item.
-            group.setHandlesChildEvents(False)
+            # QGraphicsItemGroup treats its children as one compound item and
+            # the obsolete setHandlesChildEvents() API is not exposed by the
+            # PyQt5 build shipped with ROS 2 Humble on Ubuntu 22.04. Use an
+            # inert regular QGraphicsItem parent instead: it still gives us
+            # layer-level visibility/Z control while concrete child features
+            # remain independently selectable for the Inspector.
+            group = QGraphicsRectItem(QRectF())
+            group.setPen(QPen(Qt.NoPen))
+            group.setBrush(QBrush(Qt.NoBrush))
+            group.setAcceptedMouseButtons(Qt.NoButton)
             group.setZValue(self._z_for_layer(layer_key))
             self._scene.addItem(group)
             self._groups[layer_key] = group
@@ -177,13 +182,12 @@ class RouteDebugSceneController(QObject):
         rect = QRectF()
         initialized = False
         for group in self._groups.values():
-            if not group.childItems():
-                continue
-            candidate = group.sceneBoundingRect()
-            if candidate.isNull():
-                continue
-            rect = candidate if not initialized else rect.united(candidate)
-            initialized = True
+            for child in group.childItems():
+                candidate = child.sceneBoundingRect()
+                if candidate.isNull():
+                    continue
+                rect = candidate if not initialized else rect.united(candidate)
+                initialized = True
         return rect
 
     def select_feature(self, feature_id: str) -> bool:
@@ -247,7 +251,7 @@ class RouteDebugSceneController(QObject):
         item.setPos(float(navigation.origin_x_m), float(-maximum_y))
         item.setScale(float(navigation.resolution_m))
         item.setTransformationMode(Qt.FastTransformation)
-        self._group(layer_key).addToGroup(item)
+        item.setParentItem(self._group(layer_key))
 
     def _render_navigation(self, dataset: RouteDebugDataset) -> None:
         navigation = dataset.navigation
@@ -312,7 +316,7 @@ class RouteDebugSceneController(QObject):
         item.setData(0, feature_id)
         item.setData(1, payload)
         item.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self._group(layer_key).addToGroup(item)
+        item.setParentItem(self._group(layer_key))
         self._feature_items[feature_id] = item
         if props.get("feature_kind") == "COVERAGE_TRAVERSAL" and props.get("sequence") is not None:
             self._add_sequence_label(item, str(props["sequence"]), layer_key)
@@ -360,4 +364,4 @@ class RouteDebugSceneController(QObject):
         label.setBrush(QBrush(_qcolor("#e2e8f0")))
         label.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
         label.setPos(source_item.mapToScene(source_item.boundingRect().center()))
-        self._group(layer_key).addToGroup(label)
+        label.setParentItem(self._group(layer_key))
