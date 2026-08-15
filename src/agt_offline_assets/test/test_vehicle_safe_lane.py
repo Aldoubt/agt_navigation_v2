@@ -126,6 +126,8 @@ def test_all_free_structural_centerline_remains_vehicle_safe_lane():
     assert lane.low_u_retreat_m == 0.0
     assert lane.high_u_retreat_m == 0.0
     assert lane.maximum_used_lateral_shift_m == 0.0
+    assert lane.site_boundary_rejected_pose_count == 0
+    assert lane.site_boundary_limited_sample_count == 0
 
 
 def test_wide_aisle_can_shift_laterally_around_centerline_conflict():
@@ -155,6 +157,27 @@ def test_narrow_aisle_does_not_force_vehicle_lane_through_occupied_cells():
     assert lane.centerline_xyz == ()
 
 
+def test_boundary_rejected_endpoint_poses_do_not_mean_whole_lane_is_blocked():
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((0.0, -1.0), (4.0, -1.0), (4.0, 1.0), (0.0, 1.0)),
+    )
+    plan = derive_vehicle_safe_lane_plan(
+        _graph(width=1.60),
+        _navigation(),
+        _vehicle(),
+        _config(),
+        site_boundary=boundary,
+    )
+    lane = plan.lanes[0]
+    assert lane.status == "VEHICLE_SAFE_LANE_READY"
+    assert lane.coverage_fraction >= 0.70
+    assert lane.site_boundary_rejected_pose_count > 0
+    assert lane.site_boundary_limited_sample_count > 0
+    assert lane.site_boundary_limited_sample_count < lane.total_sample_count
+    assert "SITE_BOUNDARY_CONFLICT" not in lane.reason
+
+
 def test_all_free_grid_still_rejects_lane_when_footprint_crosses_site_boundary():
     boundary = SiteBoundary(
         frame_id="map",
@@ -170,4 +193,6 @@ def test_all_free_grid_still_rejects_lane_when_footprint_crosses_site_boundary()
     lane = plan.lanes[0]
     assert lane.status == "NO_VEHICLE_SAFE_LANE"
     assert lane.centerline_xyz == ()
+    assert lane.site_boundary_rejected_pose_count > 0
+    assert lane.site_boundary_limited_sample_count == lane.total_sample_count
     assert "SITE_BOUNDARY_CONFLICT" in lane.reason
