@@ -1,3 +1,4 @@
+import ast
 from pathlib import Path
 
 
@@ -8,6 +9,26 @@ EXPERIMENT = ROOT / "docs/experiments/v25_12e_vehicle_safe_lane_diagnostic_20260
 
 def _read(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def _assigns_navigation_occupancy(text: str) -> bool:
+    tree = ast.parse(text)
+    targets = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            if isinstance(node, ast.Assign):
+                targets.extend(node.targets)
+            else:
+                targets.append(node.target)
+    for target in targets:
+        if (
+            isinstance(target, ast.Attribute)
+            and target.attr == "occupancy"
+            and isinstance(target.value, ast.Name)
+            and target.value.id == "navigation"
+        ):
+            return True
+    return False
 
 
 def test_occupancy_source_audit_is_diagnostic_only_and_source_explicit():
@@ -23,7 +44,7 @@ def test_occupancy_source_audit_is_diagnostic_only_and_source_explicit():
         'aisle_graph_mutated',
     ):
         assert token in text
-    assert 'navigation.occupancy =' not in text
+    assert not _assigns_navigation_occupancy(text)
     assert 'force_free' not in text
 
 
