@@ -8,6 +8,7 @@ from agt_offline_assets.route_debug_dataset import (
     RouteDebugMotionSample,
 )
 from agt_offline_assets.route_debug_overlay import (
+    _failure_status,
     _split_motion,
     build_route_debug_overlay,
     write_route_debug_overlay,
@@ -61,6 +62,13 @@ def _dataset(tmp_path: Path) -> RouteDebugDataset:
         occupancy_source_masks=None,
         asset_states=(),
     )
+
+
+def test_failure_status_does_not_confuse_no_accepted_with_success():
+    assert _failure_status("NO_ACCEPTED_FORWARD_CANDIDATE")
+    assert _failure_status("NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION")
+    assert not _failure_status("ACCEPTED_CENTERLINE")
+    assert not _failure_status("REVERSE_PRIMITIVE_PREVIEW_FREE")
 
 
 def test_split_motion_keeps_new_direction_out_of_previous_segment():
