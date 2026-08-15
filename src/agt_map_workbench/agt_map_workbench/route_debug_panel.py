@@ -20,6 +20,11 @@ from PyQt5.QtWidgets import (
     QWidget,
 )
 
+from agt_offline_assets.route_debug_12f import (
+    RouteDebug12FBundle,
+    build_route_debug_12f_features,
+    load_route_debug_12f,
+)
 from agt_offline_assets.route_debug_dataset import (
     ASSET_INVALID,
     ASSET_LOADED,
@@ -34,8 +39,10 @@ from agt_offline_assets.route_debug_overlay import (
 from .route_debug_view import ROUTE_DEBUG_LAYER_KEYS, RouteDebugSceneController
 
 _LAYER_LABELS = {
-    "base.navigation": "Navigation Map",
+    "base.navigation": "Current Navigation Map",
+    "base.navigation_12f": "12F Candidate Navigation Map",
     "base.no_go": "NO_GO",
+    "semantics.site_boundary": "Site Boundary",
     "structure.turn_zones": "Turn Zones",
     "structure.aisles": "Structural Aisles",
     "structure.vehicle_safe_lane": "Vehicle-safe Lane",
@@ -44,6 +51,12 @@ _LAYER_LABELS = {
     "motion.forward_candidates": "Forward Candidates",
     "motion.forward_selected": "Forward Selected / F Segments",
     "motion.reverse": "Reverse Segments / Cusps",
+    "traversability.observed": "OBSERVED_FREE",
+    "traversability.inferred": "INFERRED_TRAVERSABLE",
+    "traversability.hard_blocked": "HARD_BLOCKED",
+    "traversability.sensor_obstacle": "SENSOR_OBSTACLE",
+    "traversability.unknown": "12F UNKNOWN",
+    "traversability.aisle_geometric_envelope": "Aisle Geometric Envelope",
     "diagnostics.raw": "RAW_OBSTACLE_DIRECT",
     "diagnostics.geometry": "GEOMETRY_DIRECT",
     "diagnostics.padding": "PADDING_ONLY",
@@ -62,6 +75,7 @@ class RouteDebugPanel(QWidget):
         self.controller.featureSelected.connect(self._show_inspector_payload)
         self._current_run_dir: Path | None = None
         self._dataset: RouteDebugDataset | None = None
+        self._bundle_12f: RouteDebug12FBundle | None = None
         self._layer_items: dict[str, QTreeWidgetItem] = {}
         self._updating_tree = False
         self._build_ui()
@@ -93,12 +107,15 @@ class RouteDebugPanel(QWidget):
         coverage = QPushButton("Coverage 总览")
         planning = QPushButton("规划结果")
         collision = QPushButton("碰撞诊断")
+        candidate_12f = QPushButton("12F A/B")
         coverage.clicked.connect(lambda: self.apply_preset("coverage"))
         planning.clicked.connect(lambda: self.apply_preset("planning"))
         collision.clicked.connect(lambda: self.apply_preset("collision"))
+        candidate_12f.clicked.connect(lambda: self.apply_preset("12f"))
         presets.addWidget(coverage)
         presets.addWidget(planning)
         presets.addWidget(collision)
+        presets.addWidget(candidate_12f)
         layout.addLayout(presets)
 
         actions = QHBoxLayout()
@@ -122,10 +139,14 @@ class RouteDebugPanel(QWidget):
             parent_item = groups.get(group_name)
             if parent_item is None:
                 parent_item = QTreeWidgetItem([group_name, ""])
-                parent_item.setFlags(parent_item.flags() & ~Qt.ItemIsUserCheckable)
+                parent_item.setFlags(
+                    parent_item.flags() & ~Qt.ItemIsUserCheckable
+                )
                 self._layers.addTopLevelItem(parent_item)
                 groups[group_name] = parent_item
-            child = QTreeWidgetItem([_LAYER_LABELS.get(layer_key, layer_key), "未加载"])
+            child = QTreeWidgetItem(
+                [_LAYER_LABELS.get(layer_key, layer_key), "未加载"]
+            )
             child.setData(0, Qt.UserRole, layer_key)
             child.setFlags(child.flags() | Qt.ItemIsUserCheckable)
             child.setCheckState(0, Qt.Checked)
@@ -133,7 +154,7 @@ class RouteDebugPanel(QWidget):
             self._layer_items[layer_key] = child
         self._layers.expandAll()
         self._layers.header().setStretchLastSection(False)
-        self._layers.header().resizeSection(0, 190)
+        self._layers.header().resizeSection(0, 205)
         layer_layout.addWidget(self._layers)
         layout.addWidget(layer_box, 2)
 
@@ -141,7 +162,9 @@ class RouteDebugPanel(QWidget):
         inspector_layout = QVBoxLayout(inspector_box)
         self._inspector = QTextBrowser()
         self._inspector.setReadOnly(True)
-        self._inspector.setPlaceholderText("点击行道、路径、Connector 或碰撞点查看冻结证据")
+        self._inspector.setPlaceholderText(
+            "点击行道、路径、Connector、边界或碰撞点查看冻结证据"
+        )
         inspector_layout.addWidget(self._inspector)
         layout.addWidget(inspector_box, 3)
 
@@ -152,29 +175,60 @@ class RouteDebugPanel(QWidget):
     def load_run_directory(self, path: str | Path) -> RouteDebugDataset:
         root = Path(path).expanduser().resolve()
         dataset = load_route_debug_dataset(root)
+        bundle_12f = load_route_debug_12f(
+            root,
+            expected_frame_id=dataset.frame_id,
+        )
+
         overlay = build_route_debug_overlay(dataset)
+        features = overlay.get("features")
+        if not isinstance(features, list):
+            raise ValueError("Route Debug overlay features must be a list")
+        features.extend(build_route_debug_12f_features(bundle_12f))
+
         write_route_debug_overlay(
             overlay,
             dataset.run_dir / "route_debug_overlay.geojson",
             overwrite=True,
         )
         self.controller.set_content(dataset, overlay)
+        self.controller.set_12f_content(bundle_12f)
+        self.controller.set_failure_focus(self._failure_button.isChecked())
+
         self._dataset = dataset
+        self._bundle_12f = bundle_12f
         self._current_run_dir = dataset.run_dir
         self._path_label.setText(str(dataset.run_dir))
         self._refresh_layer_tree()
         self.apply_preset("coverage")
         self._fit_route()
 
-        invalid = [state for state in dataset.asset_states if state.availability == ASSET_INVALID]
-        loaded = [state for state in dataset.asset_states if state.availability == ASSET_LOADED]
+        states = tuple(dataset.asset_states) + tuple(bundle_12f.asset_states)
+        invalid = [
+            state for state in states if state.availability == ASSET_INVALID
+        ]
+        loaded = [
+            state for state in states if state.availability == ASSET_LOADED
+        ]
+        loaded_12f = [
+            state
+            for state in bundle_12f.asset_states
+            if state.availability == ASSET_LOADED
+        ]
         if invalid:
             self._status.setText(
-                f"已加载 {len(loaded)} 个证据层，{len(invalid)} 个证据层因 schema/frame/内容无效而关闭"
+                f"已加载 {len(loaded)} 个证据层，{len(invalid)} 个证据层因 "
+                "schema/frame/内容无效而关闭；Route Debug 仍为只读"
+            )
+        elif loaded_12f:
+            self._status.setText(
+                f"已加载 {len(loaded)} 个证据层，其中 12F {len(loaded_12f)} 层；"
+                "可用 12F A/B 比较；Route Debug 只写 route_debug_overlay.geojson"
             )
         else:
             self._status.setText(
-                f"已加载 {len(loaded)} 个证据层；Route Debug 只写 route_debug_overlay.geojson"
+                f"已加载 {len(loaded)} 个证据层；12F Candidate 尚无完整冻结证据；"
+                "Route Debug 只写 route_debug_overlay.geojson"
             )
         return dataset
 
@@ -206,7 +260,10 @@ class RouteDebugPanel(QWidget):
         return self._current_run_dir
 
     def layer_enabled(self, layer_key: str) -> bool:
-        return self.controller.layer_available(layer_key) and self.controller.layer_visible(layer_key)
+        return (
+            self.controller.layer_available(layer_key)
+            and self.controller.layer_visible(layer_key)
+        )
 
     def inspector_text(self) -> str:
         return self._inspector.toPlainText()
@@ -230,8 +287,11 @@ class RouteDebugPanel(QWidget):
             if self._current_run_dir is not None
             else Path.cwd() / "route_debug_view.png"
         )
-        selected, _ = QFileDialog.getSaveFileName(
-            self, "导出 Route Debug PNG", str(default), "PNG (*.png)"
+        selected, _selected_filter = QFileDialog.getSaveFileName(
+            self,
+            "导出 Route Debug PNG",
+            str(default),
+            "PNG (*.png)",
         )
         if selected and not self.export_current_view(selected):
             QMessageBox.warning(self, "导出失败", f"无法写入 {selected}")
@@ -255,7 +315,9 @@ class RouteDebugPanel(QWidget):
                 item.setText(1, "可用" if available else "无证据")
                 item.setCheckState(
                     0,
-                    Qt.Checked if available and self.controller.layer_visible(layer_key) else Qt.Unchecked,
+                    Qt.Checked
+                    if available and self.controller.layer_visible(layer_key)
+                    else Qt.Unchecked,
                 )
         finally:
             self._updating_tree = False
@@ -280,7 +342,10 @@ class RouteDebugPanel(QWidget):
         layer_key = item.data(0, Qt.UserRole)
         if not isinstance(layer_key, str) or item.isDisabled():
             return
-        self.controller.set_layer_visible(layer_key, item.checkState(0) == Qt.Checked)
+        self.controller.set_layer_visible(
+            layer_key,
+            item.checkState(0) == Qt.Checked,
+        )
 
     def _show_inspector_payload(self, payload: Mapping[str, Any]) -> None:
         lines = [
@@ -290,9 +355,20 @@ class RouteDebugPanel(QWidget):
             "",
         ]
         preferred = (
-            "STRUCTURE", "COVERAGE", "VEHICLE", "NAVIGATION / VEHICLE FEASIBILITY",
-            "CONFLICT", "RELATED", "FORWARD", "R5.6", "R6A", "R6B",
-            "FORWARD CANDIDATE", "SOURCE",
+            "STRUCTURE",
+            "COVERAGE",
+            "VEHICLE",
+            "NAVIGATION / VEHICLE FEASIBILITY",
+            "SEMANTICS",
+            "TRAVERSABILITY",
+            "CONFLICT",
+            "RELATED",
+            "FORWARD",
+            "R5.6",
+            "R6A",
+            "R6B",
+            "FORWARD CANDIDATE",
+            "SOURCE",
         )
         seen = set()
         for section in preferred:
@@ -303,18 +379,26 @@ class RouteDebugPanel(QWidget):
             lines.extend(self._format_section(section, value))
         for section, value in payload.items():
             if section in seen or section in {
-                "feature_id", "feature_kind", "status", "source_asset", "source_id",
-                "source_field", "is_failure", "footprint_polygon_xy",
+                "feature_id",
+                "feature_kind",
+                "status",
+                "source_asset",
+                "source_id",
+                "source_field",
+                "is_failure",
+                "footprint_polygon_xy",
             }:
                 continue
             if isinstance(value, Mapping):
                 lines.extend(self._format_section(str(section), value))
-        lines.extend([
-            "SOURCE",
-            f"  asset: {payload.get('source_asset', '')}",
-            f"  id: {payload.get('source_id', '')}",
-            f"  field: {payload.get('source_field', '')}",
-        ])
+        lines.extend(
+            [
+                "SOURCE",
+                f"  asset: {payload.get('source_asset', '')}",
+                f"  id: {payload.get('source_id', '')}",
+                f"  field: {payload.get('source_field', '')}",
+            ]
+        )
         self._inspector.setPlainText("\n".join(lines))
 
     @staticmethod
