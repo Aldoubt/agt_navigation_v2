@@ -32,6 +32,7 @@ _CORRIDOR_LAYERS = {
     "boundary_exclusion",
     "boundary_aisle",
     "boundary_aisle_centerline",
+    "aisle_geometric_envelope",
     "refined_aisle",
     "aisle_centerline",
 }
@@ -146,6 +147,8 @@ def _rgba_for_result(
         rgba[corridor.boundary_aisle_candidate] = (40, 170, 255, 235)
     elif layer == "boundary_aisle_centerline":
         rgba[corridor.boundary_aisle_centerline] = (80, 255, 190, 250)
+    elif layer == "aisle_geometric_envelope":
+        rgba[corridor.aisle_geometric_envelope] = (245, 205, 65, 105)
     elif layer == "refined_aisle":
         rgba[corridor.aisle_candidate] = (35, 225, 255, 220)
     elif layer == "aisle_centerline":
