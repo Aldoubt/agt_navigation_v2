@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 from collections.abc import Sequence
+from pathlib import Path
 
 
 REPORT_SCHEMA = "agt_v25_12g_a1_acceptance_report/v1"
@@ -36,9 +37,33 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _require_file(path: Path) -> Path:
+    if not path.is_file():
+        raise FileNotFoundError(f"required A1 acceptance input not found: {path}")
+    return path
+
+
+def _preflight(args: argparse.Namespace) -> tuple[Path, Path, Path, Path, Path]:
+    """Resolve frozen input/output paths without parsing heavy asset content."""
+    run_dir = Path(args.run_dir).expanduser().resolve()
+    aisle_graph = _require_file(run_dir / "aisle_graph.yaml")
+    site_boundary = _require_file(run_dir / "site_boundary.yaml")
+    navigation_map = _require_file(run_dir / str(args.navigation_map))
+    vehicle_profile = _require_file(Path(args.vehicle_profile).expanduser().resolve())
+
+    segment_output = run_dir / "vehicle_feasible_segments.yaml"
+    if args.write_segments and segment_output.exists() and not args.overwrite_segments:
+        raise FileExistsError(
+            f"vehicle-feasible segment asset already exists: {segment_output}"
+        )
+
+    return aisle_graph, site_boundary, navigation_map, vehicle_profile, segment_output
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Parse the frozen CLI; real-data execution is added in later TDD cycles."""
-    build_parser().parse_args(argv)
+    """Validate frozen A1 input/output paths; derivation follows in later cycles."""
+    args = build_parser().parse_args(argv)
+    _preflight(args)
     return 0
 
 
