@@ -117,6 +117,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_route_debug_overlay test/test_route_debug_overlay.py
   )
+  ament_add_pytest_test(test_site_boundary test/test_site_boundary.py)
 endif()
 
 ament_package()
