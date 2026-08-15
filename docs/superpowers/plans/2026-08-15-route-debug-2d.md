@@ -4,9 +4,9 @@
 
 **Goal:** Add a read-only 2D Route Debug tab to the existing AGT Map Workbench that loads frozen greenhouse route-production assets, renders coverage/order/planning/collision evidence in one map, and lets the operator inspect why an aisle or connector is accepted, rejected, blocked, or unsolved.
 
-**Architecture:** `agt_offline_assets` owns all parsing, cross-asset validation, cause-chain joining, collision provenance, and generation of the render-only `route_debug_overlay.geojson`. `agt_map_workbench` only renders Navigation/source-mask rasters and GeoJSON features into the existing shared 2D `QGraphicsScene`, controls layer visibility/presets, and exposes a read-only Inspector. The GUI never reruns Dubins, R6, map derivation, or route admission logic.
+**Architecture:** `agt_offline_assets` owns frozen-asset parsing, cross-asset validation, cause-chain joins, collision provenance, and generation of the render-only `route_debug_overlay.geojson`. `agt_map_workbench` only renders Navigation/source-mask rasters and GeoJSON features into the existing shared 2D `QGraphicsScene`, controls layer visibility/presets, and exposes a read-only Inspector. The GUI never reruns Dubins, R6, Navigation Map derivation, or route-admission logic.
 
-**Tech Stack:** Python 3, dataclasses, pathlib, PyYAML, NumPy, SciPy, standard-library JSON/GeoJSON serialization, PyQt5 `QGraphicsScene/QGraphicsView`, ROS 2 Humble `ament_cmake_python` + `ament_cmake_pytest`, pytest.
+**Tech Stack:** Python 3, dataclasses, pathlib, PyYAML, NumPy, SciPy, standard-library JSON for GeoJSON, PyQt5 `QGraphicsScene/QGraphicsView`, ROS 2 Humble `ament_cmake_python` + `ament_cmake_pytest`, pytest.
 
 ## Global Constraints
 
@@ -17,7 +17,7 @@
 - Missing optional assets degrade to an unavailable layer. An existing asset with invalid schema or incompatible `frame_id` fails closed for that layer and is not rendered.
 - Never silently convert coordinate frames. GeoJSON stores normal world `(x, y)` coordinates; Qt rendering converts them to scene `(x, -y)` consistently with the existing Workbench.
 - `WITH_ROW_DIRECTION` and `AGAINST_ROW_DIRECTION` remain normal FORWARD aisle traversal. Reverse motion is rendered only when a connector sample explicitly says `motion_direction=REVERSE`.
-- Preserve the exact implemented R6 backend label `BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP`; never relabel it analytic Reeds-Shepp.
+- Preserve the exact R6 backend label `BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP`; never relabel it analytic Reeds-Shepp.
 - NO_GO is recovered and displayed as separate semantic evidence from `derivation.yaml.overrides`, but this MVP does not modify Coverage/R6/R7 NO_GO admission behavior.
 - Do not change Navigation Map generation, obstacle padding, vehicle profile, Aisle Graph geometry, Coverage Ordering, connector requests, R6A admission, R6B search, R7 state, or Route READY promotion.
 - Formal vehicle readiness remains blocked by the unverified real MK-mini `base_footprint` reference/final mounted envelope; Route Debug remains preview/explainability tooling.
@@ -51,15 +51,19 @@ src/agt_map_workbench/README.md
 docs/v2.5/V25_12E_CURRENT_STATE.md
 ```
 
-Add tests:
+Add tests/test helpers:
 
 ```text
 src/agt_offline_assets/test/route_debug_test_data.py
 src/agt_offline_assets/test/test_route_debug_dataset.py
 src/agt_offline_assets/test/test_route_debug_overlay.py
+
+src/agt_map_workbench/test/conftest.py
+src/agt_map_workbench/test/route_debug_test_data.py
 src/agt_map_workbench/test/test_route_debug_view.py
 src/agt_map_workbench/test/test_route_debug_panel.py
 src/agt_map_workbench/test/test_route_debug_workbench_integration.py
+
 tests/test_v25_12e_route_debug_contract.py
 ```
 
@@ -75,8 +79,8 @@ tests/test_v25_12e_route_debug_contract.py
 - Modify: `src/agt_offline_assets/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: existing `load_navigation_grid(path)`, `load_agricultural_aisle_graph(path)`, `load_turn_zones(path)`, `load_canonical_vehicle_profile(path)`, YAML files in one run directory.
-- Produces:
+- Consumes: existing `load_navigation_grid(path)`, `load_agricultural_aisle_graph(path)`, `load_turn_zones(path)`, `load_canonical_vehicle_profile(path)`, plus frozen YAML files in one run directory.
+- Public production types are immutable dataclasses:
 
 ```python
 ASSET_LOADED = "LOADED"
@@ -136,44 +140,58 @@ class RouteDebugDataset:
     aisles: tuple[RouteDebugAisleRecord, ...]
     connector_requests: tuple[ConnectorRequest, ...]
     asset_states: tuple[RouteDebugAssetState, ...]
-
-    def asset_state(self, key: str) -> RouteDebugAssetState: ...
-    def aisle_by_id(self, aisle_id: str) -> RouteDebugAisleRecord | None: ...
-
-
-def load_route_debug_dataset(
-    run_dir: str | Path,
-    *,
-    vehicle_profile_path: str | Path | None = None,
-) -> RouteDebugDataset: ...
 ```
 
-- Coverage parsing is debug-specific and must read `coverage_order.yaml` fully, including `traversals`, `connector_requests`, and `rejected_aisles`, because the existing `load_coverage_connector_requests()` intentionally exposes only requests.
-- Dataset frame authority: first valid `navigation_map.yaml`, else valid `aisle_graph.yaml`, else valid `coverage_order.yaml`. Any later framed asset that disagrees is marked `INVALID` and excluded; do not fail the whole page.
-- NO_GO recovery reads `derivation.yaml.overrides[*]` where `mode == "no_go"`; preserve polygon geometry and source path even though PGM rasterization is OCCUPIED.
-- Profile resolution: if `vehicle_profile_path` is explicit, use it. Otherwise infer `platform_id` from valid coverage/planner assets and walk parents of `run_dir` until `profiles/platforms/<platform_id>.yaml` exists. If not found, mark `vehicle_profile` MISSING and keep non-vehicle layers usable.
+Required public signatures:
 
-- [ ] **Step 1: Write the failing dataset tests and fixture builder**
-
-Create `route_debug_test_data.py` with real on-disk YAML/PGM fixtures, not mocks. The helper must write a 0.10 m trinary Navigation Map, `derivation.yaml`, two aisles, one coverage traversal pair/request, and an optional NO_GO polygon.
-
-Key fixture behavior:
-
-```python
-def write_minimal_route_debug_run(
-    root: Path,
-    *,
-    include_no_go: bool = False,
-    coverage_frame: str = "map",
-) -> tuple[Path, Path]:
-    run_dir = root / "runtime" / "maps" / "debug_run"
-    run_dir.mkdir(parents=True)
-    # Write navigation_map.pgm/yaml, derivation.yaml, aisle_graph.yaml,
-    # turn_zones.yaml, coverage_order.yaml and profiles/platforms/mk_mini.yaml.
-    return run_dir, root / "profiles/platforms/mk_mini.yaml"
+```text
+RouteDebugDataset.asset_state(key: str) -> RouteDebugAssetState
+RouteDebugDataset.aisle_by_id(aisle_id: str) -> RouteDebugAisleRecord | None
+load_route_debug_dataset(run_dir: str | Path, *, vehicle_profile_path: str | Path | None = None) -> RouteDebugDataset
 ```
 
-Add focused tests:
+- Coverage parsing is debug-specific and reads `coverage_order.yaml` fully: `traversals`, `connector_requests`, and `rejected_aisles`. Do not widen the existing `load_coverage_connector_requests()` contract just for the GUI.
+- Dataset frame authority is first valid `navigation_map.yaml`, else valid `aisle_graph.yaml`, else valid `coverage_order.yaml`. Any later framed asset that disagrees is marked `INVALID` and excluded.
+- NO_GO recovery reads `derivation.yaml.overrides[*]` where `mode == "no_go"`; preserve polygon geometry and source path even though the PGM cell state is OCCUPIED.
+- Profile resolution: explicit `vehicle_profile_path` wins. Otherwise infer `platform_id` from valid route assets and walk parents of `run_dir` until `profiles/platforms/<platform_id>.yaml` exists. If it cannot be found, mark `vehicle_profile` MISSING and keep non-vehicle layers usable.
+
+- [ ] **Step 1: Write the failing dataset tests and a real-file fixture builder**
+
+In `route_debug_test_data.py`, implement:
+
+```text
+write_minimal_route_debug_run(root: Path, *, include_no_go: bool = False, coverage_frame: str = "map") -> tuple[Path, Path]
+```
+
+The helper writes real files under a temporary repo-like tree:
+
+```text
+runtime/maps/debug_run/navigation_map.pgm
+runtime/maps/debug_run/navigation_map.yaml
+runtime/maps/debug_run/derivation.yaml
+runtime/maps/debug_run/aisle_graph.yaml
+runtime/maps/debug_run/turn_zones.yaml
+runtime/maps/debug_run/coverage_order.yaml
+profiles/platforms/mk_mini.yaml
+```
+
+Use these exact fixture facts:
+
+```text
+frame_id = map
+resolution = 0.10 m
+2 structural aisles at positive world Y so Qt Y-flip can be tested later
+aisle_001 width = 1.20 m
+aisle_002 width = 1.20 m
+both traversal motion_direction = FORWARD
+sequence = 1, 2
+one ConnectorRequest from aisle_001 to aisle_002
+optional NO_GO polygon starts at [1.0, -0.5]
+```
+
+The profile fixture must contain `platform.name=mk_mini`, `kinematics=ackermann`, navigation footprint `[(0.42,0.30),(0.42,-0.30),(-0.42,-0.30),(-0.42,0.30)]`, and verified `minimum_turning_radius=1.5` so `load_canonical_vehicle_profile()` returns preview-ready.
+
+Add tests:
 
 ```python
 def test_route_debug_dataset_recovers_no_go_and_coverage(tmp_path):
@@ -204,44 +222,33 @@ def test_invalid_optional_frame_fails_closed_for_only_that_layer(tmp_path):
 
 - [ ] **Step 2: Run the tests and verify RED**
 
-Run:
-
 ```bash
 source /opt/ros/humble/setup.bash
-python3 -m pytest -q \
-  src/agt_offline_assets/test/test_route_debug_dataset.py
+python3 -m pytest -q src/agt_offline_assets/test/test_route_debug_dataset.py
 ```
 
 Expected: collection/import failure because `agt_offline_assets.route_debug_dataset` does not exist.
 
 - [ ] **Step 3: Implement the minimum dataset loader**
 
-Implement the dataclasses/signatures above plus small private helpers:
+Implement these private responsibilities with exact inputs/outputs:
 
-```python
-def _load_yaml(path: Path) -> Mapping[str, Any]: ...
-def _asset_state(...): ...
-def _frame_accepts(authoritative: str | None, candidate: str | None) -> bool: ...
-def _load_debug_coverage(path: Path) -> tuple[
-    tuple[RouteDebugCoverageTraversal, ...],
-    tuple[ConnectorRequest, ...],
-    tuple[RouteDebugCoverageRejection, ...],
-    str,
-    str,
-]: ...
-def _load_no_go_regions(derivation_path: Path) -> tuple[RouteDebugNoGoRegion, ...]: ...
+```text
+_load_yaml(path: Path) -> Mapping[str, Any]
+_frame_accepts(authoritative: str | None, candidate: str | None) -> bool
+_load_debug_coverage(path: Path) -> coverage frame/status + traversal/request/rejection tuples
+_load_no_go_regions(derivation_path: Path) -> tuple[RouteDebugNoGoRegion, ...]
+_discover_vehicle_profile(run_dir: Path, platform_id: str) -> Path | None
 ```
 
-Schema checks must use exact current schema constants:
+Schema checks use the existing constants, including:
 
 ```python
 NAVIGATION_DERIVATION_SCHEMA = "agt_ground_relative_navigation_map/v1"
 COVERAGE_ORDER_SCHEMA = "agt_agricultural_coverage_order/v1"
 ```
 
-Join `AislePrimitive` records to traversal/rejection by `aisle_id`; never change geometry or eligibility.
-
-Export the public dataset API from `agt_offline_assets/__init__.py` and register `test_route_debug_dataset` in `src/agt_offline_assets/CMakeLists.txt`.
+Join `AislePrimitive` to traversal/rejection by `aisle_id`; never change geometry or eligibility. Export the public dataset API from `agt_offline_assets/__init__.py` and register `test_route_debug_dataset` in `src/agt_offline_assets/CMakeLists.txt`.
 
 - [ ] **Step 4: Run focused and neighboring tests**
 
@@ -276,7 +283,7 @@ git commit -m "feat(route-debug): load frozen route debug dataset"
 - Modify: `src/agt_offline_assets/test/test_route_debug_dataset.py`
 
 **Interfaces:**
-- Consumes Task 1 `RouteDebugDataset` and current schemas:
+- Consume schemas exactly as currently frozen:
 
 ```text
 agt_forward_connector_plan/v1
@@ -290,7 +297,7 @@ agt_vehicle_safe_lane_occupancy_source_audit/v1
 agt_connector_anchor_plan/v1
 ```
 
-- Produces these additional immutable records and lookup methods:
+Add immutable records:
 
 ```python
 @dataclass(frozen=True)
@@ -360,34 +367,54 @@ class RouteDebugConnectorRecord:
     r6b_search_expansions: int | None
     r6b_goal_position_error_m: float | None
     r6b_goal_yaw_error_rad: float | None
-
-# Extend RouteDebugAisleRecord with:
-vehicle_lane: RouteDebugVehicleLaneRecord | None
-diagnostic: RouteDebugLaneDiagnosticRecord | None
-occupancy_source: RouteDebugOccupancySourceRecord | None
-
-# Extend RouteDebugDataset with:
-connectors: tuple[RouteDebugConnectorRecord, ...]
-connector_by_id(connector_id: str) -> RouteDebugConnectorRecord | None
 ```
 
-- Optional asset discovery must inspect top-level YAML `schema` values rather than depend on one filename. For multiple `agt_reverse_primitive_connector_plan/v1` files use deterministic priority:
+Extend `RouteDebugAisleRecord` with `vehicle_lane`, `diagnostic`, `occupancy_source`; extend `RouteDebugDataset` with `connectors` and:
 
 ```text
-reverse_primitive_connectors_anchored.yaml
-reverse_primitive_connectors.yaml
-then lexicographically first reverse_primitive_connectors*.yaml
+RouteDebugDataset.connector_by_id(connector_id: str) -> RouteDebugConnectorRecord | None
+```
+
+Optional asset discovery scans top-level YAML `schema` values. If multiple `agt_reverse_primitive_connector_plan/v1` assets exist, select in this deterministic priority:
+
+```text
+1. reverse_primitive_connectors_anchored.yaml
+2. reverse_primitive_connectors.yaml
+3. lexicographically first reverse_primitive_connectors*.yaml
 ```
 
 - [ ] **Step 1: Extend the fixture builder and write RED cause-chain tests**
 
-Add fixture options that write a solved `connector_015`-like R6B record and a searched-but-unsolved `connector_017`-like record. The test does not need the real greenhouse geometry; it must preserve the semantic distinction.
+Implement two helper functions in `route_debug_test_data.py`:
+
+```text
+write_route_debug_planner_assets(run_dir: Path) -> None
+write_route_debug_lane_assets(run_dir: Path) -> None
+```
+
+`write_route_debug_planner_assets()` rewrites the fixture coverage payload to contain requests `connector_015` and `connector_017`, then writes matching forward/audit/R6A/R6B files. Freeze these synthetic R6B facts:
+
+```text
+connector_015
+  decision ELIGIBLE_REVERSE_FALLBACK
+  status REVERSE_PRIMITIVE_PREVIEW_FREE
+  backend BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP
+  three representative samples: FORWARD, REVERSE, FORWARD
+  cusp_count 2
+
+connector_017
+  decision ELIGIBLE_REVERSE_FALLBACK
+  status NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION
+  search_expansions 67
+  samples empty
+```
+
+Tests:
 
 ```python
 def test_connector_cause_chain_distinguishes_solved_and_searched_unsolved(tmp_path):
     run_dir, profile = write_minimal_route_debug_run(tmp_path)
     write_route_debug_planner_assets(run_dir)
-
     dataset = load_route_debug_dataset(run_dir, vehicle_profile_path=profile)
 
     solved = dataset.connector_by_id("connector_015")
@@ -403,11 +430,8 @@ def test_connector_cause_chain_distinguishes_solved_and_searched_unsolved(tmp_pa
     assert unsolved.r6b_status == "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION"
     assert unsolved.r6b_search_expansions == 67
     assert unsolved.r6b_samples == ()
-```
 
-Also lock lane/diagnostic joins:
 
-```python
 def test_aisle_record_joins_vehicle_lane_and_blocker_source(tmp_path):
     run_dir, profile = write_minimal_route_debug_run(tmp_path)
     write_route_debug_lane_assets(run_dir)
@@ -422,33 +446,27 @@ def test_aisle_record_joins_vehicle_lane_and_blocker_source(tmp_path):
 - [ ] **Step 2: Run tests and verify RED**
 
 ```bash
-python3 -m pytest -q \
-  src/agt_offline_assets/test/test_route_debug_dataset.py
+python3 -m pytest -q src/agt_offline_assets/test/test_route_debug_dataset.py
 ```
 
 Expected: FAIL because the new connector/lane fields and schema discovery are absent.
 
-- [ ] **Step 3: Implement schema-based optional discovery and joins**
+- [ ] **Step 3: Implement schema-based discovery and joins**
 
-Implement:
+Implement exact helper responsibilities:
 
-```python
-def _discover_yaml_by_schema(run_dir: Path) -> dict[str, tuple[Path, ...]]: ...
-def _choose_reverse_primitive_asset(paths: tuple[Path, ...]) -> Path | None: ...
-def _load_forward_debug(...): ...
-def _load_reverse_debug(...): ...
-def _load_vehicle_lane_debug(...): ...
-def _join_connector_records(...): ...
+```text
+_discover_yaml_by_schema(run_dir: Path) -> dict[str, tuple[Path, ...]]
+_choose_reverse_primitive_asset(paths: Sequence[Path]) -> Path | None
+_load_forward_debug(path: Path) -> connector-id keyed frozen forward records
+_load_reverse_debug(path: Path) -> connector-id keyed frozen R6 records
+_load_vehicle_lane_debug(path: Path) -> aisle-id keyed lane records
+_join_connector_records(requests, forward, audit, r6a, r6b) -> tuple[RouteDebugConnectorRecord, ...]
 ```
 
-For each optional file:
-- validate the exact schema before parsing
-- validate its `frame_id` against dataset authority
-- mark only that asset `INVALID` if parsing/frame validation fails
-- preserve source filename in its `RouteDebugAssetState`
-- do not infer planner success from absence of a path; carry the frozen status string.
+For every optional file: validate schema, validate `frame_id`, mark only that asset INVALID on failure, preserve source filename, and carry frozen status text even when no path samples exist.
 
-- [ ] **Step 4: Run route-debug plus source producer regressions**
+- [ ] **Step 4: Run route-debug plus producer regressions**
 
 ```bash
 python3 -m pytest -q \
@@ -485,12 +503,16 @@ git commit -m "feat(route-debug): join planner and lane diagnostics"
 - Modify: `src/agt_offline_assets/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes Task 2 `RouteDebugDataset`.
-- Produces:
+
+```text
+ROUTE_DEBUG_OVERLAY_SCHEMA = agt_route_debug_overlay/v1
+build_route_debug_overlay(dataset: RouteDebugDataset, config: RouteDebugOverlayConfig | None = None) -> dict[str, Any]
+write_route_debug_overlay(overlay: Mapping[str, Any], path: str | Path, *, overwrite: bool = False) -> Path
+```
+
+Config fields/defaults:
 
 ```python
-ROUTE_DEBUG_OVERLAY_SCHEMA = "agt_route_debug_overlay/v1"
-
 @dataclass(frozen=True)
 class RouteDebugOverlayConfig:
     forward_sample_step_m: float = 0.05
@@ -498,23 +520,9 @@ class RouteDebugOverlayConfig:
     lateral_search_step_m: float = 0.05
     maximum_lateral_shift_m: float = 0.50
     preview_footprint_padding_m: float = 0.05
-
-
-def build_route_debug_overlay(
-    dataset: RouteDebugDataset,
-    config: RouteDebugOverlayConfig | None = None,
-) -> dict[str, Any]: ...
-
-
-def write_route_debug_overlay(
-    overlay: Mapping[str, Any],
-    path: str | Path,
-    *,
-    overwrite: bool = False,
-) -> Path: ...
 ```
 
-Top-level serialization is fixed:
+Top-level GeoJSON must be:
 
 ```python
 {
@@ -522,35 +530,21 @@ Top-level serialization is fixed:
     "agt_schema": "agt_route_debug_overlay/v1",
     "frame_id": dataset.frame_id,
     "validation_scope": "DEBUG_RENDER_ONLY",
-    "features": [...],
+    "features": feature_list,
 }
 ```
 
-Every feature property must contain:
+Every feature carries `feature_id`, `layer_group`, `layer_key`, `feature_kind`, `frame_id`, `status`, `source_asset`, `source_id`, `source_field`, `is_failure`, and `inspector`.
 
-```text
-feature_id
-layer_group
-layer_key
-feature_kind
-frame_id
-status
-source_asset
-source_id
-source_field
-is_failure
-inspector
-```
-
-- [ ] **Step 1: Write RED overlay structure/coverage/motion tests**
+- [ ] **Step 1: Write RED structure/coverage/motion tests**
 
 ```python
 def test_overlay_separates_structural_coverage_request_and_motion(tmp_path):
     run_dir, profile = write_minimal_route_debug_run(tmp_path)
     write_route_debug_planner_assets(run_dir)
     dataset = load_route_debug_dataset(run_dir, vehicle_profile_path=profile)
-
     overlay = build_route_debug_overlay(dataset)
+
     assert overlay["type"] == "FeatureCollection"
     assert overlay["agt_schema"] == "agt_route_debug_overlay/v1"
     kinds = {f["properties"]["feature_kind"] for f in overlay["features"]}
@@ -561,14 +555,11 @@ def test_overlay_separates_structural_coverage_request_and_motion(tmp_path):
     assert "CUSP" in kinds
 
     request = next(f for f in overlay["features"] if f["properties"]["feature_kind"] == "CONNECTOR_REQUEST")
-    assert request["properties"]["layer_group"] == "coverage"
     motion = next(f for f in overlay["features"] if f["properties"]["feature_kind"] == "R6_MOTION_SEGMENT")
+    assert request["properties"]["layer_group"] == "coverage"
     assert motion["properties"]["layer_group"] == "motion"
-```
 
-Add writer immutability:
 
-```python
 def test_overlay_writer_refuses_accidental_overwrite(tmp_path):
     path = tmp_path / "route_debug_overlay.geojson"
     write_route_debug_overlay({"type": "FeatureCollection", "features": []}, path)
@@ -579,45 +570,35 @@ def test_overlay_writer_refuses_accidental_overwrite(tmp_path):
 - [ ] **Step 2: Run and verify RED**
 
 ```bash
-python3 -m pytest -q \
-  src/agt_offline_assets/test/test_route_debug_overlay.py
+python3 -m pytest -q src/agt_offline_assets/test/test_route_debug_overlay.py
 ```
 
 Expected: import failure because `route_debug_overlay.py` does not exist.
 
-- [ ] **Step 3: Implement base GeoJSON features and forward-candidate replay**
+- [ ] **Step 3: Implement base GeoJSON features and forward-candidate geometry replay**
 
-Create helper constructors rather than hand-building property dictionaries repeatedly:
+Implement a single `_feature` constructor accepting every required property plus a GeoJSON geometry mapping. Generate:
 
-```python
-def _feature(
-    *, feature_id: str, layer_group: str, layer_key: str,
-    feature_kind: str, frame_id: str, geometry: Mapping[str, Any],
-    status: str, source_asset: str, source_id: str,
-    source_field: str, is_failure: bool,
-    inspector: Mapping[str, Any],
-) -> dict[str, Any]: ...
+```text
+NO_GO Polygon
+Aisle LineString
+Vehicle-safe-lane LineString when non-empty
+Turn Zone Polygon
+Coverage traversal LineString with order/orientation Inspector data
+ConnectorRequest LineString between frozen start/goal
+Frozen selected forward samples
+Frozen R6 samples split into FORWARD/REVERSE LineStrings at motion-direction changes
+Cusp Point markers
+Failed connector Point at request midpoint when frozen status is a failure
 ```
 
-Generate:
-- NO_GO Polygon from dataset semantics
-- Aisle `LineString`
-- Vehicle-safe lane `LineString` when non-empty
-- Turn Zone Polygon
-- coverage traversal `LineString` with sequence/orientation in inspector
-- ConnectorRequest `LineString` between frozen start/goal
-- frozen forward selected samples when present
-- frozen R6 samples split into separate FORWARD/REVERSE `LineString`s at motion-direction changes
-- `Point` cusp markers at `is_cusp=True`
-- failed connector `Point` at request midpoint when a frozen failure status exists.
-
-Candidate audit geometry has no samples. Replay geometry **only inside `agt_offline_assets`** from the frozen request + canonical Rmin using the existing `_dubins_candidates()` and `_sample_candidate()` helpers. Attach:
+Candidate-audit records do not contain path samples. Replay candidate geometry only inside `agt_offline_assets` from the frozen ConnectorRequest + canonical Rmin using existing `_dubins_candidates()` and `_sample_candidate()`. Attach:
 
 ```text
 derived_geometry_method = REPLAY_ANALYTIC_DUBINS_FROM_FROZEN_REQUEST_AND_PROFILE
 ```
 
-and join audit status by `path_type`; do not change which candidate was accepted/rejected.
+Join audit evidence by `path_type`; do not alter frozen planner decisions.
 
 - [ ] **Step 4: Run focused tests**
 
@@ -631,7 +612,7 @@ python3 -m pytest -q \
 
 Expected: PASS.
 
-- [ ] **Step 5: Export overlay API and register test, then commit**
+- [ ] **Step 5: Export API/register test and commit**
 
 ```bash
 git add \
@@ -652,46 +633,27 @@ git commit -m "feat(route-debug): build render-only GeoJSON overlay"
 - Modify: `src/agt_offline_assets/test/test_route_debug_overlay.py`
 
 **Interfaces:**
-- Extend `RouteDebugDataset` with:
+- Extend `RouteDebugDataset` with `occupancy_source_masks: NavigationOccupancySourceMasks | None`.
+- Load masks through `load_navigation_occupancy_source_masks(navigation, navigation_asset)` only when required frozen sidecars exist and validate.
+- Do not serialize every global OCCUPIED cell to GeoJSON. Emit one `COLLISION_STATION` point for every sampled aisle station with no fully FREE bounded-lateral vehicle pose, and store the selected candidate's `footprint_polygon_xy` in properties.
 
-```python
-occupancy_source_masks: NavigationOccupancySourceMasks | None
-```
+- [ ] **Step 1: Write RED synthetic provenance tests**
 
-Load it through existing `load_navigation_occupancy_source_masks(navigation, navigation_asset)` only when required frozen sidecars are present and valid.
-
-- Collision feature policy: do not serialize every global occupied cell to GeoJSON. Emit one `COLLISION_STATION` point for every sampled aisle station with no fully FREE bounded-lateral vehicle pose. Store the selected best candidate's footprint polygon in properties so Qt can highlight it without recomputing collision math.
-
-- [ ] **Step 1: Write RED synthetic collision-provenance tests**
-
-Construct a small direct `RouteDebugDataset` in the test with:
-- 0.10 m Navigation Grid
-- one 0.70 m-wide aisle, so lateral shift is zero with a 0.60 m vehicle + 0.05 m preview padding
-- a direct raw obstacle cell just outside the footprint edge
-- a neighboring PADDING_ONLY occupied cell inside the footprint
-- explicit `NavigationOccupancySourceMasks`.
-
-Test:
+Construct a direct synthetic dataset with 0.10 m grid, 0.70 m aisle width, MK-mini 0.60 m navigation width + 0.05 m preview padding, and explicit `NavigationOccupancySourceMasks`. Place a raw direct cell immediately outside the footprint and a PADDING_ONLY neighbor inside it so the best zero-lateral pose fails specifically on padding.
 
 ```python
 def test_collision_station_reports_padding_only_and_footprint_polygon():
     dataset = synthetic_padding_collision_dataset()
     overlay = build_route_debug_overlay(dataset)
-    conflicts = [
-        f for f in overlay["features"]
-        if f["properties"]["feature_kind"] == "COLLISION_STATION"
-    ]
+    conflicts = [f for f in overlay["features"] if f["properties"]["feature_kind"] == "COLLISION_STATION"]
     assert conflicts
     first = conflicts[0]["properties"]
     assert first["dominant_source"] == "PADDING_ONLY"
     assert first["occupied_count"] > 0
     assert len(first["footprint_polygon_xy"]) >= 4
     assert first["source_asset"] == "navigation_map.yaml"
-```
 
-Also add an UNKNOWN-only case:
 
-```python
 def test_collision_station_keeps_unknown_distinct_from_occupied():
     dataset = synthetic_unknown_collision_dataset()
     overlay = build_route_debug_overlay(dataset)
@@ -703,16 +665,14 @@ def test_collision_station_keeps_unknown_distinct_from_occupied():
 - [ ] **Step 2: Run and verify RED**
 
 ```bash
-python3 -m pytest -q \
-  src/agt_offline_assets/test/test_route_debug_overlay.py \
-  -k "collision_station"
+python3 -m pytest -q src/agt_offline_assets/test/test_route_debug_overlay.py -k collision_station
 ```
 
 Expected: FAIL because collision station features are absent.
 
-- [ ] **Step 3: Implement collision station generation by reusing existing offline helpers**
+- [ ] **Step 3: Implement collision station generation using existing offline helpers**
 
-Use, inside `route_debug_overlay.py` only:
+Inside `route_debug_overlay.py`, reuse:
 
 ```python
 from .forward_connector_navigation_gate import _preview_local_footprint, _transform_polygon
@@ -720,21 +680,20 @@ from .vehicle_safe_lane import _normalize, _offset_candidates, _resample_polylin
 from .vehicle_safe_lane_occupancy_sources import _pose_mask, _candidate_key, _fully_free
 ```
 
-Algorithm per aisle:
+Per aisle:
 
 ```text
 resample structural centerline at collision_sample_spacing_m
 → compute allowed lateral shift from structural width and preview vehicle width
 → evaluate all bounded offsets
-→ if any full pose is FREE: no collision marker
-→ else choose candidate using existing least-total-non-FREE ordering
-→ classify selected footprint cells:
-   RAW_OBSTACLE_DIRECT / GEOMETRY_DIRECT / PADDING_ONLY /
-   UNEXPLAINED_OCCUPIED / UNKNOWN / OUT_OF_GRID
+→ if any full pose is FREE, emit no collision marker
+→ otherwise choose the candidate with existing least-total-non-FREE ordering
+→ classify selected footprint cells as RAW_OBSTACLE_DIRECT / GEOMETRY_DIRECT /
+  PADDING_ONLY / UNEXPLAINED_OCCUPIED / UNKNOWN / OUT_OF_GRID
 → emit collision Point + footprint_polygon_xy + source counts
 ```
 
-Do not relax occupancy, do not treat UNKNOWN as FREE, and do not write any modified map.
+Do not relax occupancy, do not turn UNKNOWN into FREE, and do not write any modified map.
 
 - [ ] **Step 4: Run collision/source regressions**
 
@@ -759,37 +718,34 @@ git commit -m "feat(route-debug): expose collision locations and provenance"
 
 ---
 
-### Task 5: Shared-Scene Route Debug Renderer and Layer Presets
+### Task 5: Shared-Scene Renderer and Layer Presets
 
 **Files:**
 - Create: `src/agt_map_workbench/agt_map_workbench/route_debug_view.py`
+- Create: `src/agt_map_workbench/test/conftest.py`
+- Create: `src/agt_map_workbench/test/route_debug_test_data.py`
 - Create: `src/agt_map_workbench/test/test_route_debug_view.py`
 - Modify: `src/agt_map_workbench/agt_map_workbench/__init__.py`
 - Modify: `src/agt_map_workbench/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes `RouteDebugDataset` and GeoJSON mapping from Tasks 1-4.
-- Produces:
 
-```python
-ROUTE_DEBUG_PRESETS: Mapping[str, frozenset[str]]
-
-class RouteDebugSceneController(QObject):
-    featureSelected = pyqtSignal(object)
-
-    def __init__(self, scene: QGraphicsScene, parent: QObject | None = None): ...
-    def set_content(self, dataset: RouteDebugDataset, overlay: Mapping[str, Any]) -> None: ...
-    def clear(self) -> None: ...
-    def set_active(self, active: bool) -> None: ...
-    def set_layer_visible(self, layer_key: str, visible: bool) -> None: ...
-    def layer_visible(self, layer_key: str) -> bool: ...
-    def apply_preset(self, preset_name: str) -> None: ...
-    def set_failure_focus(self, enabled: bool) -> None: ...
-    def route_bounds(self) -> QRectF: ...
-    def select_feature(self, feature_id: str) -> bool: ...
+```text
+RouteDebugSceneController(scene: QGraphicsScene, parent: QObject | None = None)
+.set_content(dataset: RouteDebugDataset, overlay: Mapping[str, Any]) -> None
+.clear() -> None
+.set_active(active: bool) -> None
+.is_active() -> bool
+.set_layer_visible(layer_key: str, visible: bool) -> None
+.layer_visible(layer_key: str) -> bool
+.apply_preset(preset_name: str) -> None
+.set_failure_focus(enabled: bool) -> None
+.route_bounds() -> QRectF
+.select_feature(feature_id: str) -> bool
+featureSelected = pyqtSignal(object)
 ```
 
-Layer keys are fixed for MVP:
+Layer keys:
 
 ```text
 base.navigation
@@ -830,9 +786,35 @@ ROUTE_DEBUG_PRESETS = {
 }
 ```
 
-- [ ] **Step 1: Write RED Qt controller tests**
+- [ ] **Step 1: Add an explicit headless QApplication fixture and Workbench-local test data**
 
-Use `QT_QPA_PLATFORM=offscreen` and instantiate a real `QApplication`, `QGraphicsScene`, and controller. Avoid scripted mouse coordinates.
+In `src/agt_map_workbench/test/conftest.py`:
+
+```python
+import pytest
+from PyQt5.QtWidgets import QApplication
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    yield app
+```
+
+Do not add `pytest-qt`.
+
+In `src/agt_map_workbench/test/route_debug_test_data.py`, create two helpers owned by this package's tests:
+
+```text
+synthetic_route_debug_content() -> tuple[RouteDebugDataset, dict]
+write_workbench_route_debug_run(root: Path, *, include_no_go: bool = False, include_reverse: bool = False) -> Path
+```
+
+`synthetic_route_debug_content()` must place `aisle_001` at positive world Y and include an `aisle:aisle_001` GeoJSON LineString. When `include_reverse=True`, the disk fixture includes `connector_015` F/R/F evidence.
+
+- [ ] **Step 2: Write RED controller tests**
 
 ```python
 def test_route_debug_controller_applies_presets_and_world_y_flip(qapp):
@@ -845,15 +827,11 @@ def test_route_debug_controller_applies_presets_and_world_y_flip(qapp):
     assert controller.layer_visible("coverage.order")
     assert controller.layer_visible("coverage.requests")
     assert not controller.layer_visible("motion.reverse")
-
     assert controller.select_feature("aisle:aisle_001")
     item = next(item for item in scene.selectedItems() if item.data(0) == "aisle:aisle_001")
-    assert item.sceneBoundingRect().center().y() < 0.0  # positive world Y renders negative scene Y
-```
+    assert item.sceneBoundingRect().center().y() < 0.0
 
-Selection dispatch test:
 
-```python
 def test_route_debug_controller_emits_inspector_payload(qapp):
     scene = QGraphicsScene()
     controller = RouteDebugSceneController(scene)
@@ -861,38 +839,39 @@ def test_route_debug_controller_emits_inspector_payload(qapp):
     selected = []
     controller.featureSelected.connect(selected.append)
     controller.set_content(dataset, overlay)
-    assert controller.select_feature("connector:connector_015:r6:0")
-    assert selected[-1]["source_id"] == "connector_015"
+    assert controller.select_feature("aisle:aisle_001")
+    assert selected[-1]["source_id"] == "aisle_001"
 ```
 
-- [ ] **Step 2: Run and verify RED**
+- [ ] **Step 3: Run and verify RED**
 
 ```bash
-QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
-  src/agt_map_workbench/test/test_route_debug_view.py
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q src/agt_map_workbench/test/test_route_debug_view.py
 ```
 
 Expected: import failure because `route_debug_view.py` does not exist.
 
-- [ ] **Step 3: Implement renderer without planner math**
+- [ ] **Step 4: Implement renderer without planner math**
 
-Implementation rules:
+Use exactly:
 
 ```python
 def _scene_xy(x: float, y: float) -> QPointF:
     return QPointF(float(x), float(-y))
 ```
 
-- Render `NavigationGridEvidence` as a `QGraphicsPixmapItem` using the existing navigation-preview flip/placement convention: image rows flip for display; item origin is `(origin_x, -(origin_y + height*resolution))`; item scale is `resolution`.
-- Render source masks as separate translucent pixmaps for raw/geometry/padding. Do not serialize every mask cell as a vector item.
-- Render GeoJSON vectors into per-layer `QGraphicsItemGroup`s. Set `item.setData(0, feature_id)` and `item.setData(1, inspector_dict)` on selectable vector/conflict objects.
-- Clicking/selecting a conflict may create a temporary footprint outline directly from its stored `footprint_polygon_xy`; do not recompute footprint collision.
-- `set_failure_focus(True)` reduces opacity of features whose `is_failure` is false and never changes data membership.
-- `clear()` removes only items owned by the controller; never clear the whole shared Workbench scene.
+Rendering rules:
+- Navigation raster uses the same flip/placement convention as existing `NavigationPreviewItem`.
+- Raw/geometry/padding source masks are translucent raster pixmaps, not thousands of GeoJSON cells.
+- GeoJSON vectors go into per-layer `QGraphicsItemGroup`s.
+- Selectable items store `feature_id` in `item.data(0)` and Inspector mapping in `item.data(1)`.
+- Selecting a `COLLISION_STATION` draws a temporary footprint outline from stored `footprint_polygon_xy`; no collision recomputation.
+- Failure focus only adjusts opacity.
+- `clear()` removes only Route Debug-owned items, never the shared scene wholesale.
 
-Export `RouteDebugSceneController` from `agt_map_workbench/__init__.py` and register the test in CMake.
+Export `RouteDebugSceneController` from `agt_map_workbench/__init__.py` and register `test_route_debug_view` in CMake.
 
-- [ ] **Step 4: Run focused Qt and existing view regressions**
+- [ ] **Step 5: Run focused Qt regressions and commit**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
@@ -903,12 +882,12 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
 
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
-
 ```bash
 git add \
   src/agt_map_workbench/agt_map_workbench/route_debug_view.py \
   src/agt_map_workbench/agt_map_workbench/__init__.py \
+  src/agt_map_workbench/test/conftest.py \
+  src/agt_map_workbench/test/route_debug_test_data.py \
   src/agt_map_workbench/test/test_route_debug_view.py \
   src/agt_map_workbench/CMakeLists.txt
 git commit -m "feat(route-debug): render layered route debug scene"
@@ -916,7 +895,7 @@ git commit -m "feat(route-debug): render layered route debug scene"
 
 ---
 
-### Task 6: Route Debug Panel, Layer Tree, Inspector, Presets, and PNG Export
+### Task 6: Route Debug Panel, Inspector, Presets, and PNG Export
 
 **Files:**
 - Create: `src/agt_map_workbench/agt_map_workbench/route_debug_panel.py`
@@ -925,29 +904,28 @@ git commit -m "feat(route-debug): render layered route debug scene"
 - Modify: `src/agt_map_workbench/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes `load_route_debug_dataset()`, `build_route_debug_overlay()`, `write_route_debug_overlay()`, `RouteDebugSceneController`.
-- Produces:
 
-```python
-class RouteDebugPanel(QWidget):
-    def __init__(self, scene: QGraphicsScene, view: QGraphicsView, parent=None): ...
-    def load_run_directory(self, path: str | Path) -> RouteDebugDataset: ...
-    def reload_current_directory(self) -> RouteDebugDataset | None: ...
-    def set_active(self, active: bool) -> None: ...
-    def apply_preset(self, preset_name: str) -> None: ...
-    def set_failure_focus(self, enabled: bool) -> None: ...
-    def export_current_view(self, path: str | Path) -> bool: ...
-    def current_run_directory(self) -> Path | None: ...
+```text
+RouteDebugPanel(scene: QGraphicsScene, view: QGraphicsView, parent=None)
+.load_run_directory(path: str | Path) -> RouteDebugDataset
+.reload_current_directory() -> RouteDebugDataset | None
+.set_active(active: bool) -> None
+.apply_preset(preset_name: str) -> None
+.set_failure_focus(enabled: bool) -> None
+.export_current_view(path: str | Path) -> bool
+.current_run_directory() -> Path | None
+.layer_enabled(layer_key: str) -> bool
+.inspector_text() -> str
+.controller: RouteDebugSceneController
 ```
 
-The panel loads synchronously for MVP because the frozen 2D YAML/PGM/NPY assets are small compared with the already-separate full PCD processing pipeline. Do not add a worker thread unless a measured UI stall later justifies it.
+The panel loads synchronously for MVP; do not add a worker thread without measured need.
 
-- [ ] **Step 1: Write RED panel behavior tests**
+- [ ] **Step 1: Write RED panel behavior tests using the Workbench-local disk fixture**
 
 ```python
 def test_panel_loads_directory_writes_only_debug_overlay_and_populates_inspector(qapp, tmp_path):
-    run_dir, profile = write_minimal_route_debug_run(tmp_path, include_no_go=True)
-    write_route_debug_planner_assets(run_dir)
+    run_dir = write_workbench_route_debug_run(tmp_path, include_no_go=True, include_reverse=True)
     scene = QGraphicsScene()
     view = QGraphicsView(scene)
     panel = RouteDebugPanel(scene, view)
@@ -956,18 +934,13 @@ def test_panel_loads_directory_writes_only_debug_overlay_and_populates_inspector
     assert dataset.run_dir == run_dir.resolve()
     assert (run_dir / "route_debug_overlay.geojson").is_file()
     assert panel.current_run_directory() == run_dir.resolve()
-
     assert panel.controller.select_feature("aisle:aisle_001")
-    text = panel.inspector_text()
-    assert "aisle_001" in text
-    assert "STRUCTURE" in text
-```
+    assert "aisle_001" in panel.inspector_text()
+    assert "STRUCTURE" in panel.inspector_text()
 
-Preset/layer availability test:
 
-```python
 def test_panel_disables_missing_optional_layers_without_blocking_coverage(qapp, tmp_path):
-    run_dir, _ = write_minimal_route_debug_run(tmp_path)
+    run_dir = write_workbench_route_debug_run(tmp_path)
     scene = QGraphicsScene()
     view = QGraphicsView(scene)
     panel = RouteDebugPanel(scene, view)
@@ -981,15 +954,14 @@ def test_panel_disables_missing_optional_layers_without_blocking_coverage(qapp, 
 - [ ] **Step 2: Run and verify RED**
 
 ```bash
-QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
-  src/agt_map_workbench/test/test_route_debug_panel.py
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q src/agt_map_workbench/test/test_route_debug_panel.py
 ```
 
 Expected: import failure because `route_debug_panel.py` does not exist.
 
 - [ ] **Step 3: Implement the panel**
 
-Build the approved controls:
+Approved controls:
 
 ```text
 [选择运行目录] [重载] [适配全图]
@@ -999,9 +971,9 @@ Layers tree
 Inspector
 ```
 
-Use a two-column `QTreeWidget` for layer group/availability and a read-only `QTextBrowser` or two-column `QTreeWidget` for Inspector. Layer children are checkable only when the corresponding source is available/valid.
+Use a two-column `QTreeWidget` for layer availability/check state and a read-only `QTextBrowser` or two-column `QTreeWidget` for Inspector. A layer is checkable only when its source is LOADED.
 
-`load_run_directory()` must execute exactly:
+`load_run_directory()` executes this data path:
 
 ```python
 dataset = load_route_debug_dataset(path)
@@ -1014,9 +986,9 @@ write_route_debug_overlay(
 self.controller.set_content(dataset, overlay)
 ```
 
-The only file the panel may replace is `route_debug_overlay.geojson`.
+The panel may replace only `route_debug_overlay.geojson`.
 
-Inspector formatting must group known keys:
+Inspector sections:
 
 ```text
 STRUCTURE
@@ -1028,7 +1000,7 @@ RELATED
 SOURCE
 ```
 
-For connector features show cause-chain fields in order:
+Connector Inspector cause-chain order:
 
 ```text
 Coverage Request
@@ -1038,11 +1010,9 @@ R6A
 R6B
 ```
 
-Use frozen fields; do not invent an R7 status.
+Use frozen fields only and do not invent R7 state. `export_current_view(path)` calls `self._view.grab().save(str(path), "PNG")` and returns that boolean result.
 
-`export_current_view(path)` uses `self._view.grab().save(str(path), "PNG")` and returns the boolean result.
-
-- [ ] **Step 4: Run panel/view tests**
+- [ ] **Step 4: Run panel/view tests and commit**
 
 ```bash
 QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
@@ -1051,8 +1021,6 @@ QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
 ```
 
 Expected: PASS.
-
-- [ ] **Step 5: Export API and commit**
 
 ```bash
 git add \
@@ -1065,7 +1033,7 @@ git commit -m "feat(route-debug): add route debug controls and inspector"
 
 ---
 
-### Task 7: Mount the New 路径调试 Tab into the Existing Workbench
+### Task 7: Mount 路径调试 into the Existing Workbench
 
 **Files:**
 - Modify: `src/agt_map_workbench/agt_map_workbench/app.py` around the right-side controls `QTabWidget`
@@ -1074,10 +1042,11 @@ git commit -m "feat(route-debug): add route debug controls and inspector"
 - Modify: `src/agt_map_workbench/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes Task 6 `RouteDebugPanel`.
-- Produces no new planner API. It exposes the existing right-side control tabs as `self._control_tabs` and adds one child tab named exactly `路径调试`.
+- Expose the current right control tabs as `self._control_tabs`.
+- Add one tab named exactly `路径调试` containing `RouteDebugPanel`.
+- Store `self._route_debug_panel` and `self._route_debug_tab_index`.
 
-- [ ] **Step 1: Write RED integration test**
+- [ ] **Step 1: Write RED integration tests**
 
 ```python
 def test_review_workbench_contains_route_debug_control_tab(qapp):
@@ -1085,11 +1054,8 @@ def test_review_workbench_contains_route_debug_control_tab(qapp):
     labels = [window._control_tabs.tabText(i) for i in range(window._control_tabs.count())]
     assert labels == ["点云编辑", "坐标系标定", "导航地图", "路径调试"]
     assert isinstance(window._route_debug_panel, RouteDebugPanel)
-```
 
-Also verify route layers are active only on that tab:
 
-```python
 def test_route_debug_activation_does_not_leave_overlay_on_authoring_tabs(qapp):
     window = ReviewMapWorkbenchWindow()
     route_index = window._route_debug_tab_index
@@ -1099,20 +1065,17 @@ def test_route_debug_activation_does_not_leave_overlay_on_authoring_tabs(qapp):
     assert not window._route_debug_panel.controller.is_active()
 ```
 
-Add `is_active() -> bool` to the controller if not already present.
-
 - [ ] **Step 2: Run and verify RED**
 
 ```bash
-QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
-  src/agt_map_workbench/test/test_route_debug_workbench_integration.py
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q src/agt_map_workbench/test/test_route_debug_workbench_integration.py
 ```
 
-Expected: FAIL because `MapWorkbenchWindow` does not expose `_control_tabs` and `ReviewMapWorkbenchWindow` does not mount Route Debug.
+Expected: FAIL because the existing control `QTabWidget` is local and no Route Debug panel is mounted.
 
 - [ ] **Step 3: Make the smallest integration changes**
 
-In `app.py`, replace only the local control-tab ownership:
+In `app.py` change only ownership of the existing control tabs:
 
 ```python
 self._control_tabs = QTabWidget()
@@ -1122,15 +1085,7 @@ self._control_tabs.addTab(self._build_navigation_tab(), "导航地图")
 layout.addWidget(self._control_tabs, 1)
 ```
 
-Do not move editing/navigation logic into the new panel.
-
-In `ReviewMapWorkbenchWindow.__init__` after the existing 3D/offline-action installation:
-
-```python
-self._install_route_debug()
-```
-
-Implement:
+In `ReviewMapWorkbenchWindow.__init__`, call `self._install_route_debug()` after current 3D/offline-action installation. Implement:
 
 ```python
 def _install_route_debug(self) -> None:
@@ -1150,18 +1105,15 @@ def _route_debug_control_tab_changed(self, index: int) -> None:
         self._update_navigation_overlay()
 ```
 
-This preserves the actual launcher lineage through `review_workbench.main` and keeps one shared 2D scene/view.
+This preserves the real launcher lineage through `review_workbench.main` and one shared 2D scene/view.
 
-- [ ] **Step 4: Run all Workbench tests offscreen**
+- [ ] **Step 4: Run all Workbench tests and commit**
 
 ```bash
-QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
-  src/agt_map_workbench/test
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q src/agt_map_workbench/test
 ```
 
 Expected: PASS.
-
-- [ ] **Step 5: Commit**
 
 ```bash
 git add \
@@ -1174,7 +1126,7 @@ git commit -m "feat(route-debug): mount route debug in map workbench"
 
 ---
 
-### Task 8: Freeze Route-Debug Contracts, Documentation, and Local-Acceptance Gate
+### Task 8: Freeze Contracts, Documentation, and Local-Acceptance Gate
 
 **Files:**
 - Create: `tests/test_v25_12e_route_debug_contract.py`
@@ -1182,7 +1134,7 @@ git commit -m "feat(route-debug): mount route debug in map workbench"
 - Modify: `docs/v2.5/V25_12E_CURRENT_STATE.md`
 
 **Interfaces:**
-- No new runtime interface. This task locks architectural boundaries and provides exact operator smoke commands.
+- No new runtime interface. This task locks architecture and leaves real-data visual acceptance pending.
 
 - [ ] **Step 1: Write the RED repository contract test**
 
@@ -1222,7 +1174,7 @@ def test_route_debug_preserves_no_go_and_reverse_semantics():
     assert 'LOCAL ACCEPTANCE PENDING' in state
 ```
 
-- [ ] **Step 2: Run contract test and verify RED**
+- [ ] **Step 2: Run the contract test and verify RED**
 
 ```bash
 python3 -m pytest -q tests/test_v25_12e_route_debug_contract.py
@@ -1230,39 +1182,35 @@ python3 -m pytest -q tests/test_v25_12e_route_debug_contract.py
 
 Expected: FAIL until README/current-state text is updated.
 
-- [ ] **Step 3: Update README and current-state without overclaiming**
+- [ ] **Step 3: Update README/current-state without overclaiming**
 
-Add a Route Debug section to `src/agt_map_workbench/README.md` covering:
+README Route Debug section must state:
 
 ```text
 路径调试 is 2D and read-only
-load a run directory, not individual YAML files
+load a run directory rather than individual YAML files
 Coverage 总览 / 规划结果 / 碰撞诊断 presets
-NO_GO is displayed separately from physical OCCUPIED
+NO_GO is visually separate from physical OCCUPIED
 route_debug_overlay.geojson is derived render evidence only
-missing optional layer vs invalid contract behavior
+missing optional asset degrades; invalid contract fails closed for that layer
 ```
 
-Update `docs/v2.5/V25_12E_CURRENT_STATE.md` to:
+Current state must say exactly:
 
 ```text
 Route Debug 2D
   CORE IMPLEMENTED / LOCAL ACCEPTANCE PENDING
 
-Purpose
-  visualize structural aisles + coverage + connector motion + conflict provenance
-  before further R6/R7 work
-
 No production map/route semantics changed
 ```
 
-Keep the existing padding/direct-source diagnostic conclusion intact. Do not write that the greenhouse Route Debug visual acceptance passed.
+Keep the existing padding/direct-source diagnostic conclusion intact. Do not claim greenhouse visual acceptance.
 
-- [ ] **Step 4: Run the complete focused test matrix**
+- [ ] **Step 4: Run the complete focused matrix**
 
 ```bash
 source /opt/ros/humble/setup.bash
-python3 -m pytest -q \
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
   src/agt_offline_assets/test/test_route_debug_dataset.py \
   src/agt_offline_assets/test/test_route_debug_overlay.py \
   src/agt_map_workbench/test/test_route_debug_view.py \
@@ -1278,13 +1226,14 @@ python3 -m pytest -q \
 
 Expected: PASS.
 
-Then build and run package-level ament tests:
+Then:
 
 ```bash
-source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-select agt_offline_assets agt_map_workbench
 source install/setup.bash
-colcon test --packages-select agt_offline_assets agt_map_workbench --event-handlers console_direct+
+QT_QPA_PLATFORM=offscreen colcon test \
+  --packages-select agt_offline_assets agt_map_workbench \
+  --event-handlers console_direct+
 colcon test-result --verbose
 ```
 
@@ -1302,7 +1251,7 @@ git commit -m "docs(route-debug): freeze MVP acceptance boundary"
 
 - [ ] **Step 6: Generate the real greenhouse debug overlay without modifying truth assets**
 
-After the implementation commits are available on the operator machine:
+After the implementation commits are present on the operator machine:
 
 ```bash
 cd ~/agt_navigation_v2
@@ -1339,7 +1288,7 @@ for state in dataset.asset_states:
 PY
 ```
 
-Expected structural counts for the current frozen greenhouse inputs, if the same run assets are still present:
+For the same frozen greenhouse asset version previously tested, expect structurally:
 
 ```text
 19 structural aisles
@@ -1347,7 +1296,7 @@ Expected structural counts for the current frozen greenhouse inputs, if the same
 17 ConnectorRequests
 ```
 
-Treat any mismatch as an asset-version change to investigate; do not hard-code these counts into the loader.
+Treat a mismatch as an asset-version change to inspect; never hard-code these counts in the loader.
 
 - [ ] **Step 7: Operator visual smoke in AGT Map Workbench**
 
@@ -1357,56 +1306,60 @@ Launch:
 ros2 run agt_map_workbench agt_map_workbench
 ```
 
-In `路径调试`, load:
+Load:
 
 ```text
 ~/agt_navigation_v2/runtime/maps/agt_workbench_run
 ```
 
-Perform this exact review:
+Review exactly:
 
 ```text
 Coverage 总览
-  verify whole greenhouse order is visible
-  verify aisle traversal arrows do not imply reverse gear
-  verify ConnectorRequest is visually different from solved motion
+  whole greenhouse order visible
+  aisle arrows do not imply reverse gear
+  ConnectorRequest visually differs from solved motion
 
- ais le_005
-  inspect structural width 0.658 m vs required preview width 0.700 m
-  verify it is visibly rejected
+ aisle_005
+  structural width 0.658 m vs required preview width 0.700 m
+  visibly rejected
 
  aisle_003
-  enable collision-source view
-  verify RAW obstacle evidence can be viewed with structural aisle and footprint conflict
+  RAW obstacle evidence + structural aisle + footprint conflict visible together
 
  aisle_013
-  verify PADDING_ONLY evidence can be viewed with centerline and footprint conflict
+  PADDING_ONLY evidence + centerline + footprint conflict visible together
 
  connector_015
-  verify FORWARD → REVERSE → FORWARD, 2 cusp markers
-  Inspector should expose 4.499 m total, 0.600 m reverse, 1490 expansions,
-  and 0.154 m / 8.11° goal error if the current frozen R6B asset is loaded
+  FORWARD → REVERSE → FORWARD
+  2 cusp markers
+  Inspector shows frozen 4.499 m total / 0.600 m reverse / 1490 expansions /
+  0.154 m / 8.11° goal error when that frozen R6B asset is loaded
 
  connector_017
-  verify request exists + R6A admitted + R6B searched +
-  NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION is distinguishable from a missing asset
+  request exists
+  R6A admitted
+  R6B searched
+  NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION
+  visibly distinct from a missing asset
 
  NO_GO
-  if the current run contains no NO_GO override, create a separate test derivation using the existing Navigation Map authoring page rather than editing the production run
-  verify the semantic polygon is purple/separate from physical OCCUPIED
+  if production run has none, make a separate test derivation in the existing Navigation Map authoring page
+  semantic polygon renders separately from physical OCCUPIED
 ```
 
-Do not mark `REAL-DATA OPERATOR ACCEPTANCE PASS` until this checklist is actually completed on the operator machine.
+Do not mark `REAL-DATA OPERATOR ACCEPTANCE PASS` until the operator actually completes this checklist.
 
 ---
 
 ## Final Verification Gate Before Claiming Completion
 
-The implementation worker must run, in order:
+Run in order:
 
 ```bash
 git status --short
-python3 -m pytest -q \
+source /opt/ros/humble/setup.bash
+QT_QPA_PLATFORM=offscreen python3 -m pytest -q \
   src/agt_offline_assets/test/test_route_debug_dataset.py \
   src/agt_offline_assets/test/test_route_debug_overlay.py \
   src/agt_map_workbench/test/test_route_debug_view.py \
@@ -1414,16 +1367,15 @@ python3 -m pytest -q \
   src/agt_map_workbench/test/test_route_debug_workbench_integration.py \
   tests/test_v25_12e_route_debug_contract.py
 colcon build --symlink-install --packages-select agt_offline_assets agt_map_workbench
-colcon test --packages-select agt_offline_assets agt_map_workbench
+source install/setup.bash
+QT_QPA_PLATFORM=offscreen colcon test --packages-select agt_offline_assets agt_map_workbench
 colcon test-result --verbose
 git status --short
 ```
 
-Completion may be described only as:
+Until the operator returns the final visual checklist, completion wording is limited to:
 
 ```text
 Route Debug 2D CORE IMPLEMENTED / AUTOMATED TESTS PASS
 REAL-DATA OPERATOR VISUAL ACCEPTANCE PENDING
 ```
-
-until the final greenhouse checklist is returned by the user.
