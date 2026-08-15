@@ -3,6 +3,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication, QGraphicsScene
 
 from agt_offline_assets.route_debug_dataset import RouteDebugDataset
@@ -73,13 +74,14 @@ def test_route_debug_controller_preserves_child_selection_and_world_y_flip():
     controller.apply_preset("coverage")
 
     group = controller._groups["structure.aisles"]
-    assert not group.handlesChildEvents()
+    assert group.acceptedMouseButtons() == Qt.NoButton
     assert controller.layer_visible("structure.aisles")
     assert not controller.layer_visible("motion.reverse")
     assert controller.select_feature("aisle:aisle_001")
     app.processEvents()
 
     item = next(item for item in scene.selectedItems() if item.data(0) == "aisle:aisle_001")
+    assert item.parentItem() is group
     assert item.sceneBoundingRect().center().y() < 0.0
     assert selected[-1]["source_id"] == "aisle_001"
 
