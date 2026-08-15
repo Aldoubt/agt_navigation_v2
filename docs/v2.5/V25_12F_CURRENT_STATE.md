@@ -5,7 +5,7 @@ Date: 2026-08-15
 Status:
 
 ```text
-CODE IMPLEMENTED / LOCAL AUTOMATED VERIFICATION PENDING / REAL-DATA A/B PENDING
+CODE IMPLEMENTED / FOCUSED AUTOMATED VERIFICATION PASS / REAL-DATA A/B OBSERVED / PACKAGE-LEVEL COLCON TEST PENDING
 ```
 
 This checkpoint continues from `V25_12E_CURRENT_STATE.md`
@@ -283,85 +283,92 @@ validation_scope OFFLINE_A_B_REVIEW_NOT_ROUTE_READY
 
 The harness does not regenerate the candidate map and does not promote any asset
 
-## Verification boundary
+## Verification evidence
 
-The implementation has been written through the GitHub connector in this conversation
-
-The assistant execution environment could not resolve GitHub through git and therefore could not create a runnable local worktree or execute ROS2/PyQt5 pytest / colcon against these commits
-
-Therefore this document must not claim:
+Operator-machine focused regression evidence on branch `feat/v25-12f-traversability-hard-boundary`:
 
 ```text
-AUTOMATED TEST PASS
-BUILD PASS
-REAL-DATA A/B PASS
-REAL-DATA OPERATOR ACCEPTANCE PASS
+26 passed
+src/agt_offline_assets/test/test_vehicle_safe_lane.py
+src/agt_offline_assets/test/test_site_boundary.py
+src/agt_offline_assets/test/test_traversability.py
+tests/test_v25_12f_traversability_contract.py
+
+12 passed
+src/agt_map_workbench/test/test_site_boundary_workbench.py
+src/agt_map_workbench/test/test_route_debug_panel.py
+src/agt_map_workbench/test/test_route_debug_view.py
 ```
 
-until the operator machine provides those results
+Focused total:
 
-## Immediate local gate
+```text
+38 passed
+```
 
-On the operator machine:
+The corrected real-data A/B rerun is recorded in:
+
+```text
+docs/v2.5/V25_12F_REAL_AB_2026-08-15.md
+```
+
+The current evidence supports these conclusions:
+
+```text
+Site Boundary remains a valid hard safety invariant
+no aisle is fully blocked by Site Boundary in the corrected real-data rerun
+UNKNOWN-only recovery does not improve the Vehicle-Safe Lane summary on this dataset
+the dominant remaining limitation is still Navigation Grid OCCUPIED / padding / footprint configuration-space semantics
+R6B search-budget tuning is not justified by this A/B result
+```
+
+This checkpoint still does not claim a full package test pass until the registered package-level test suites are run through `colcon test`
+
+## Final package-level gate
+
+Run on the operator machine:
 
 ```bash
 cd ~/agt_navigation_v2
-git fetch origin
-git switch feat/v25-12f-traversability-hard-boundary
-git pull --ff-only
-
 source /opt/ros/humble/setup.bash
-
-rm -rf \
-  build/agt_offline_assets \
-  build/agt_map_workbench \
-  install/agt_offline_assets \
-  install/agt_map_workbench
-
-colcon build \
-  --symlink-install \
-  --packages-select agt_offline_assets agt_map_workbench
-
 source install/setup.bash
+
+colcon test \
+  --packages-select agt_offline_assets agt_map_workbench \
+  --event-handlers console_direct+
+
+colcon test-result \
+  --test-result-base build \
+  --all
 ```
 
-Then run the focused automated contracts before any real-data promotion
+If this package-level gate is green, V25-12F is ready for branch integration decision
 
-## Real-data operator gate
+## Real-data operator result
 
-After automated tests pass:
+Completed:
 
 ```text
-1. open processed.pcd in the existing Workbench
-2. draw the vehicle-permitted inner greenhouse Site Boundary
-3. export site_boundary.yaml into runtime/maps/agt_workbench_run
-4. generate and export the 12F candidate
-5. open Route Debug → 12F A/B
-6. inspect wall/perimeter behavior and inferred gaps
-7. inspect aisle_003 / aisle_005 / aisle_013
-8. run tools/v25_12f_acceptance.py
-9. inspect connector_015 / connector_017 current-vs-candidate results
-10. only then decide whether the candidate is eligible for canonical promotion
+1. real processed.pcd reviewed in Workbench
+2. vehicle-permitted inner greenhouse Site Boundary authored
+3. site_boundary.yaml frozen in runtime/maps/agt_workbench_run
+4. 12F candidate generated and exported
+5. Route Debug 12F A/B inspected
+6. corrected acceptance harness rerun completed
 ```
+
+The 12F candidate is not promoted to the canonical Navigation Map because its UNKNOWN-only recovery does not materially improve the real Vehicle-Safe Lane feasibility summary
 
 ## Current next gate
 
 ```text
-LOCAL AUTOMATED VERIFICATION
+PACKAGE-LEVEL COLCON TEST
         ↓
-fix any compile/test regressions
+branch integration decision
         ↓
-REAL Site Boundary authoring
+freeze V25-12F as completed safety/traversability experiment
         ↓
-12F candidate freeze
-        ↓
-Route Debug A/B + acceptance harness
-        ↓
-operator decision on candidate semantics
-        ↓ only after acceptance
-canonical Navigation Map promotion decision
-        ↓
-resume Vehicle-Safe Lane / Connector / R6B / R7 progression
+start V25-12G Maximum Feasible Coverage design
 ```
 
-Do not tune R6B to compensate for a failed 12F map
+Do not tune R6B to compensate for the failed UNKNOWN-only 12F recovery experiment
