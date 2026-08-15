@@ -105,6 +105,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_vehicle_safe_lane_occupancy_sources test/test_vehicle_safe_lane_occupancy_sources.py
   )
+  ament_add_pytest_test(
+    test_vehicle_safe_lane_padding_sensitivity test/test_vehicle_safe_lane_padding_sensitivity.py
+  )
 endif()
 
 ament_package()
