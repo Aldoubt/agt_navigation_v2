@@ -64,12 +64,24 @@ def _require_file(run_dir: Path, name: str) -> Path:
 def _lane_summary(plan) -> dict[str, Any]:
     lanes = []
     coverages = []
-    boundary_conflicts = 0
+    boundary_rejected_pose_aisles = 0
+    boundary_limited_aisles = 0
+    boundary_fully_blocked_aisles = 0
     for lane in plan.lanes:
         coverage = float(lane.coverage_fraction)
         coverages.append(coverage)
-        if "SITE_BOUNDARY_CONFLICT" in str(lane.reason):
-            boundary_conflicts += 1
+        rejected_poses = int(lane.site_boundary_rejected_pose_count)
+        limited_samples = int(lane.site_boundary_limited_sample_count)
+        if rejected_poses > 0:
+            boundary_rejected_pose_aisles += 1
+        if limited_samples > 0:
+            boundary_limited_aisles += 1
+        if (
+            lane.status == "NO_VEHICLE_SAFE_LANE"
+            and lane.total_sample_count > 0
+            and limited_samples >= lane.total_sample_count
+        ):
+            boundary_fully_blocked_aisles += 1
         lanes.append(
             {
                 "aisle_id": lane.aisle_id,
@@ -82,6 +94,11 @@ def _lane_summary(plan) -> dict[str, Any]:
                 "maximum_used_lateral_shift_m": float(
                     lane.maximum_used_lateral_shift_m
                 ),
+                "safe_sample_count": int(lane.safe_sample_count),
+                "total_sample_count": int(lane.total_sample_count),
+                "site_boundary_rejected_pose_count": rejected_poses,
+                "site_boundary_limited_sample_count": limited_samples,
+                "grid_rejected_pose_count": int(lane.grid_rejected_pose_count),
                 "reason": lane.reason,
             }
         )
@@ -93,7 +110,9 @@ def _lane_summary(plan) -> dict[str, Any]:
         "partial": int(plan.partial_count),
         "unavailable": int(plan.unavailable_count),
         "mean_coverage_fraction": mean_coverage,
-        "site_boundary_conflict_aisles": int(boundary_conflicts),
+        "site_boundary_rejected_pose_aisles": int(boundary_rejected_pose_aisles),
+        "site_boundary_limited_aisles": int(boundary_limited_aisles),
+        "site_boundary_fully_blocked_aisles": int(boundary_fully_blocked_aisles),
         "aisles": lanes,
     }
 
@@ -246,7 +265,6 @@ def run_acceptance(run_dir: Path, vehicle_profile_path: Path) -> dict[str, Any]:
     )
     admission = _regression_admission(selected, zones, vehicle)
 
-    # Intentionally use one unchanged default configuration for both maps.
     r6b_cfg = ReversePrimitiveConnectorConfig()
     current_r6b = derive_reverse_primitive_connector_plan(
         selected,
@@ -336,11 +354,23 @@ def run_acceptance(run_dir: Path, vehicle_profile_path: Path) -> dict[str, Any]:
             "candidate_12f": _r6b_summary(candidate_r6b),
         },
         "safety_summary": {
-            "current_lane_site_boundary_conflicts": current_lane_summary[
-                "site_boundary_conflict_aisles"
+            "current_lane_site_boundary_rejected_pose_aisles": current_lane_summary[
+                "site_boundary_rejected_pose_aisles"
             ],
-            "candidate_lane_site_boundary_conflicts": candidate_lane_summary[
-                "site_boundary_conflict_aisles"
+            "current_lane_site_boundary_limited_aisles": current_lane_summary[
+                "site_boundary_limited_aisles"
+            ],
+            "current_lane_site_boundary_fully_blocked_aisles": current_lane_summary[
+                "site_boundary_fully_blocked_aisles"
+            ],
+            "candidate_lane_site_boundary_rejected_pose_aisles": candidate_lane_summary[
+                "site_boundary_rejected_pose_aisles"
+            ],
+            "candidate_lane_site_boundary_limited_aisles": candidate_lane_summary[
+                "site_boundary_limited_aisles"
+            ],
+            "candidate_lane_site_boundary_fully_blocked_aisles": candidate_lane_summary[
+                "site_boundary_fully_blocked_aisles"
             ],
             "candidate_route_ready_claimed": False,
         },
