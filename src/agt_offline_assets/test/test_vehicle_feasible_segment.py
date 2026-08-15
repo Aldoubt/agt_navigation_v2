@@ -83,7 +83,7 @@ def _navigation_with_blocked_x_ranges(ranges):
     resolution = 0.05
     origin_x = -1.0
     origin_y = -1.5
-    width = 160
+    width = 180
     height = 60
     occupancy = np.full((height, width), FREE, dtype=np.uint8)
 
@@ -136,3 +136,20 @@ def test_two_disjoint_useful_runs_are_both_emitted():
     ]
     assert aisle.active_segments[0].end_distance_m < aisle.active_segments[1].start_distance_m
     assert all(segment.length_m >= 1.0 for segment in aisle.active_segments)
+
+
+def test_short_feasible_run_is_preserved_only_as_rejected_fragment():
+    plan = derive_vehicle_feasible_segment_plan(
+        _graph(length_m=6.0),
+        _navigation_with_blocked_x_ranges(((2.00, 2.20), (3.60, 3.80))),
+        _vehicle(),
+        _config(minimum_contiguous_span_m=1.0),
+    )
+    aisle = plan.aisles[0]
+
+    assert len(aisle.active_segments) == 2
+    assert len(aisle.rejected_fragments) == 1
+    fragment = aisle.rejected_fragments[0]
+    assert fragment.fragment_id == "aisle_001.fragment_001"
+    assert fragment.length_m < 1.0
+    assert fragment.reason == "BELOW_MINIMUM_USEFUL_SEGMENT_LENGTH"
