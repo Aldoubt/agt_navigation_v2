@@ -1,3 +1,4 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -11,6 +12,10 @@ from agt_offline_assets import (
     SiteBoundary,
     TraversabilityConfig,
     derive_traversability_evidence,
+    load_navigation_grid,
+    load_traversability_evidence,
+    write_site_boundary,
+    write_traversability_candidate,
 )
 
 
@@ -80,6 +85,14 @@ def _fixture(*, gap_columns=range(6, 10), boundary_max_x=2.0, overrides=()):
     return navigation, corridor, evidence
 
 
+def _full_boundary():
+    return SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((0.0, 0.0), (2.0, 0.0), (2.0, 0.30), (0.0, 0.30)),
+        source={"authoring_mode": "WORKBENCH_MANUAL_POLYGON"},
+    )
+
+
 def test_short_longitudinal_unknown_gap_is_inferred():
     _navigation, _corridor, evidence = _fixture(gap_columns=range(6, 10))
     assert np.all(evidence.inferred_traversable_mask[1, 6:10])
@@ -95,10 +108,6 @@ def test_long_unknown_gap_remains_unknown():
 def test_row_structural_band_is_not_recovered():
     navigation, corridor, _evidence = _fixture(gap_columns=range(6, 10))
     corridor.row_structural_band[1, 7] = True
-    boundary = SiteBoundary(
-        frame_id="map",
-        outer_boundary_xy=((0.0, 0.0), (2.0, 0.0), (2.0, 0.30), (0.0, 0.30)),
-    )
     structure = SimpleNamespace(
         row_model=SimpleNamespace(direction_xy=np.array([1.0, 0.0]))
     )
@@ -106,7 +115,7 @@ def test_row_structural_band_is_not_recovered():
         navigation,
         structure,
         corridor,
-        boundary,
+        _full_boundary(),
         frame_id="map",
     )
     assert not evidence.inferred_traversable_mask[1, 7]
@@ -115,10 +124,6 @@ def test_row_structural_band_is_not_recovered():
 def test_current_occupied_cell_is_never_recovered():
     navigation, corridor, _evidence = _fixture(gap_columns=range(6, 10))
     navigation.occupancy[1, 8] = OCCUPIED
-    boundary = SiteBoundary(
-        frame_id="map",
-        outer_boundary_xy=((0.0, 0.0), (2.0, 0.0), (2.0, 0.30), (0.0, 0.30)),
-    )
     structure = SimpleNamespace(
         row_model=SimpleNamespace(direction_xy=np.array([1.0, 0.0]))
     )
@@ -126,7 +131,7 @@ def test_current_occupied_cell_is_never_recovered():
         navigation,
         structure,
         corridor,
-        boundary,
+        _full_boundary(),
         frame_id="map",
     )
     assert evidence.sensor_obstacle_mask[1, 8]
@@ -137,7 +142,7 @@ def test_current_occupied_cell_is_never_recovered():
 def test_no_go_is_not_recovered():
     no_go = {
         "mode": "no_go",
-        "polygon_xy": [[0.65, 0.10], [0.95, 0.10], [0.95, 0.20], [0.65, 0.20]],
+        "polygon_xy": [[0.60, 0.05], [1.00, 0.05], [1.00, 0.25], [0.60, 0.25]],
     }
     _navigation, _corridor, evidence = _fixture(
         gap_columns=range(6, 10), overrides=(no_go,)
@@ -159,7 +164,7 @@ def test_outside_site_boundary_is_hard_blocked():
 def test_state_precedence_masks_do_not_overlap_inference():
     no_go = {
         "mode": "no_go",
-        "polygon_xy": [[0.65, 0.10], [0.75, 0.10], [0.75, 0.20], [0.65, 0.20]],
+        "polygon_xy": [[0.60, 0.05], [0.80, 0.05], [0.80, 0.25], [0.60, 0.25]],
     }
     navigation, corridor, _evidence = _fixture(
         gap_columns=range(6, 10), overrides=(no_go,)
@@ -187,3 +192,47 @@ def test_state_precedence_masks_do_not_overlap_inference():
     assert not np.any(
         evidence.inferred_traversable_mask & evidence.sensor_obstacle_mask
     )
+
+
+def test_candidate_serialization_round_trip_preserves_canonical_files(tmp_path: Path):
+    navigation, _corridor, evidence = _fixture(gap_columns=range(6, 10))
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+
+    canonical = {
+        "navigation_map.yaml": b"canonical-yaml\n",
+        "navigation_map.pgm": b"canonical-pgm\n",
+        "derivation.yaml": b"canonical-derivation\n",
+    }
+    for name, payload in canonical.items():
+        (run_dir / name).write_bytes(payload)
+
+    boundary = _full_boundary()
+    write_site_boundary(boundary, run_dir / "site_boundary.yaml")
+    before = {name: (run_dir / name).read_bytes() for name in canonical}
+
+    write_traversability_candidate(
+        evidence,
+        navigation,
+        boundary,
+        run_dir,
+        source_navigation_asset="navigation_map.yaml",
+    )
+
+    expected = {
+        "traversability_evidence.yaml",
+        "traversability_evidence.npz",
+        "navigation_map_12f.yaml",
+        "navigation_map_12f.pgm",
+        "navigation_map_12f_derivation.yaml",
+    }
+    assert expected.issubset({path.name for path in run_dir.iterdir()})
+    assert before == {name: (run_dir / name).read_bytes() for name in canonical}
+
+    loaded = load_traversability_evidence(run_dir, expected_frame_id="map")
+    assert np.array_equal(
+        loaded.inferred_traversable_mask,
+        evidence.inferred_traversable_mask,
+    )
+    candidate = load_navigation_grid(run_dir / "navigation_map_12f.yaml")
+    assert np.array_equal(candidate.occupancy, evidence.candidate_occupancy())
