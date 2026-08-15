@@ -57,6 +57,10 @@ if(BUILD_TESTING)
     test_route_debug_workbench_integration
     test/test_route_debug_workbench_integration.py
   )
+  ament_add_pytest_test(
+    test_site_boundary_workbench
+    test/test_site_boundary_workbench.py
+  )
 endif()
 
 ament_package()
