@@ -2,13 +2,13 @@
 
 The shared Turn Zone is a search envelope spanning many aisle endpoints, so the
 FREE/OCCUPIED ratio of an enlarged whole zone is not a valid proxy for whether a
-particular Dubins connector is drivable.  This module evaluates each analytic
+particular Dubins connector is drivable. This module evaluates each analytic
 forward candidate directly against the frozen Navigation Grid.
 
-For MK-mini preview the canonical navigation footprint is swept along each
-sampled pose.  Because the exact on-vehicle ``base_footprint`` reference is not
-yet verified, this remains PREVIEW evidence and cannot replace the formal R8
-vehicle-READY swept-footprint gate.
+V25-12F optionally adds a continuous Site Boundary constraint. A forward
+candidate is preview-free only when every transformed vehicle footprint is both
+strictly inside the vehicle-permitted inner perimeter and FREE in the frozen
+Navigation Grid.
 """
 
 from __future__ import annotations
@@ -32,6 +32,7 @@ from .forward_connector import (
 from .forward_connector_diagnostics import _candidate_expansion
 from .navigation_grid import NavigationGridEvidence
 from .navigation_map_derivation import FREE, OCCUPIED, UNKNOWN
+from .site_boundary import SiteBoundary, polygon_strictly_inside_site_boundary
 from .turn_zones import TurnZoneSet, _points_inside_polygon
 from .vehicle_profile import CanonicalVehicleProfile
 
@@ -107,7 +108,9 @@ class ForwardConnectorNavigationPlan:
 
     @property
     def preview_free_count(self) -> int:
-        return sum(item.status == "PREVIEW_FOOTPRINT_FREE" for item in self.connectors)
+        return sum(
+            item.status == "PREVIEW_FOOTPRINT_FREE" for item in self.connectors
+        )
 
     @property
     def review_required_count(self) -> int:
@@ -127,7 +130,11 @@ def _empty_evidence() -> GridPathEvidence:
     )
 
 
-def _evidence_from_mask(mask: np.ndarray, occupancy: np.ndarray, coverage: float) -> GridPathEvidence:
+def _evidence_from_mask(
+    mask: np.ndarray,
+    occupancy: np.ndarray,
+    coverage: float,
+) -> GridPathEvidence:
     count = int(np.count_nonzero(mask))
     if count <= 0:
         return GridPathEvidence(0, 0, 0, 0, 0.0, 0.0, 0.0, float(coverage))
@@ -150,12 +157,7 @@ def _preview_local_footprint(
     vehicle: CanonicalVehicleProfile,
     padding_m: float,
 ) -> tuple[tuple[float, float], ...]:
-    """Return a conservative rectangle around canonical navigation footprint.
-
-    MK-mini's canonical footprint is rectangular.  Using extents keeps the gate
-    conservative for any future non-rectangular platform while avoiding a second
-    vehicle geometry truth format.
-    """
+    """Return a conservative rectangle around canonical navigation footprint."""
     points = np.asarray(vehicle.navigation_footprint_xy, dtype=np.float64)
     if points.ndim != 2 or points.shape[0] < 3 or points.shape[1] != 2:
         raise ValueError("canonical navigation footprint is invalid")
@@ -176,6 +178,20 @@ def _transform_polygon(local_polygon, sample: ForwardConnectorSample):
         )
         for lx, ly in local_polygon
     )
+
+
+def _candidate_inside_site_boundary(
+    samples: tuple[ForwardConnectorSample, ...],
+    local_footprint,
+    site_boundary: SiteBoundary | None,
+) -> bool:
+    if site_boundary is None:
+        return True
+    for sample in samples:
+        polygon = _transform_polygon(local_footprint, sample)
+        if not polygon_strictly_inside_site_boundary(site_boundary, polygon):
+            return False
+    return True
 
 
 def _cell_index(navigation: NavigationGridEvidence, x: float, y: float):
@@ -214,12 +230,18 @@ def _evaluate_candidate(
         if px0 < min_x or py0 < min_y or px1 > max_x or py1 > max_y:
             footprint_out += 1
 
-        col0 = max(0, int(math.floor((float(px0) - navigation.origin_x_m) / resolution)))
+        col0 = max(
+            0,
+            int(math.floor((float(px0) - navigation.origin_x_m) / resolution)),
+        )
         col1 = min(
             navigation.width - 1,
             int(math.floor((float(px1) - navigation.origin_x_m) / resolution)),
         )
-        row0 = max(0, int(math.floor((float(py0) - navigation.origin_y_m) / resolution)))
+        row0 = max(
+            0,
+            int(math.floor((float(py0) - navigation.origin_y_m) / resolution)),
+        )
         row1 = min(
             navigation.height - 1,
             int(math.floor((float(py1) - navigation.origin_y_m) / resolution)),
@@ -227,7 +249,10 @@ def _evaluate_candidate(
         if row0 > row1 or col0 > col1:
             continue
 
-        rows, cols = np.indices((row1 - row0 + 1, col1 - col0 + 1), dtype=np.float64)
+        rows, cols = np.indices(
+            (row1 - row0 + 1, col1 - col0 + 1),
+            dtype=np.float64,
+        )
         xx = navigation.origin_x_m + (cols + col0 + 0.5) * resolution
         yy = navigation.origin_y_m + (rows + row0 + 0.5) * resolution
         inside = _points_inside_polygon(xx, yy, polygon)
@@ -261,6 +286,7 @@ def derive_forward_connector_navigation_gate(
     vehicle: CanonicalVehicleProfile,
     config: ForwardConnectorNavigationGateConfig | None = None,
     *,
+    site_boundary: SiteBoundary | None = None,
     source: Mapping[str, Any] | None = None,
 ) -> ForwardConnectorNavigationPlan:
     """Evaluate forward Dubins candidates against frozen navigation evidence."""
@@ -268,15 +294,26 @@ def derive_forward_connector_navigation_gate(
     cfg.validate()
     requests = tuple(connector_requests)
     if vehicle.kinematics != "ackermann":
-        raise ValueError("forward navigation gate currently requires Ackermann kinematics")
+        raise ValueError(
+            "forward navigation gate currently requires Ackermann kinematics"
+        )
     if not vehicle.planning_preview_ready:
-        raise ValueError(f"vehicle profile {vehicle.profile_id} is not ready for planning preview")
+        raise ValueError(
+            f"vehicle profile {vehicle.profile_id} is not ready for planning preview"
+        )
+    if site_boundary is not None:
+        site_boundary.validate(expected_frame_id=zones.frame_id)
     radius = float(vehicle.minimum_turning_radius_m)
     if not vehicle.minimum_turning_radius_verified or radius <= 0.0:
-        raise ValueError("forward navigation gate requires verified minimum turning radius")
+        raise ValueError(
+            "forward navigation gate requires verified minimum turning radius"
+        )
 
     zone_map = _zone_by_id(zones)
-    local_footprint = _preview_local_footprint(vehicle, cfg.preview_footprint_padding_m)
+    local_footprint = _preview_local_footprint(
+        vehicle,
+        cfg.preview_footprint_padding_m,
+    )
     forward_cfg = ForwardConnectorConfig(sample_step_m=cfg.sample_step_m)
     results: list[ForwardConnectorNavigationResult] = []
 
@@ -307,7 +344,11 @@ def derive_forward_connector_navigation_gate(
             )
             continue
 
-        candidates = _dubins_candidates(request.start_pose, request.goal_pose, radius)
+        candidates = _dubins_candidates(
+            request.start_pose,
+            request.goal_pose,
+            radius,
+        )
         scored = []
         for path_type, normalized_lengths in candidates:
             samples, length_m = _sample_candidate(
@@ -318,12 +359,23 @@ def derive_forward_connector_navigation_gate(
                 radius,
                 forward_cfg.sample_step_m,
             )
-            centerline, footprint = _evaluate_candidate(samples, navigation, local_footprint)
+            centerline, footprint = _evaluate_candidate(
+                samples,
+                navigation,
+                local_footprint,
+            )
+            boundary_free = _candidate_inside_site_boundary(
+                samples,
+                local_footprint,
+                site_boundary,
+            )
             outward, inward, low_v, high_v, maximum = _candidate_expansion(
                 samples,
                 zone,
                 np.asarray(zones.row_direction_xy, dtype=np.float64)
-                / np.linalg.norm(np.asarray(zones.row_direction_xy, dtype=np.float64)),
+                / np.linalg.norm(
+                    np.asarray(zones.row_direction_xy, dtype=np.float64)
+                ),
                 np.array(
                     [
                         -zones.row_direction_xy[1],
@@ -331,11 +383,14 @@ def derive_forward_connector_navigation_gate(
                     ],
                     dtype=np.float64,
                 )
-                / np.linalg.norm(np.asarray(zones.row_direction_xy, dtype=np.float64)),
+                / np.linalg.norm(
+                    np.asarray(zones.row_direction_xy, dtype=np.float64)
+                ),
             )
-            accepted = _candidate_is_preview_free(footprint, cfg)
+            accepted = _candidate_is_preview_free(footprint, cfg) and boundary_free
             score = (
                 0 if accepted else 1,
+                0 if boundary_free else 1,
                 1.0 - footprint.grid_coverage_fraction,
                 footprint.occupied_fraction,
                 footprint.unknown_fraction,
@@ -357,6 +412,7 @@ def derive_forward_connector_navigation_gate(
                     float(high_v),
                     float(maximum),
                     accepted,
+                    boundary_free,
                 )
             )
 
@@ -399,17 +455,34 @@ def derive_forward_connector_navigation_gate(
             high_v,
             maximum,
             accepted,
+            boundary_free,
         ) = scored[0]
-        status = "PREVIEW_FOOTPRINT_FREE" if accepted else "NO_FORWARD_PREVIEW_FREE_CANDIDATE"
+        status = (
+            "PREVIEW_FOOTPRINT_FREE"
+            if accepted
+            else "NO_FORWARD_PREVIEW_FREE_CANDIDATE"
+        )
         if accepted:
             reason = (
-                "selected forward Dubins candidate is free in the frozen Navigation Grid "
-                "under the preview navigation-footprint assumption"
+                "selected forward Dubins candidate is FREE in the frozen Navigation Grid"
+                + (
+                    " and strictly inside the Site Boundary"
+                    if site_boundary is not None
+                    else ""
+                )
+                + " under the preview navigation-footprint assumption"
+            )
+        elif not boundary_free:
+            reason = (
+                "SITE_BOUNDARY_CONFLICT: at least one transformed preview footprint of "
+                "the selected forward candidate touches or crosses the vehicle-permitted "
+                "inner boundary; a FREE raster cannot override this hard constraint"
             )
         else:
             reason = (
-                "all forward Dubins candidates have occupied/unknown/out-of-grid preview footprint evidence; "
-                "do not infer that enlarging the shared Turn Zone makes them drivable"
+                "all forward Dubins candidates have occupied/unknown/out-of-grid preview "
+                "footprint evidence; do not infer that enlarging the shared Turn Zone "
+                "makes them drivable"
             )
         results.append(
             ForwardConnectorNavigationResult(
@@ -443,6 +516,7 @@ def derive_forward_connector_navigation_gate(
             "preview_footprint_padding_m": cfg.preview_footprint_padding_m,
             "footprint_semantics": "CANONICAL_NAVIGATION_FOOTPRINT_BOUNDING_RECTANGLE_PREVIEW",
             "validation_scope": "PREVIEW_ONLY_NOT_R8_VEHICLE_READY",
+            "site_boundary_enforced": site_boundary is not None,
         }
     )
     return ForwardConnectorNavigationPlan(
@@ -498,8 +572,12 @@ def forward_connector_navigation_gate_to_dict(
                     "lateral_high_m": item.required_lateral_high_extension_m,
                     "max_m": item.max_required_zone_extension_m,
                 },
-                "centerline_evidence": _evidence_to_dict(item.centerline_evidence),
-                "preview_footprint_evidence": _evidence_to_dict(item.footprint_evidence),
+                "centerline_evidence": _evidence_to_dict(
+                    item.centerline_evidence
+                ),
+                "preview_footprint_evidence": _evidence_to_dict(
+                    item.footprint_evidence
+                ),
                 "samples": [
                     {
                         "x": sample.x,
