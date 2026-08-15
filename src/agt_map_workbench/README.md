@@ -226,6 +226,65 @@ ground_support_count.npy
 
 `navigation_map.yaml` 使用 Nav2 / map_server 常见 trinary 参数
 
+## 路径调试 Route Debug 2D
+
+右侧 `路径调试` 是现有 Workbench 内的 **2D、只读** 路径生产证据查看器
+
+它加载一个完整 run directory，而不是让操作者逐个选择 YAML，从冻结资产中联合显示行道结构、Coverage 顺序、ConnectorRequest、Forward/R6 运动、车辆可行性和碰撞来源
+
+```text
+运行目录
+├── navigation_map.pgm / navigation_map.yaml
+├── derivation.yaml
+├── aisle_graph.yaml
+├── turn_zones.yaml
+├── coverage_order.yaml
+├── forward / R5.6 / R6A / R6B 可选冻结资产
+└── vehicle-safe-lane / occupancy-source 可选冻结资产
+        ↓
+RouteDebugDataset
+        ↓
+agt_route_debug_overlay/v1
+        ↓
+共享 QGraphicsScene
+```
+
+界面预设
+
+```text
+Coverage 总览
+规划结果
+碰撞诊断
+```
+
+`ConnectorRequest` 与真实已求解运动轨迹分层显示，Coverage 行道方向不会被误画成倒车；只有冻结 R6B sample 明确包含 `motion_direction=REVERSE` 时才显示 Reverse 段和 cusp
+
+`NO_GO` 保持为独立的语义排除证据，不与物理 `OCCUPIED` 混为一种状态
+
+碰撞诊断可以叠加
+
+```text
+RAW_OBSTACLE_DIRECT
+GEOMETRY_DIRECT
+PADDING_ONLY
+UNKNOWN
+COLLISION_STATION
+```
+
+选中碰撞点后 Inspector 显示对应 footprint、占据来源统计与冻结来源字段，不在 GUI 中重新运行规划器或修改原始 Navigation Map
+
+Route Debug 允许创建或替换的唯一 run-directory 输出是
+
+```text
+route_debug_overlay.geojson
+```
+
+该文件只是 `DEBUG_RENDER_ONLY` 派生证据，不是新的路径真值，也不能用于 READY promotion
+
+可选资产缺失时只关闭对应图层；已有资产若 schema、`frame_id` 或内容合同无效，则该图层 fail-closed，不做静默坐标转换
+
+真实温室视觉验收必须由操作者实际完成后再标记 PASS；当前工具实现本身不能代替现场检查
+
 ## 产品边界
 
 ```text
