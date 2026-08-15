@@ -107,7 +107,7 @@ RouteDebugDataset
         ↓
 Route Debug Overlay Builder
         ↓
-render-only geometry + provenance
+route_debug_overlay.geojson
         ↓
 AGT Map Workbench / 路径调试
 ```
@@ -478,18 +478,17 @@ The goal is that an operator can click a red/orange/purple conflict and answer `
 
 ## 10. Route Debug Overlay
 
-The GUI should not recompute full planning or collision logic
+The GUI must not recompute full planning or collision logic
 
-A dedicated derived overlay is recommended:
+The MVP serialization is fixed as:
 
 ```text
 route_debug_overlay.geojson
-or equivalent serialized overlay representation
 ```
 
-The exact serialization can be finalized during implementation planning, but the semantic contract is fixed
+The overlay uses normal GeoJSON feature geometry and properties. Geometry types may include Point, LineString, Polygon, and MultiPolygon as required by a layer
 
-Overlay features may include:
+Overlay features include when source evidence exists:
 
 ```text
 Aisle geometry
@@ -512,6 +511,16 @@ source_id: connector_015
 source_field: preview_footprint_evidence
 ```
 
+Each feature also carries at minimum:
+
+```text
+feature_id
+layer_group
+feature_kind
+frame_id
+status when applicable
+```
+
 The overlay is render-only derived evidence and cannot become a new route truth owner
 
 ## 11. NO_GO semantic contract
@@ -527,9 +536,17 @@ no_go
 
 Current Navigation Map rasterization maps both `force_occupied` and `no_go` to OCCUPIED. Therefore a PGM alone cannot preserve the semantic distinction
 
-The Route Debug page must reconstruct NO_GO polygons from frozen override metadata such as `derivation.yaml.overrides`
+### 11.1 MVP behavior
 
-Long-term route semantics must distinguish:
+The Route Debug MVP reconstructs NO_GO polygons from frozen override metadata such as `derivation.yaml.overrides`
+
+It renders NO_GO separately from physical OCCUPIED and exposes semantic provenance in the inspector
+
+The MVP does not modify Coverage Ordering, R6, R7, Navigation Map generation, or existing route admission behavior to enforce a new semantic gate
+
+### 11.2 Future route-production contract
+
+A later route-production increment should preserve the distinction:
 
 ```text
 Physical Navigation Evidence
@@ -549,9 +566,7 @@ drivable = physical FREE AND not semantic NO_GO
 
 Aisle Graph may still preserve a structural aisle that crosses a NO_GO area because Aisle Graph answers whether a structural road exists
 
-Coverage and motion-planning stages must be able to reject such an aisle or connector semantically without pretending the road itself does not exist
-
-Future statuses should preserve the reason, for example:
+Future Coverage and motion-planning stages should preserve explicit semantic rejection reasons instead of pretending the structural road does not exist, for example:
 
 ```text
 STRUCTURALLY_VALID
@@ -564,9 +579,9 @@ and connector conflict such as:
 SEMANTIC_NO_GO_CONFLICT
 ```
 
-R6 / R7 must never use stronger search to bypass semantic exclusion
+Future R6 / R7 semantic gating must never use stronger search to bypass semantic exclusion
 
-The first Route Debug MVP only visualizes and inspects the frozen NO_GO semantics. It does not implement a new NO_GO authoring workflow in the Route Debug tab
+The Route Debug spec intentionally reserves this semantic distinction now so the visualization does not erase information that later route-production stages need
 
 ## 12. Explicit MVP exclusions
 
@@ -581,6 +596,7 @@ rerun Dubins inside the GUI
 rerun R6 inside the GUI
 implement R7 Smac search
 change map padding
+change Coverage/R6/R7 NO_GO admission behavior
 promote a Route Asset to READY
 add 3D route linkage
 ```
@@ -662,6 +678,8 @@ from a connector that simply has no generated asset
 
 A NO_GO region created in the existing Navigation Map authoring flow may rasterize to OCCUPIED in the PGM, but Route Debug must additionally display the preserved semantic polygon as NO_GO and inspect it as semantic exclusion rather than physical obstacle
 
+This acceptance case validates visualization and provenance recovery only. It does not require a new downstream route-admission implementation
+
 ## 14. Testing strategy
 
 Most correctness tests belong in pure Python rather than fragile GUI automation
@@ -678,7 +696,7 @@ optional asset graceful degradation
 NO_GO semantic recovery
 aisle ↔ connector linkage
 collision-source linkage
-overlay feature generation
+GeoJSON overlay feature generation
 source provenance retention
 ```
 
