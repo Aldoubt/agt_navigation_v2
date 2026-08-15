@@ -151,6 +151,23 @@ def test_navigation_override_change_invalidates_existing_12f_candidate():
         window.close()
 
 
+def test_geometric_envelope_preview_uses_corridor_evidence():
+    app = qapp()
+    window = ReviewMapWorkbenchWindow()
+    try:
+        _install_candidate_fixture(window)
+        index = window._nav_layer.findData("aisle_geometric_envelope")
+        assert index >= 0
+        window._nav_layer.setCurrentIndex(index)
+        window._nav_overlay_visible.setChecked(True)
+        window._update_navigation_overlay()
+        assert window._navigation_preview_item.isVisible()
+        assert not window._navigation_preview_item.pixmap().isNull()
+        app.processEvents()
+    finally:
+        window.close()
+
+
 def test_generate_12f_candidate_requires_ready_site_boundary():
     app = qapp()
     window = ReviewMapWorkbenchWindow()
