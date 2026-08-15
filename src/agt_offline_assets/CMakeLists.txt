@@ -111,6 +111,12 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_vehicle_safe_lane_direct_source_sensitivity test/test_vehicle_safe_lane_direct_source_sensitivity.py
   )
+  ament_add_pytest_test(
+    test_route_debug_dataset test/test_route_debug_dataset.py
+  )
+  ament_add_pytest_test(
+    test_route_debug_overlay test/test_route_debug_overlay.py
+  )
 endif()
 
 ament_package()
