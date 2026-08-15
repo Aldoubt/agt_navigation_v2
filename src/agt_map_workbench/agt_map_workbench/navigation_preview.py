@@ -38,6 +38,18 @@ _CORRIDOR_LAYERS = {
 }
 
 
+def _qimage_from_rgba(rgba: np.ndarray) -> QImage:
+    image_data = np.ascontiguousarray(rgba, dtype=np.uint8)
+    height, width, _channels = image_data.shape
+    return QImage(
+        image_data.data,
+        width,
+        height,
+        int(image_data.strides[0]),
+        QImage.Format_RGBA8888,
+    ).copy()
+
+
 def _rgba_for_result(
     result: NavigationMapResult,
     layer: str,
@@ -164,15 +176,19 @@ def navigation_layer_pixmap(
     corridor: CorridorRefinementResult | None = None,
 ) -> QPixmap:
     rgba = _rgba_for_result(result, layer, structure, corridor)
-    height, width, _ = rgba.shape
-    image = QImage(
-        rgba.data,
-        width,
-        height,
-        int(rgba.strides[0]),
-        QImage.Format_RGBA8888,
-    ).copy()
-    return QPixmap.fromImage(image)
+    return QPixmap.fromImage(_qimage_from_rgba(rgba))
+
+
+def navigation_mask_pixmap(
+    mask: np.ndarray,
+    rgba_value: tuple[int, int, int, int],
+) -> QPixmap:
+    values = np.asarray(mask, dtype=bool)
+    if values.ndim != 2:
+        raise ValueError("navigation mask must be 2D")
+    rgba = np.zeros((values.shape[0], values.shape[1], 4), dtype=np.uint8)
+    rgba[values] = np.asarray(rgba_value, dtype=np.uint8)
+    return QPixmap.fromImage(_qimage_from_rgba(np.flipud(rgba).copy()))
 
 
 class NavigationPreviewItem(QGraphicsPixmapItem):
@@ -183,6 +199,12 @@ class NavigationPreviewItem(QGraphicsPixmapItem):
         self.setZValue(5.0)
         self.setVisible(False)
 
+    def _align_to_result(self, result: NavigationMapResult) -> None:
+        maximum_y = result.origin_y_m + result.height * result.resolution_m
+        self.setPos(float(result.origin_x_m), float(-maximum_y))
+        self.setScale(float(result.resolution_m))
+        self.setVisible(True)
+
     def set_result(
         self,
         result: NavigationMapResult,
@@ -191,10 +213,19 @@ class NavigationPreviewItem(QGraphicsPixmapItem):
         corridor: CorridorRefinementResult | None = None,
     ) -> None:
         self.setPixmap(navigation_layer_pixmap(result, layer, structure, corridor))
-        maximum_y = result.origin_y_m + result.height * result.resolution_m
-        self.setPos(float(result.origin_x_m), float(-maximum_y))
-        self.setScale(float(result.resolution_m))
-        self.setVisible(True)
+        self._align_to_result(result)
+
+    def set_mask(
+        self,
+        result: NavigationMapResult,
+        mask: np.ndarray,
+        rgba_value: tuple[int, int, int, int],
+    ) -> None:
+        values = np.asarray(mask, dtype=bool)
+        if values.shape != result.occupancy.shape:
+            raise ValueError("navigation mask shape does not match reference result")
+        self.setPixmap(navigation_mask_pixmap(values, rgba_value))
+        self._align_to_result(result)
 
     def clear_result(self) -> None:
         self.setPixmap(QPixmap())
