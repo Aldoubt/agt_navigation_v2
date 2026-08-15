@@ -217,13 +217,19 @@ def _add_forward_candidates(dataset, features, cfg):
 
 
 def _split_motion(samples):
+    """Split F/R motion without assigning the first new-direction sample to the old segment."""
     if not samples:
         return []
-    groups = []; current = [samples[0]]; direction = samples[0].motion_direction
+    groups = []
+    current = [samples[0]]
+    direction = samples[0].motion_direction
     for sample in samples[1:]:
         if sample.motion_direction != direction:
-            current.append(sample); groups.append((direction, tuple(current)))
-            current = [current[-1], sample]; direction = sample.motion_direction
+            groups.append((direction, tuple(current)))
+            # Keep the previous endpoint as a shared geometric boundary, then
+            # start the new motion segment with the first sample of its direction.
+            current = [current[-1], sample]
+            direction = sample.motion_direction
         else:
             current.append(sample)
     groups.append((direction, tuple(current)))
