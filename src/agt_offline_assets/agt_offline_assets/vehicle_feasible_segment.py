@@ -2,8 +2,8 @@
 
 This layer consumes the shared sample-level vehicle lane feasibility trace and
 preserves every maximal contiguous feasible run that already satisfies the
-minimum useful span.  Later TDD cycles add rejected-fragment diagnostics and
-endpoint classification without changing this core extraction behavior.
+minimum useful span.  Later TDD cycles add endpoint classification without
+changing this core extraction behavior.
 """
 
 from __future__ import annotations
@@ -161,10 +161,22 @@ def derive_vehicle_feasible_segment_plan(
         )
         raw_runs = _maximal_feasible_runs(trace)
         active_segments: list[VehicleFeasibleSegment] = []
+        rejected_fragments: list[RejectedFeasibleFragment] = []
         segment_ordinal = 0
+        fragment_ordinal = 0
 
         for run in raw_runs:
             if run.length_m + 1.0e-9 < cfg.minimum_contiguous_span_m:
+                fragment_ordinal += 1
+                rejected_fragments.append(
+                    RejectedFeasibleFragment(
+                        fragment_id=f"{aisle.aisle_id}.fragment_{fragment_ordinal:03d}",
+                        aisle_id=aisle.aisle_id,
+                        start_distance_m=run.start_distance_m,
+                        end_distance_m=run.end_distance_m,
+                        length_m=run.length_m,
+                    )
+                )
                 continue
 
             segment_ordinal += 1
@@ -231,7 +243,7 @@ def derive_vehicle_feasible_segment_plan(
                 aisle_id=aisle.aisle_id,
                 structural_length_m=float(trace.structural_length_m),
                 active_segments=tuple(active_segments),
-                rejected_fragments=(),
+                rejected_fragments=tuple(rejected_fragments),
                 raw_feasible_fragment_count=len(raw_runs),
                 allowed_lateral_shift_m=float(trace.allowed_lateral_shift_m),
                 site_boundary_rejected_pose_count=int(
