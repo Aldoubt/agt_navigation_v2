@@ -3,16 +3,36 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
-from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox, QSplitter, QTabWidget
+from PyQt5.QtCore import QPointF
+from PyQt5.QtGui import QBrush, QColor, QPen, QPolygonF
+from PyQt5.QtWidgets import (
+    QApplication,
+    QFileDialog,
+    QGraphicsPolygonItem,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
 from agt_offline_assets import (
     AisleGraphConfig,
+    SiteBoundary,
     VehicleCorridorConfig,
     VehicleCorridorResult,
     derive_agricultural_aisle_graph,
     derive_vehicle_corridor,
+    load_site_boundary,
+    validate_site_boundary,
     write_agricultural_aisle_graph,
+    write_site_boundary,
 )
 
 from .agricultural_workbench import AgriculturalMapWorkbenchWindow
@@ -32,9 +52,21 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self._route_debug_active = False
         self._pre_route_cloud_visible = True
         self._pre_route_navigation_visible = False
+
+        self._site_boundary: SiteBoundary | None = None
+        self._site_boundary_vertices: list[tuple[float, float]] = []
+        self._site_boundary_item: QGraphicsPolygonItem | None = None
+        self._site_boundary_vertex_items = []
+        self._site_boundary_status: QLabel | None = None
+        self._site_boundary_export_button: QPushButton | None = None
+        self._site_boundary_last_error = ""
+
         super().__init__()
         self._control_tabs = self._locate_control_tabs()
-        self.setWindowTitle("AGT 地图工作台 — V25-12E 农业结构 + 3D 审查 + 路径调试")
+        self.setWindowTitle(
+            "AGT 地图工作台 — V25-12F 农业结构 + 3D 审查 + 路径调试"
+        )
+        self._install_site_boundary_authoring()
         self._install_3d_review()
         self._install_offline_asset_actions()
         self._install_route_debug()
@@ -48,6 +80,271 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
                 return tabs
         raise RuntimeError("unable to locate the existing Workbench control QTabWidget")
 
+    # ------------------------------------------------------- Site Boundary authoring
+    def _navigation_authoring_layout(self):
+        page = self._control_tabs.widget(2)
+        if page is None:
+            raise RuntimeError("unable to locate Navigation Map authoring page")
+        scroll = page.findChild(QScrollArea)
+        content = scroll.widget() if scroll is not None else page
+        layout = content.layout() if content is not None else None
+        if layout is None:
+            raise RuntimeError("Navigation Map authoring page has no layout")
+        return layout
+
+    def _install_site_boundary_authoring(self) -> None:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 6, 0, 0)
+
+        title = QLabel("Site Boundary（车辆允许区域内边界）")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        note = QLabel(
+            "沿车辆允许进入区域的内边界点选多边形；边界已经包含墙厚与贴墙安全距离，"
+            "车辆 footprint 接触或越过该边界都视为冲突"
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        row = QHBoxLayout()
+        start = QPushButton("开始绘制")
+        finish = QPushButton("完成")
+        undo = QPushButton("撤销顶点")
+        clear = QPushButton("清除")
+        start.clicked.connect(self._start_site_boundary_authoring)
+        finish.clicked.connect(self._finish_site_boundary_authoring)
+        undo.clicked.connect(self._undo_site_boundary_vertex)
+        clear.clicked.connect(self._clear_site_boundary)
+        row.addWidget(start)
+        row.addWidget(finish)
+        row.addWidget(undo)
+        row.addWidget(clear)
+        layout.addLayout(row)
+
+        export = QPushButton("导出 site_boundary.yaml")
+        export.clicked.connect(self._export_site_boundary)
+        layout.addWidget(export)
+        self._site_boundary_export_button = export
+
+        status = QLabel("Site Boundary：未定义")
+        status.setWordWrap(True)
+        layout.addWidget(status)
+        self._site_boundary_status = status
+
+        target_layout = self._navigation_authoring_layout()
+        target_layout.insertWidget(max(0, target_layout.count() - 1), panel)
+        self._refresh_site_boundary_status()
+
+    def _on_map_clicked(self, x: float, y: float) -> None:
+        if self._interaction_mode == "site_boundary":
+            self._append_site_boundary_vertex(x, y)
+            return
+        super()._on_map_clicked(x, y)
+
+    def _start_site_boundary_authoring(self) -> None:
+        if self._cloud is None and self._navigation_result is None:
+            QMessageBox.information(
+                self,
+                "尚未加载地图",
+                "请先打开 PCD 或生成 Navigation Map，再绘制 Site Boundary",
+            )
+            return
+        self._site_boundary_vertices = []
+        self._site_boundary_last_error = ""
+        self._refresh_site_boundary_graphics()
+        self._refresh_site_boundary_status()
+        self._set_interaction_mode(
+            "site_boundary",
+            "Site Boundary：左键按顺序添加车辆允许区域内边界顶点",
+        )
+
+    def _append_site_boundary_vertex(self, x: float, y: float) -> None:
+        self._site_boundary_vertices.append((float(x), float(y)))
+        self._site_boundary_last_error = ""
+        self._refresh_site_boundary_graphics()
+        self._refresh_site_boundary_status()
+        self.statusBar().showMessage(
+            f"Site Boundary 顶点 {len(self._site_boundary_vertices)}："
+            f"X={x:.3f} m，Y={y:.3f} m"
+        )
+
+    def _undo_site_boundary_vertex(self) -> None:
+        if self._site_boundary_vertices:
+            self._site_boundary_vertices.pop()
+        self._site_boundary_last_error = ""
+        self._refresh_site_boundary_graphics()
+        self._refresh_site_boundary_status()
+
+    def _finish_site_boundary_authoring(self, _checked=False, *, show_errors: bool = True) -> bool:
+        if len(self._site_boundary_vertices) < 3:
+            self._site_boundary_last_error = "至少需要 3 个顶点"
+            self._refresh_site_boundary_status()
+            if show_errors:
+                QMessageBox.warning(self, "Site Boundary 未完成", self._site_boundary_last_error)
+            return False
+
+        candidate = SiteBoundary(
+            frame_id="map",
+            outer_boundary_xy=tuple(
+                (float(x), float(y)) for x, y in self._site_boundary_vertices
+            ),
+            source={"authoring_mode": "WORKBENCH_MANUAL_POLYGON"},
+        )
+        try:
+            validate_site_boundary(candidate, expected_frame_id="map")
+        except Exception as exc:
+            self._site_boundary_last_error = str(exc)
+            self._refresh_site_boundary_status()
+            if show_errors:
+                QMessageBox.warning(self, "Site Boundary 无效", str(exc))
+            return False
+
+        self._site_boundary = candidate
+        self._site_boundary_vertices = list(candidate.outer_boundary_xy)
+        self._site_boundary_last_error = ""
+        if self._interaction_mode == "site_boundary":
+            self._set_interaction_mode(None, "Site Boundary 已冻结为 READY 草案")
+        self._refresh_site_boundary_graphics()
+        self._refresh_site_boundary_status()
+        return True
+
+    def _clear_site_boundary(self, _checked=False) -> None:
+        self._site_boundary = None
+        self._site_boundary_vertices = []
+        self._site_boundary_last_error = ""
+        if self._interaction_mode == "site_boundary":
+            self._set_interaction_mode(None, "Site Boundary 已清除")
+        self._refresh_site_boundary_graphics()
+        self._refresh_site_boundary_status()
+
+    def _refresh_site_boundary_graphics(self) -> None:
+        if self._site_boundary_item is not None:
+            self._scene.removeItem(self._site_boundary_item)
+            self._site_boundary_item = None
+        for item in self._site_boundary_vertex_items:
+            self._scene.removeItem(item)
+        self._site_boundary_vertex_items.clear()
+
+        points = list(self._site_boundary_vertices)
+        if not points and self._site_boundary is not None:
+            points = list(self._site_boundary.outer_boundary_xy)
+        if not points:
+            return
+
+        scene_points = [QPointF(float(x), float(-y)) for x, y in points]
+        color = QColor(40, 225, 165)
+        item = QGraphicsPolygonItem(QPolygonF(scene_points))
+        pen = QPen(color)
+        pen.setWidth(3)
+        pen.setCosmetic(True)
+        item.setPen(pen)
+        item.setBrush(QBrush(QColor(40, 225, 165, 24)))
+        item.setZValue(18.0)
+        self._scene.addItem(item)
+        self._site_boundary_item = item
+
+        if self._interaction_mode == "site_boundary":
+            for index, point in enumerate(scene_points, start=1):
+                self._add_fixed_marker(
+                    point,
+                    f"B{index}",
+                    color,
+                    self._site_boundary_vertex_items,
+                    label_offset_px=(8.0, -18.0),
+                )
+
+    def _set_site_boundary_authoring_visible(self, visible: bool) -> None:
+        if self._site_boundary_item is not None:
+            self._site_boundary_item.setVisible(bool(visible))
+        for item in self._site_boundary_vertex_items:
+            item.setVisible(bool(visible))
+
+    def _refresh_site_boundary_status(self) -> None:
+        if self._site_boundary_status is None:
+            return
+        if self._site_boundary_last_error:
+            ready_suffix = "；上一 READY 边界仍保留" if self._site_boundary is not None else ""
+            text = f"Site Boundary：INVALID 草稿 | {self._site_boundary_last_error}{ready_suffix}"
+        elif self._interaction_mode == "site_boundary" or (
+            self._site_boundary_vertices and self._site_boundary is None
+        ):
+            text = f"Site Boundary：草稿 {len(self._site_boundary_vertices)} 点"
+        elif self._site_boundary is not None:
+            text = (
+                f"Site Boundary：READY | {len(self._site_boundary.outer_boundary_xy)} 点 | "
+                "车辆 footprint 接触边界即冲突"
+            )
+        else:
+            text = "Site Boundary：未定义"
+        self._site_boundary_status.setText(text)
+        if self._site_boundary_export_button is not None:
+            self._site_boundary_export_button.setEnabled(self._site_boundary is not None)
+
+    def _load_site_boundary_sibling(self) -> None:
+        self._site_boundary = None
+        self._site_boundary_vertices = []
+        self._site_boundary_last_error = ""
+        if self._source_path is None:
+            self._refresh_site_boundary_graphics()
+            self._refresh_site_boundary_status()
+            return
+
+        candidate = self._source_path.parent / "site_boundary.yaml"
+        if not candidate.is_file():
+            self._refresh_site_boundary_graphics()
+            self._refresh_site_boundary_status()
+            return
+        try:
+            boundary = load_site_boundary(candidate, expected_frame_id="map")
+        except Exception as exc:
+            self._site_boundary_last_error = str(exc)
+            self._refresh_site_boundary_graphics()
+            self._refresh_site_boundary_status()
+            QMessageBox.warning(
+                self,
+                "Site Boundary 加载失败",
+                f"{candidate}\n\n{exc}",
+            )
+            return
+        self._site_boundary = boundary
+        self._site_boundary_vertices = list(boundary.outer_boundary_xy)
+        self._refresh_site_boundary_graphics()
+        self._refresh_site_boundary_status()
+        self.statusBar().showMessage(f"Site Boundary 已加载：{candidate}")
+
+    def _export_site_boundary(self, _checked=False) -> Path | None:
+        if self._site_boundary is None:
+            QMessageBox.information(
+                self,
+                "Site Boundary 未就绪",
+                "请先完成并验证 Site Boundary",
+            )
+            return None
+
+        if self._source_path is not None:
+            output = self._source_path.parent / "site_boundary.yaml"
+        else:
+            filename, _selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "导出 Site Boundary",
+                "site_boundary.yaml",
+                "YAML (*.yaml *.yml)",
+            )
+            if not filename:
+                return None
+            output = Path(filename)
+
+        try:
+            path = write_site_boundary(self._site_boundary, output, overwrite=True)
+        except Exception as exc:
+            QMessageBox.critical(self, "Site Boundary 导出失败", str(exc))
+            return None
+        self.statusBar().showMessage(f"site_boundary.yaml 已导出：{path}")
+        return path
+
+    # ------------------------------------------------------- Route Debug
     def _install_route_debug(self) -> None:
         panel = RouteDebugPanel(self._scene, self._view, self)
         self._route_debug_panel = panel
@@ -61,28 +358,29 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         active = int(index) == int(self._route_debug_tab_index)
         if active == self._route_debug_active:
             self._route_debug_panel.set_active(active)
+            self._set_site_boundary_authoring_visible(not active)
             return
         if active:
             self._pre_route_cloud_visible = bool(self._cloud_item.isVisible())
             self._pre_route_navigation_visible = bool(self._navigation_preview_item.isVisible())
             self._cloud_item.setVisible(False)
             self._navigation_preview_item.setVisible(False)
+            self._set_site_boundary_authoring_visible(False)
             if self._review_tabs is not None:
                 self._review_tabs.setCurrentIndex(0)
         else:
             self._cloud_item.setVisible(self._pre_route_cloud_visible)
             self._navigation_preview_item.setVisible(self._pre_route_navigation_visible)
+            self._set_site_boundary_authoring_visible(True)
         self._route_debug_active = active
         self._route_debug_panel.set_active(active)
 
+    # ------------------------------------------------------- 3D review
     def _install_3d_review(self) -> None:
         splitter = self.centralWidget()
         if not isinstance(splitter, QSplitter):
             raise RuntimeError("3D Review expects the Workbench central QSplitter")
 
-        # Avoid replacing the splitter child in place. On some Qt5 builds an
-        # in-place replacement inherits a collapsed/zero splitter size, leaving
-        # the controls visible while the whole 2D/3D review plane appears missing.
         old_sizes = splitter.sizes()
         old_view = splitter.widget(0)
         if old_view is None:
@@ -105,9 +403,6 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         splitter.setStretchFactor(1, 0)
         splitter.setHandleWidth(6)
 
-        # Re-establish a useful initial geometry after reparenting the old view.
-        # Keep a sane historical ratio even if Qt reports a zero-width first
-        # pane from a previous/collapsed layout state.
         if len(old_sizes) >= 2 and old_sizes[0] >= 320 and old_sizes[1] >= 240:
             splitter.setSizes([int(old_sizes[0]), int(old_sizes[1])])
         else:
@@ -194,6 +489,8 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
     def _open_pcd(self) -> None:
         previous = self._source_path
         super()._open_pcd()
+        if self._source_path != previous:
+            self._load_site_boundary_sibling()
         if self._review_3d is None or self._cloud is None:
             return
         if self._source_path != previous:
@@ -238,9 +535,6 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         vehicle = self._vehicle_corridor_result
         navigation = self._navigation_result
         if vehicle is not None and navigation is not None:
-            # Review the complete requested vehicle envelope, not only the part
-            # clipped by the refined aisle. This makes geometric intrusion
-            # visible instead of hiding the unsafe part of the requested width.
             self._review_3d.canvas.set_layer_xyz(
                 "vehicle_corridor",
                 self._review_3d._grid_xyz(
