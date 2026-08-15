@@ -208,6 +208,12 @@ from .site_boundary import (
     validate_site_boundary,
     write_site_boundary,
 )
+from .traversability import (
+    TRAVERSABILITY_EVIDENCE_SCHEMA,
+    TraversabilityConfig,
+    TraversabilityEvidence,
+    derive_traversability_evidence,
+)
 
 __all__ = [
     "AssetContractError",
@@ -381,4 +387,8 @@ __all__ = [
     "write_site_boundary",
     "rasterize_site_boundary",
     "polygon_strictly_inside_site_boundary",
+    "TRAVERSABILITY_EVIDENCE_SCHEMA",
+    "TraversabilityConfig",
+    "TraversabilityEvidence",
+    "derive_traversability_evidence",
 ]
