@@ -256,7 +256,7 @@ A rejected short fragment contains at minimum:
 
 ```text
 fragment_id
-___id
+aisle_id
 start_distance_m
 end_distance_m
 length_m
@@ -272,6 +272,10 @@ aisle_016.segment_001
 aisle_016.segment_002
 aisle_016.fragment_001
 ```
+
+Endpoint pose yaw follows the graph row direction in the canonical LOW_U -> HIGH_U orientation
+
+A2 derives the opposite-heading service pose by adding pi and wrapping yaw when a segment is serviced HIGH_U -> LOW_U
 
 ## 8. Longitudinal segmentation semantics
 
