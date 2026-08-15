@@ -58,10 +58,17 @@ def _polygon(points):
 
 
 def _failure_status(status):
+    """Classify frozen status text without treating `NO_ACCEPTED_*` as success."""
     if not status:
         return False
     text = str(status).upper()
-    return not any(token in text for token in ("ACCEPTED", "READY", "FREE", "KEEP_FORWARD", "ELIGIBLE"))
+    if text.startswith(("NO_", "NOT_")):
+        return True
+    failure_tokens = (
+        "REJECT", "BLOCK", "INVALID", "UNAVAILABLE", "FAIL", "UNSOLVED",
+        "COLLISION", "OCCUPIED", "OUTSIDE", "MISMATCH", "LIMIT_REACHED",
+    )
+    return any(token in text for token in failure_tokens)
 
 
 def _connector_inspector(connector):
@@ -226,8 +233,6 @@ def _split_motion(samples):
     for sample in samples[1:]:
         if sample.motion_direction != direction:
             groups.append((direction, tuple(current)))
-            # Keep the previous endpoint as a shared geometric boundary, then
-            # start the new motion segment with the first sample of its direction.
             current = [current[-1], sample]
             direction = sample.motion_direction
         else:
