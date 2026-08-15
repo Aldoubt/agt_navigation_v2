@@ -107,6 +107,7 @@ def _fixture():
         row_structural_band=np.zeros(shape, dtype=bool),
         vegetation_envelope=np.zeros(shape, dtype=bool),
         boundary_exclusion=np.zeros(shape, dtype=bool),
+        aisle_geometric_envelope=aisle.copy(),
         aisle_candidate=aisle,
         aisle_centerline=centerline,
         boundary_aisle_candidate=boundary_aisle,
