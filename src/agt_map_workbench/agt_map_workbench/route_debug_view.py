@@ -92,6 +92,10 @@ class RouteDebugSceneController(QObject):
         group = self._groups.get(layer_key)
         if group is None:
             group = QGraphicsItemGroup()
+            # QGraphicsItemGroup handles child events by default in Qt5. Route
+            # Debug keeps each concrete child selectable so the Inspector can
+            # receive the feature_id and frozen evidence stored on that item.
+            group.setHandlesChildEvents(False)
             group.setZValue(self._z_for_layer(layer_key))
             self._scene.addItem(group)
             self._groups[layer_key] = group
