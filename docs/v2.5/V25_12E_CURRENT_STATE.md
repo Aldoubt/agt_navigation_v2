@@ -1,6 +1,6 @@
 # V25-12E Current State
 
-Date: 2026-08-14
+Date: 2026-08-15
 
 Purpose: short continuation checkpoint for future conversations / Codex tasks
 
@@ -147,7 +147,7 @@ Some raw poses were individually FREE (`connector_006` goal and
 
 This proves that increasing the retreat limit alone is not the correct repair
 
-## Root cause now frozen
+## Root cause frozen before vehicle-safe-lane smoke
 
 ```text
 Aisle Graph structural safe evidence
@@ -169,71 +169,109 @@ raw structural aisle centerline
 
 Do not relax R6B occupancy / footprint gates
 
-## Vehicle-Safe Aisle Lane
+## Vehicle-Safe Aisle Lane real smoke
 
-New derived asset:
+Asset:
 
 ```text
 vehicle_safe_aisles.yaml
 schema agt_vehicle_safe_aisle_lane/v1
 ```
 
+Real greenhouse result with 0.10 m longitudinal sampling, 0.05 m lateral search,
+0.05 m preview footprint padding, and the canonical MK-mini profile:
+
+```text
+19 structural aisles
+1  VEHICLE_SAFE_LANE_READY
+7  VEHICLE_SAFE_LANE_PARTIAL
+11 NO_VEHICLE_SAFE_LANE
+```
+
+Only `aisle_020` is READY:
+
+```text
+span        23.730 / 25.126 m
+coverage     0.944
+LOW_U retreat 1.396 m
+HIGH_U retreat 0.000 m
+max lateral shift used 0.050 m
+```
+
+Representative PARTIAL aisles:
+
+```text
+aisle_016 coverage 0.511, selected span 14.465 / 28.331 m
+aisle_017 coverage 0.305, selected span  8.082 / 26.540 m
+aisle_018 coverage 0.629, selected span 16.245 / 25.813 m
+aisle_019 coverage 0.292, selected span  7.396 / 25.287 m
+```
+
+Many earlier aisles (`001`, `002`, `003`, `006`, `007`, `008`, `011`, `012`,
+`014`, `015`) produced zero preview-footprint-free samples even with their
+bounded lateral search. `aisle_005` remains correctly rejected by the structural
+width gate because 0.658 m < 0.700 m preview required width
+
+This is now a system-level route-evidence failure, not an endpoint-retreat or R6
+search-budget problem
+
+## Current diagnostic gate
+
+Do not continue R6B or R7 yet
+
+New diagnostic asset:
+
+```text
+vehicle_safe_lane_diagnostics.yaml
+schema agt_vehicle_safe_lane_diagnostic/v1
+```
+
 Implementation:
 
 ```text
-src/agt_offline_assets/agt_offline_assets/vehicle_safe_lane.py
-src/agt_offline_assets/test/test_vehicle_safe_lane.py
+src/agt_offline_assets/agt_offline_assets/vehicle_safe_lane_diagnostics.py
+src/agt_offline_assets/test/test_vehicle_safe_lane_diagnostics.py
 ```
 
-Policy:
+The diagnostic separates, for every aisle:
 
 ```text
-immutable Aisle Graph structural centerline
-+ frozen Navigation Grid
-+ canonical MK-mini preview footprint
-        ↓
-resample structural aisle
-        ↓
-bounded lateral search in row frame
-        ↓
-preview footprint must be fully FREE
-        ↓
-bounded lateral continuity
-        ↓
-longest continuous vehicle-safe lane segment
+structural reference point FREE / OCCUPIED / UNKNOWN / out-of-grid
+zero-offset full-footprint FREE poses
+any bounded-lateral full-footprint FREE poses
+best-candidate OCCUPIED / UNKNOWN / out-of-grid blocker counts
 ```
 
-The lane records:
+The next decision is based on this evidence:
 
 ```text
-coverage fraction
-LOW_U retreat
-HIGH_U retreat
-allowed lateral shift
-maximum used lateral shift
-continuous lane centerline
+center reference mostly OCCUPIED
+→ Navigation Map / Corridor semantic disagreement
+
+center reference mostly UNKNOWN
+→ ground-support / map-coverage problem
+
+center reference mostly FREE but full footprint OCCUPIED
+→ vehicle-width / row-end / lateral clearance problem
+
+many isolated lateral FREE poses but no continuous lane
+→ continuity / lane-selection problem
 ```
 
-The allowed lateral shift is conservatively bounded by both configuration and
-vehicle-width surplus inside the aisle
-
-No lateral teleport is allowed: if adjacent samples would require a lateral
-jump above the configured limit, the lane segment is explicitly broken
-
-Aisle Graph and Navigation Map remain immutable evidence
-
-This layer is still PREVIEW_ONLY_NOT_R8_VEHICLE_READY
+Navigation Grid loading orientation has been reviewed: AGT writes PGM with one
+Y flip and `load_navigation_grid()` flips it back into minimum-Y-first world-grid
+order. There is currently no evidence for a PGM Y-axis inversion bug
 
 ## Current architecture boundary
 
 ```text
-R5.6 Forward Candidate Audit
+Structural Aisle Graph
 ↓
-R6A Admission 13 / 1 / 3 / 0
+Vehicle-Safe Lane Evidence Diagnostic
 ↓
 Vehicle-Safe Aisle Lane
-↓
-Vehicle-safe Connector Anchors
+↓ only if route evidence is coherent
+Vehicle-safe Connector Anchor
 ↓
 R6B bounded local F/R/F primitive search
 ├─ solved → later R8
@@ -242,18 +280,19 @@ R6B bounded local F/R/F primitive search
 
 Held R6A connectors still do not enter R6B automatically
 
+R6B remains preview-only because the real `base_footprint` reference / final mounted envelope are not yet physically measured
+
 ## Next gate
 
 ```text
-1. local pytest vehicle-safe lane + R6 contracts
-2. derive vehicle_safe_aisles.yaml from frozen aisle_graph.yaml + navigation_map.yaml + mk_mini.yaml
-3. inspect READY / PARTIAL / UNAVAILABLE aisle counts
-4. inspect coverage / LOW_U retreat / HIGH_U retreat / lateral shift for all aisles
-5. only after real-data lane review, wire connector anchors to the vehicle-safe lane
-6. rerun the 13 R6A-admitted connectors
-7. preserve connector_015 as the solved R6B regression baseline
-8. only valid-lane / valid-anchor unsolved connectors may move to R7
+1. local pytest lane diagnostic + frozen contracts
+2. derive vehicle_safe_lane_diagnostics.yaml
+3. inspect reference FREE/OCCUPIED/UNKNOWN distribution per aisle
+4. inspect any-lateral FREE-pose fraction
+5. inspect best-candidate blocker type
+6. decide whether the repair belongs to Navigation Map semantics, corridor semantics, or vehicle clearance
+7. do not rerun R6B until this upstream conflict is resolved
 ```
 
-Do not reopen Ground / Row tuning unless the new vehicle-safe lane evidence shows
-that the Navigation Map / corridor contracts themselves require upstream changes
+Do not widen occupancy, turn UNKNOWN into FREE, or hand invalid lanes to R7 merely
+to make route generation succeed
