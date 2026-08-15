@@ -52,6 +52,11 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_workbench_model test/test_workbench_model.py)
   ament_add_pytest_test(test_frame_calibration test/test_frame_calibration.py)
   ament_add_pytest_test(test_route_debug_view test/test_route_debug_view.py)
+  ament_add_pytest_test(test_route_debug_panel test/test_route_debug_panel.py)
+  ament_add_pytest_test(
+    test_route_debug_workbench_integration
+    test/test_route_debug_workbench_integration.py
+  )
 endif()
 
 ament_package()
