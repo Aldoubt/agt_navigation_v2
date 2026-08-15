@@ -139,6 +139,7 @@ def test_default_safety_width_rejects_fixture_aisle_that_is_too_narrow():
     result = derive_corridor_refinement(navigation, structure)
     assert np.count_nonzero(result.aisle_candidate) == 0
     assert np.count_nonzero(result.aisle_centerline) == 0
+    assert np.count_nonzero(result.aisle_geometric_envelope) == 0
     assert len(result.aisle_pair_diagnostics) == 2
     for diagnostic in result.aisle_pair_diagnostics:
         assert diagnostic.status == "REJECTED_TOO_NARROW"
@@ -155,6 +156,7 @@ def test_default_safety_width_rejects_fixture_aisle_that_is_too_narrow():
 def test_aisle_centerline_is_subset_of_refined_aisle_when_corridor_is_feasible():
     navigation, structure = _fixture()
     result = derive_corridor_refinement(navigation, structure, _feasible_config())
+    assert np.all(~result.aisle_candidate | result.aisle_geometric_envelope)
     assert np.all(~result.aisle_centerline | result.aisle_candidate)
     assert np.count_nonzero(result.aisle_candidate) > 0
     assert np.count_nonzero(result.aisle_centerline) > 0
@@ -176,6 +178,15 @@ def test_aisle_centerline_shifts_around_midpoint_obstacle_when_side_clearance_ex
     assert np.all(~result.aisle_centerline | result.aisle_candidate)
 
 
+def test_geometric_envelope_survives_ground_hole():
+    navigation, structure = _fixture()
+    navigation.ground_valid[14:17, 20:24] = False
+    result = derive_corridor_refinement(navigation, structure, _feasible_config())
+    assert np.any(result.aisle_geometric_envelope[14:17, 20:24])
+    assert not np.any(result.aisle_candidate[14:17, 20:24])
+    assert np.all(~result.aisle_candidate | result.aisle_geometric_envelope)
+
+
 def test_explicit_boundary_aisles_connect_wall_anchor_to_nearest_crop_row():
     navigation, structure = _fixture()
     config = _feasible_config(
@@ -190,6 +201,7 @@ def test_explicit_boundary_aisles_connect_wall_anchor_to_nearest_crop_row():
     assert np.count_nonzero(result.boundary_aisle_centerline) > 0
     assert np.all(~result.boundary_aisle_candidate | result.aisle_candidate)
     assert np.all(~result.boundary_aisle_centerline | result.aisle_centerline)
+    assert np.all(~result.aisle_candidate | result.aisle_geometric_envelope)
 
     kinds = [diagnostic.pair_kind for diagnostic in result.aisle_pair_diagnostics]
     assert kinds[:2] == ["ROW_ROW", "ROW_ROW"]
