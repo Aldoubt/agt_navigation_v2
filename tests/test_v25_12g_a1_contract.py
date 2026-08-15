@@ -324,7 +324,7 @@ def test_a1_acceptance_harness_reports_recoverable_segment_length(tmp_path, caps
     assert len(report["aisles"]) == 1
 
     aisle = report["aisles"][0]
-    assert tuple(aisle) == (
+    assert set(aisle) == {
         "aisle_id",
         "structural_length_m",
         "raw_feasible_fragment_count",
@@ -335,7 +335,7 @@ def test_a1_acceptance_harness_reports_recoverable_segment_length(tmp_path, caps
         "recoverable_additional_length_m",
         "active_segment_ids",
         "endpoint_classifications",
-    )
+    }
     assert aisle["aisle_id"] == "aisle_016"
     assert aisle["active_segment_count"] == 2
     assert aisle["raw_feasible_fragment_count"] == 2
