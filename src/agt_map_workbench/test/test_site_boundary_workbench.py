@@ -30,7 +30,7 @@ def _install_candidate_fixture(window):
     ground_valid[1, 6:10] = False
     ground_height[1, 6:10] = np.nan
 
-    window._navigation_result = NavigationMapResult(
+    navigation = NavigationMapResult(
         resolution_m=resolution,
         origin_x_m=0.0,
         origin_y_m=0.0,
@@ -50,6 +50,8 @@ def _install_candidate_fixture(window):
             maximum_step_m=0.12,
         ),
     )
+    window._navigation_base_result = navigation
+    window._navigation_result = navigation
     window._navigation_structure_result = SimpleNamespace(
         row_model=SimpleNamespace(
             direction_xy=np.array([1.0, 0.0], dtype=np.float64)
@@ -119,6 +121,31 @@ def test_generate_12f_candidate_does_not_mutate_current_navigation_result():
         assert window._navigation_12f_result is not None
         assert window._traversability_evidence is not None
         assert np.all(window._navigation_12f_result.occupancy[1, 6:10] == FREE)
+        app.processEvents()
+    finally:
+        window.close()
+
+
+def test_navigation_override_change_invalidates_existing_12f_candidate():
+    app = qapp()
+    window = ReviewMapWorkbenchWindow()
+    try:
+        _install_candidate_fixture(window)
+        assert window._generate_12f_candidate(show_errors=False)
+        assert window._navigation_12f_result is not None
+
+        window._navigation_overrides.append(
+            {
+                "mode": "no_go",
+                "polygon_xy": [[0.7, 0.0], [1.1, 0.0], [1.1, 0.3], [0.7, 0.3]],
+                "reason": "test_override_change",
+            }
+        )
+        window._apply_navigation_overrides_to_result()
+
+        assert window._navigation_result is not None
+        assert window._navigation_12f_result is None
+        assert window._traversability_evidence is None
         app.processEvents()
     finally:
         window.close()
