@@ -191,9 +191,9 @@ Real greenhouse result with 0.10 m longitudinal sampling, 0.05 m lateral search,
 Only `aisle_020` is READY:
 
 ```text
-span        23.730 / 25.126 m
-coverage     0.944
-LOW_U retreat 1.396 m
+span          23.730 / 25.126 m
+coverage       0.944
+LOW_U retreat  1.396 m
 HIGH_U retreat 0.000 m
 max lateral shift used 0.050 m
 ```
@@ -208,69 +208,167 @@ aisle_019 coverage 0.292, selected span  7.396 / 25.287 m
 ```
 
 Many earlier aisles (`001`, `002`, `003`, `006`, `007`, `008`, `011`, `012`,
-`014`, `015`) produced zero preview-footprint-free samples even with their
-bounded lateral search. `aisle_005` remains correctly rejected by the structural
-width gate because 0.658 m < 0.700 m preview required width
+`014`, `015`) produced zero preview-footprint-free samples even with bounded
+lateral search. `aisle_005` remains correctly rejected by the structural width
+gate because 0.658 m < 0.700 m preview required width
 
-This is now a system-level route-evidence failure, not an endpoint-retreat or R6
+This is a system-level route-evidence failure, not an endpoint-retreat or R6
 search-budget problem
 
-## Current diagnostic gate
+## Vehicle-Safe Lane evidence diagnostic — DONE
 
-Do not continue R6B or R7 yet
-
-New diagnostic asset:
+Asset:
 
 ```text
 vehicle_safe_lane_diagnostics.yaml
 schema agt_vehicle_safe_lane_diagnostic/v1
 ```
 
-Implementation:
+Real classification:
 
 ```text
-src/agt_offline_assets/agt_offline_assets/vehicle_safe_lane_diagnostics.py
-src/agt_offline_assets/test/test_vehicle_safe_lane_diagnostics.py
+13 FOOTPRINT_OCCUPIED_DOMINANT
+ 2 MIXED_OCCUPIED_DOMINANT
+ 2 MOSTLY_CONFIGURATION_SPACE_FREE
+ 1 CENTER_REFERENCE_OCCUPIED_DOMINANT
+ 1 STRUCTURAL_WIDTH_BLOCKED
 ```
 
-The diagnostic separates, for every aisle:
+No aisle was UNKNOWN-dominant or map-coverage-limited
+
+Most structural centerline reference points are frequently FREE, but the full
+MK-mini preview footprint overlaps OCCUPIED cells. `aisle_003` is the only
+center-reference-occupied-dominant aisle
+
+Configuration-space positive controls:
 
 ```text
-structural reference point FREE / OCCUPIED / UNKNOWN / out-of-grid
-zero-offset full-footprint FREE poses
-any bounded-lateral full-footprint FREE poses
-best-candidate OCCUPIED / UNKNOWN / out-of-grid blocker counts
+aisle_016 any lateral FREE 0.951
+aisle_020 any lateral FREE 0.945
 ```
 
-The next decision is based on this evidence:
+## OCCUPIED source audit — DONE
+
+Asset:
 
 ```text
-center reference mostly OCCUPIED
-→ Navigation Map / Corridor semantic disagreement
-
-center reference mostly UNKNOWN
-→ ground-support / map-coverage problem
-
-center reference mostly FREE but full footprint OCCUPIED
-→ vehicle-width / row-end / lateral clearance problem
-
-many isolated lateral FREE poses but no continuous lane
-→ continuity / lane-selection problem
+vehicle_safe_lane_occupancy_sources.yaml
+schema agt_vehicle_safe_lane_occupancy_source_audit/v1
 ```
 
-Navigation Grid loading orientation has been reviewed: AGT writes PGM with one
-Y flip and `load_navigation_grid()` flips it back into minimum-Y-first world-grid
-order. There is currently no evidence for a PGM Y-axis inversion bug
+Source exactness:
+
+```text
+APPROX_GEOMETRY_THRESHOLD_SOURCE_NO_POINT_COUNT_GROUND_VALID
+```
+
+Global Navigation OCCUPIED:
+
+```text
+actual occupied  85468
+raw obstacle     46981  0.550
+geometry         15813  0.185
+padding only     22674  0.265
+unexplained          0  0.000
+```
+
+Route-pose occupied-source classification:
+
+```text
+17 PADDING_ONLY_DOMINANT
+ 1 RAW_OBSTACLE_DIRECT_DOMINANT   aisle_003
+ 1 STRUCTURAL_WIDTH_BLOCKED       aisle_005
+```
+
+Representative padding fractions among occupied cells hit by the selected best
+bounded-lateral vehicle poses:
+
+```text
+aisle_001 0.495
+aisle_011 0.534
+aisle_013 0.761
+aisle_015 0.700
+aisle_019 0.786
+aisle_020 0.781
+```
+
+This strongly elevates obstacle-padding / full-footprint double-margin as the
+next hypothesis, but does not yet justify changing the frozen map
+
+The current Navigation Map implementation default is:
+
+```text
+resolution_m       0.10 m
+obstacle_padding_m 0.05 m
+```
+
+Metric obstacle padding is converted with `ceil(padding/resolution)` and then a
+square maximum filter. Therefore a 0.05 m request would become a one-cell
+8-neighborhood dilation at 0.10 m resolution. The exact frozen greenhouse
+`obstacle_padding_m` must still be read from `derivation.yaml` rather than
+assumed from the default
+
+## Current diagnostic gate: counterfactual padding sensitivity
+
+Do not continue R6B or R7 yet
+
+New asset:
+
+```text
+vehicle_safe_lane_padding_sensitivity.yaml
+schema agt_vehicle_safe_lane_padding_sensitivity/v1
+```
+
+Matrix:
+
+```text
+map padding radius  0 / 1 / 2 grid cells
+footprint padding   0 / 0.05 m
+```
+
+The sensitivity audit reconstructs immutable counterfactual Navigation Grids
+from the frozen direct OCCUPIED source mask plus ground-height / ground-support
+sidecars. It does not overwrite `navigation_map.pgm/yaml`
+
+It must report:
+
+```text
+current_requested_obstacle_padding_m
+current_effective_padding_cells
+per-case occupied/free/unknown counts
+per-case zero-feasible aisle count
+per-case mostly-configuration-space-free aisle count
+per-case mean any-lateral FREE fraction
+per-aisle any-lateral FREE fraction
+```
+
+Decision policy:
+
+```text
+0-cell map padding strongly restores aisle feasibility
+while 1-cell destroys it
+→ map/footprint margin duplication or coarse discrete dilation
+
+0-cell still leaves early aisles blocked
+→ raw obstacle / geometry source remains limiting
+
+footprint 0.05 alone causes the drop
+→ preview envelope margin is the primary issue
+```
 
 ## Current architecture boundary
 
 ```text
 Structural Aisle Graph
 ↓
-Vehicle-Safe Lane Evidence Diagnostic
+Vehicle-Safe Lane Evidence Diagnostic       DONE
 ↓
+OCCUPIED Source Audit                       DONE
+↓
+Counterfactual Padding Sensitivity          CURRENT
+↓ only after upstream semantics are coherent
 Vehicle-Safe Aisle Lane
-↓ only if route evidence is coherent
+↓
 Vehicle-safe Connector Anchor
 ↓
 R6B bounded local F/R/F primitive search
@@ -285,14 +383,14 @@ R6B remains preview-only because the real `base_footprint` reference / final mou
 ## Next gate
 
 ```text
-1. local pytest lane diagnostic + frozen contracts
-2. derive vehicle_safe_lane_diagnostics.yaml
-3. inspect reference FREE/OCCUPIED/UNKNOWN distribution per aisle
-4. inspect any-lateral FREE-pose fraction
-5. inspect best-candidate blocker type
-6. decide whether the repair belongs to Navigation Map semantics, corridor semantics, or vehicle clearance
-7. do not rerun R6B until this upstream conflict is resolved
+1. local pytest occupancy-source + padding-sensitivity contracts
+2. derive vehicle_safe_lane_padding_sensitivity.yaml
+3. confirm frozen current_requested_obstacle_padding_m and effective cell radius
+4. compare six map-padding / footprint-padding cases
+5. inspect aisle_003 / 011 / 013 / 015 / 016 / 020 as probes
+6. choose map-padding semantics only from the sensitivity evidence
+7. do not rerun R6B until the vehicle-safe aisle evidence is coherent
 ```
 
-Do not widen occupancy, turn UNKNOWN into FREE, or hand invalid lanes to R7 merely
-to make route generation succeed
+Do not turn UNKNOWN into FREE, erase raw obstacles, or hand invalid lanes to R7
+merely to make route generation succeed
