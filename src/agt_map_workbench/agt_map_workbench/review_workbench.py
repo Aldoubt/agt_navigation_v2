@@ -1,4 +1,4 @@
-"""Compose the stable 2D agricultural Workbench with a review-only 3D tab."""
+"""Compose the stable 2D agricultural Workbench with review-only extensions."""
 
 from __future__ import annotations
 
@@ -17,25 +17,70 @@ from agt_offline_assets import (
 
 from .agricultural_workbench import AgriculturalMapWorkbenchWindow
 from .review_3d import ThreeDReviewWidget
+from .route_debug_panel import RouteDebugPanel
 
 
 class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
-    """Keep 2D authoring authoritative and add an independent 3D review plane."""
+    """Keep 2D authoring authoritative while adding independent review planes."""
 
     def __init__(self) -> None:
         self._vehicle_corridor_result: VehicleCorridorResult | None = None
         self._review_3d: ThreeDReviewWidget | None = None
+        self._review_tabs: QTabWidget | None = None
+        self._route_debug_panel: RouteDebugPanel | None = None
+        self._route_debug_tab_index = -1
+        self._route_debug_active = False
+        self._pre_route_cloud_visible = True
+        self._pre_route_navigation_visible = False
         super().__init__()
-        self.setWindowTitle("AGT 地图工作台 — V25-12C 农业结构 + 3D 审查")
+        self._control_tabs = self._locate_control_tabs()
+        self.setWindowTitle("AGT 地图工作台 — V25-12E 农业结构 + 3D 审查 + 路径调试")
         self._install_3d_review()
         self._install_offline_asset_actions()
+        self._install_route_debug()
+
+    def _locate_control_tabs(self) -> QTabWidget:
+        """Resolve the existing right-side authoring tabs without rebuilding the base UI."""
+        expected = ["点云编辑", "坐标系标定", "导航地图"]
+        for tabs in self.findChildren(QTabWidget):
+            labels = [tabs.tabText(index) for index in range(tabs.count())]
+            if labels[:3] == expected:
+                return tabs
+        raise RuntimeError("unable to locate the existing Workbench control QTabWidget")
+
+    def _install_route_debug(self) -> None:
+        panel = RouteDebugPanel(self._scene, self._view, self)
+        self._route_debug_panel = panel
+        self._route_debug_tab_index = self._control_tabs.addTab(panel, "路径调试")
+        self._control_tabs.currentChanged.connect(self._on_control_tab_changed)
+        self._on_control_tab_changed(self._control_tabs.currentIndex())
+
+    def _on_control_tab_changed(self, index: int) -> None:
+        if self._route_debug_panel is None or self._route_debug_tab_index < 0:
+            return
+        active = int(index) == int(self._route_debug_tab_index)
+        if active == self._route_debug_active:
+            self._route_debug_panel.set_active(active)
+            return
+        if active:
+            self._pre_route_cloud_visible = bool(self._cloud_item.isVisible())
+            self._pre_route_navigation_visible = bool(self._navigation_preview_item.isVisible())
+            self._cloud_item.setVisible(False)
+            self._navigation_preview_item.setVisible(False)
+            if self._review_tabs is not None:
+                self._review_tabs.setCurrentIndex(0)
+        else:
+            self._cloud_item.setVisible(self._pre_route_cloud_visible)
+            self._navigation_preview_item.setVisible(self._pre_route_navigation_visible)
+        self._route_debug_active = active
+        self._route_debug_panel.set_active(active)
 
     def _install_3d_review(self) -> None:
         splitter = self.centralWidget()
         if not isinstance(splitter, QSplitter):
             raise RuntimeError("3D Review expects the Workbench central QSplitter")
 
-        # Avoid replacing the splitter child in place.  On some Qt5 builds an
+        # Avoid replacing the splitter child in place. On some Qt5 builds an
         # in-place replacement inherits a collapsed/zero splitter size, leaving
         # the controls visible while the whole 2D/3D review plane appears missing.
         old_sizes = splitter.sizes()
@@ -71,6 +116,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         tabs.setCurrentIndex(0)
         old_view.show()
         tabs.show()
+        self._review_tabs = tabs
         self._review_3d = review
 
         if self._cloud is not None:
@@ -193,7 +239,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         navigation = self._navigation_result
         if vehicle is not None and navigation is not None:
             # Review the complete requested vehicle envelope, not only the part
-            # clipped by the refined aisle.  This makes geometric intrusion
+            # clipped by the refined aisle. This makes geometric intrusion
             # visible instead of hiding the unsafe part of the requested width.
             self._review_3d.canvas.set_layer_xyz(
                 "vehicle_corridor",
