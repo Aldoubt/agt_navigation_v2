@@ -85,12 +85,14 @@ def test_route_debug_controller_preserves_child_selection_and_world_y_flip():
 
 
 def test_route_debug_controller_hides_owned_layers_when_inactive():
-    _qapp()
+    app = _qapp()
     scene = QGraphicsScene()
     controller = RouteDebugSceneController(scene)
     controller.set_content(_dataset(), _overlay())
     controller.set_active(True)
+    app.processEvents()
     assert controller._groups["structure.aisles"].isVisible()
 
     controller.set_active(False)
+    app.processEvents()
     assert not controller._groups["structure.aisles"].isVisible()
