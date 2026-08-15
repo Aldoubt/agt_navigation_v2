@@ -198,6 +198,16 @@ from .route_debug_overlay import (
     build_route_debug_overlay,
     write_route_debug_overlay,
 )
+from .site_boundary import (
+    SITE_BOUNDARY_SCHEMA,
+    SITE_BOUNDARY_SEMANTICS,
+    SiteBoundary,
+    load_site_boundary,
+    polygon_strictly_inside_site_boundary,
+    rasterize_site_boundary,
+    validate_site_boundary,
+    write_site_boundary,
+)
 
 __all__ = [
     "AssetContractError",
@@ -363,4 +373,12 @@ __all__ = [
     "build_route_debug_overlay",
     "load_route_debug_dataset",
     "write_route_debug_overlay",
+    "SITE_BOUNDARY_SCHEMA",
+    "SITE_BOUNDARY_SEMANTICS",
+    "SiteBoundary",
+    "validate_site_boundary",
+    "load_site_boundary",
+    "write_site_boundary",
+    "rasterize_site_boundary",
+    "polygon_strictly_inside_site_boundary",
 ]
