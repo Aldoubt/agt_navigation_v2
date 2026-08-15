@@ -5,13 +5,25 @@ import numpy as np
 import pytest
 
 from agt_offline_assets.agricultural_aisle_graph import AislePrimitive, AgriculturalAisleGraph
+from agt_offline_assets.forward_connector import ForwardConnectorSample
+from agt_offline_assets.forward_connector_navigation_gate import (
+    _preview_local_footprint,
+    _transform_polygon,
+)
 from agt_offline_assets.navigation_grid import NavigationGridEvidence
 from agt_offline_assets.navigation_map_derivation import FREE, OCCUPIED
+from agt_offline_assets.site_boundary import (
+    SiteBoundary,
+    polygon_strictly_inside_site_boundary,
+)
 from agt_offline_assets.vehicle_feasible_segment import (
     HIGH_U_HEADLAND,
     INTERIOR_BLOCKED_END,
     LOW_U_HEADLAND,
     derive_vehicle_feasible_segment_plan,
+)
+from agt_offline_assets.vehicle_lane_feasibility import (
+    derive_vehicle_lane_feasibility_trace,
 )
 from agt_offline_assets.vehicle_profile import CanonicalVehicleProfile
 from agt_offline_assets.vehicle_safe_lane import VehicleSafeLaneConfig
@@ -115,6 +127,20 @@ def _navigation_with_blocked_x_ranges(ranges):
     )
 
 
+def _navigation_with_centerline_strip():
+    navigation = _navigation_with_blocked_x_ranges(())
+    occupancy = navigation.occupancy.copy()
+    resolution = float(navigation.resolution_m)
+    y0, y1 = -0.05, 0.05
+    x0, x1 = -0.5, 5.5
+    r0 = int(math.floor((y0 - navigation.origin_y_m) / resolution))
+    r1 = int(math.ceil((y1 - navigation.origin_y_m) / resolution))
+    c0 = int(math.floor((x0 - navigation.origin_x_m) / resolution))
+    c1 = int(math.ceil((x1 - navigation.origin_x_m) / resolution))
+    occupancy[r0 : r1 + 1, c0 : c1 + 1] = OCCUPIED
+    return replace(navigation, occupancy=occupancy)
+
+
 def _config(*, minimum_contiguous_span_m=1.0):
     return VehicleSafeLaneConfig(
         sample_spacing_m=0.10,
@@ -125,6 +151,13 @@ def _config(*, minimum_contiguous_span_m=1.0):
         minimum_lane_coverage_fraction=0.70,
         maximum_endpoint_retreat_m=1.0,
         minimum_contiguous_span_m=float(minimum_contiguous_span_m),
+    )
+
+
+def _large_boundary():
+    return SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((-2.0, -2.0), (7.0, -2.0), (7.0, 2.0), (-2.0, 2.0)),
     )
 
 
@@ -187,3 +220,171 @@ def test_frame_mismatch_fails_closed_before_segment_generation():
             _vehicle(),
             _config(minimum_contiguous_span_m=1.0),
         )
+
+
+def test_preview_not_ready_vehicle_fails_closed():
+    vehicle = replace(_vehicle(), preview_planning_enabled=False)
+    with pytest.raises(ValueError, match="not ready for planning preview"):
+        derive_vehicle_feasible_segment_plan(
+            _graph(),
+            _navigation_with_blocked_x_ranges(()),
+            vehicle,
+            _config(),
+        )
+
+
+def test_invalid_site_boundary_fails_closed():
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((0.0, 0.0), (1.0, 0.0), (2.0, 0.0)),
+    )
+    with pytest.raises(ValueError, match="site_boundary"):
+        derive_vehicle_feasible_segment_plan(
+            _graph(),
+            _navigation_with_blocked_x_ranges(()),
+            _vehicle(),
+            _config(),
+            site_boundary=boundary,
+        )
+
+
+def test_nonfinite_aisle_geometry_fails_closed():
+    aisle = replace(
+        _aisle(),
+        centerline_xyz=((0.0, 0.0, 0.0), (float("nan"), 0.0, 0.0)),
+    )
+    graph = replace(_graph(), aisles=(aisle,))
+    with pytest.raises(ValueError, match="non-finite"):
+        derive_vehicle_feasible_segment_plan(
+            graph,
+            _navigation_with_blocked_x_ranges(()),
+            _vehicle(),
+            _config(),
+        )
+
+
+def test_structural_width_gate_emits_zero_segments_with_reason():
+    plan = derive_vehicle_feasible_segment_plan(
+        _graph(width=0.65),
+        _navigation_with_blocked_x_ranges(()),
+        _vehicle(),
+        _config(),
+    )
+    aisle = plan.aisles[0]
+    assert aisle.active_segments == ()
+    assert aisle.rejected_fragments == ()
+    assert aisle.raw_feasible_fragment_count == 0
+    assert aisle.allowed_lateral_shift_m == 0.0
+    assert aisle.reason == (
+        "STRUCTURAL_WIDTH_BELOW_PREVIEW_VEHICLE_WIDTH: "
+        "aisle=0.650 m required=0.700 m"
+    )
+
+
+def test_site_boundary_clipping_keeps_every_emitted_pose_strictly_inside():
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((0.50, -1.0), (4.50, -1.0), (4.50, 1.0), (0.50, 1.0)),
+    )
+    vehicle = _vehicle()
+    config = _config()
+    plan = derive_vehicle_feasible_segment_plan(
+        _graph(),
+        _navigation_with_blocked_x_ranges(()),
+        vehicle,
+        config,
+        site_boundary=boundary,
+    )
+    aisle = plan.aisles[0]
+    assert aisle.active_segments
+    assert aisle.site_boundary_rejected_pose_count > 0
+
+    local_footprint = _preview_local_footprint(
+        vehicle,
+        config.preview_footprint_padding_m,
+    )
+    for segment in aisle.active_segments:
+        for point in segment.centerline_xyz:
+            sample = ForwardConnectorSample(
+                x=float(point[0]),
+                y=float(point[1]),
+                z=float(point[2]),
+                yaw=0.0,
+            )
+            polygon = _transform_polygon(local_footprint, sample)
+            assert polygon_strictly_inside_site_boundary(boundary, polygon)
+
+
+def test_site_boundary_can_fully_block_aisle():
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((-1.0, -0.20), (6.0, -0.20), (6.0, 0.20), (-1.0, 0.20)),
+    )
+    plan = derive_vehicle_feasible_segment_plan(
+        _graph(),
+        _navigation_with_blocked_x_ranges(()),
+        _vehicle(),
+        _config(),
+        site_boundary=boundary,
+    )
+    aisle = plan.aisles[0]
+    assert aisle.active_segments == ()
+    assert aisle.raw_feasible_fragment_count == 0
+    assert aisle.site_boundary_rejected_pose_count > 0
+    assert aisle.site_boundary_limited_sample_count > 0
+
+
+def test_all_navigation_poses_blocked_emits_zero_segments():
+    plan = derive_vehicle_feasible_segment_plan(
+        _graph(),
+        _navigation_with_blocked_x_ranges(((-0.50, 5.50),)),
+        _vehicle(),
+        _config(),
+    )
+    aisle = plan.aisles[0]
+    assert aisle.active_segments == ()
+    assert aisle.rejected_fragments == ()
+    assert aisle.raw_feasible_fragment_count == 0
+    assert aisle.grid_rejected_pose_count > 0
+
+
+def test_lateral_shift_segment_preserves_shared_trace_selection():
+    graph = _graph()
+    navigation = _navigation_with_centerline_strip()
+    vehicle = _vehicle()
+    config = _config()
+    trace = derive_vehicle_lane_feasibility_trace(
+        graph.aisles[0],
+        navigation,
+        vehicle,
+        config,
+        row_direction_xy=graph.row_direction_xy,
+    )
+    plan = derive_vehicle_feasible_segment_plan(
+        graph,
+        navigation,
+        vehicle,
+        config,
+    )
+    segment = plan.aisles[0].active_segments[0]
+    expected_offsets = tuple(
+        float(value) for value in trace.selected_offsets_m if value is not None
+    )
+    assert segment.lateral_offsets_m == expected_offsets
+    assert segment.maximum_used_lateral_shift_m >= 0.30
+
+
+def test_repeated_derivation_is_deterministic():
+    args = (
+        _graph(length_m=5.0),
+        _navigation_with_blocked_x_ranges(((2.20, 2.80),)),
+        _vehicle(),
+        _config(minimum_contiguous_span_m=1.0),
+    )
+    first = derive_vehicle_feasible_segment_plan(*args, site_boundary=_large_boundary())
+    second = derive_vehicle_feasible_segment_plan(*args, site_boundary=_large_boundary())
+    assert first == second
+    assert [segment.segment_id for segment in first.aisles[0].active_segments] == [
+        "aisle_001.segment_001",
+        "aisle_001.segment_002",
+    ]
