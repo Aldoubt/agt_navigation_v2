@@ -130,6 +130,34 @@ def test_all_free_structural_centerline_remains_vehicle_safe_lane():
     assert lane.site_boundary_limited_sample_count == 0
 
 
+def test_large_site_boundary_does_not_change_lane_solution():
+    baseline = derive_vehicle_safe_lane_plan(
+        _graph(),
+        _navigation(),
+        _vehicle(),
+        _config(),
+    ).lanes[0]
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((-2.0, -2.0), (6.0, -2.0), (6.0, 2.0), (-2.0, 2.0)),
+    )
+    bounded = derive_vehicle_safe_lane_plan(
+        _graph(),
+        _navigation(),
+        _vehicle(),
+        _config(),
+        site_boundary=boundary,
+    ).lanes[0]
+
+    assert bounded.status == baseline.status
+    assert bounded.coverage_fraction == baseline.coverage_fraction
+    assert bounded.selected_span_m == baseline.selected_span_m
+    assert bounded.centerline_xyz == baseline.centerline_xyz
+    assert bounded.lateral_offsets_m == baseline.lateral_offsets_m
+    assert bounded.site_boundary_rejected_pose_count == 0
+    assert bounded.site_boundary_limited_sample_count == 0
+
+
 def test_wide_aisle_can_shift_laterally_around_centerline_conflict():
     plan = derive_vehicle_safe_lane_plan(
         _graph(width=1.60),
