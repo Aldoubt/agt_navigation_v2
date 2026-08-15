@@ -51,6 +51,7 @@ if(BUILD_TESTING)
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_workbench_model test/test_workbench_model.py)
   ament_add_pytest_test(test_frame_calibration test/test_frame_calibration.py)
+  ament_add_pytest_test(test_route_debug_view test/test_route_debug_view.py)
 endif()
 
 ament_package()
