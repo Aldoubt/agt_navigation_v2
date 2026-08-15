@@ -5,7 +5,12 @@ import numpy as np
 from agt_offline_assets.agricultural_aisle_graph import AislePrimitive, AgriculturalAisleGraph
 from agt_offline_assets.navigation_grid import NavigationGridEvidence
 from agt_offline_assets.navigation_map_derivation import FREE, OCCUPIED
-from agt_offline_assets.vehicle_feasible_segment import derive_vehicle_feasible_segment_plan
+from agt_offline_assets.vehicle_feasible_segment import (
+    HIGH_U_HEADLAND,
+    INTERIOR_BLOCKED_END,
+    LOW_U_HEADLAND,
+    derive_vehicle_feasible_segment_plan,
+)
 from agt_offline_assets.vehicle_profile import CanonicalVehicleProfile
 from agt_offline_assets.vehicle_safe_lane import VehicleSafeLaneConfig
 
@@ -153,3 +158,18 @@ def test_short_feasible_run_is_preserved_only_as_rejected_fragment():
     assert fragment.fragment_id == "aisle_001.fragment_001"
     assert fragment.length_m < 1.0
     assert fragment.reason == "BELOW_MINIMUM_USEFUL_SEGMENT_LENGTH"
+
+
+def test_only_outer_active_segment_endpoints_are_headland_candidates():
+    plan = derive_vehicle_feasible_segment_plan(
+        _graph(length_m=5.0),
+        _navigation_with_blocked_x_ranges(((2.20, 2.80),)),
+        _vehicle(),
+        _config(minimum_contiguous_span_m=1.0),
+    )
+    first, second = plan.aisles[0].active_segments
+
+    assert first.low_endpoint_type == LOW_U_HEADLAND
+    assert first.high_endpoint_type == INTERIOR_BLOCKED_END
+    assert second.low_endpoint_type == INTERIOR_BLOCKED_END
+    assert second.high_endpoint_type == HIGH_U_HEADLAND
