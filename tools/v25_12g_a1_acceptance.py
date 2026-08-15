@@ -17,6 +17,7 @@ from agt_offline_assets.navigation_grid import load_navigation_grid
 from agt_offline_assets.site_boundary import load_site_boundary
 from agt_offline_assets.vehicle_feasible_segment import (
     derive_vehicle_feasible_segment_plan,
+    write_vehicle_feasible_segment_plan,
 )
 from agt_offline_assets.vehicle_profile import load_canonical_vehicle_profile
 from agt_offline_assets.vehicle_safe_lane import (
@@ -278,14 +279,20 @@ def _emit_report(report: dict[str, object], *, pretty: bool) -> None:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the frozen A1 longest-only versus all-segment diagnostic comparison."""
     args = build_parser().parse_args(argv)
-    graph, boundary, navigation, vehicle, cfg, _segment_output = _load_frozen_inputs(args)
-    _lane_plan, _segment_plan, lanes, segments = _derive_comparable_plans(
+    graph, boundary, navigation, vehicle, cfg, segment_output = _load_frozen_inputs(args)
+    _lane_plan, segment_plan, lanes, segments = _derive_comparable_plans(
         graph,
         boundary,
         navigation,
         vehicle,
         cfg,
     )
+    if args.write_segments:
+        write_vehicle_feasible_segment_plan(
+            segment_plan,
+            segment_output,
+            overwrite=bool(args.overwrite_segments),
+        )
     report = _build_report(args, graph, vehicle, cfg, lanes, segments)
     _emit_report(report, pretty=bool(args.pretty))
     return 0
