@@ -3,9 +3,12 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import QApplication, QGraphicsScene
 
+from agt_offline_assets import FREE, NavigationGridEvidence, TraversabilityConfig, TraversabilityEvidence
+from agt_offline_assets.route_debug_12f import RouteDebug12FBundle
 from agt_offline_assets.route_debug_dataset import RouteDebugDataset
 from agt_map_workbench.route_debug_view import RouteDebugSceneController
 
@@ -27,6 +30,40 @@ def _dataset() -> RouteDebugDataset:
         connector_requests=(),
         connectors=(),
         occupancy_source_masks=None,
+        asset_states=(),
+    )
+
+
+def _bundle() -> RouteDebug12FBundle:
+    occupancy = np.full((3, 4), FREE, dtype=np.uint8)
+    navigation = NavigationGridEvidence(
+        resolution_m=0.10,
+        origin_x_m=0.0,
+        origin_y_m=0.0,
+        width=4,
+        height=3,
+        occupancy=occupancy,
+        frame_id="map",
+    )
+    inferred = np.zeros((3, 4), dtype=bool)
+    inferred[1, 2] = True
+    evidence = TraversabilityEvidence(
+        frame_id="map",
+        observed_free_mask=~inferred,
+        inferred_traversable_mask=inferred,
+        hard_blocked_mask=np.zeros((3, 4), dtype=bool),
+        sensor_obstacle_mask=np.zeros((3, 4), dtype=bool),
+        unknown_mask=np.zeros((3, 4), dtype=bool),
+        semantic_no_go_mask=np.zeros((3, 4), dtype=bool),
+        aisle_geometric_envelope_mask=np.ones((3, 4), dtype=bool),
+        config=TraversabilityConfig(),
+    )
+    return RouteDebug12FBundle(
+        run_dir=Path("."),
+        frame_id="map",
+        candidate_navigation=navigation,
+        site_boundary=None,
+        traversability=evidence,
         asset_states=(),
     )
 
@@ -98,3 +135,21 @@ def test_route_debug_controller_hides_owned_layers_when_inactive():
     controller.set_active(False)
     app.processEvents()
     assert not controller._groups["structure.aisles"].isVisible()
+
+
+def test_route_debug_12f_bundle_adds_candidate_and_inferred_raster_layers():
+    app = _qapp()
+    scene = QGraphicsScene()
+    controller = RouteDebugSceneController(scene)
+    controller.set_content(_dataset(), _overlay())
+    controller.set_12f_content(_bundle())
+    controller.set_active(True)
+    controller.apply_preset("12f")
+    app.processEvents()
+
+    assert controller.layer_available("base.navigation_12f")
+    assert controller.layer_available("traversability.inferred")
+    assert controller.layer_available("traversability.aisle_geometric_envelope")
+    assert controller.layer_visible("base.navigation_12f")
+    assert controller.layer_visible("traversability.inferred")
+    assert not controller.layer_visible("motion.reverse")
