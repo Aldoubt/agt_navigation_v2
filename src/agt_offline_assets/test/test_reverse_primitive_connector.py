@@ -15,6 +15,7 @@ from agt_offline_assets.reverse_primitive_connector import (
     derive_reverse_primitive_connector_plan,
     reverse_primitive_connector_plan_to_dict,
 )
+from agt_offline_assets.site_boundary import SiteBoundary
 from agt_offline_assets.turn_zones import TurnZone, TurnZoneSet
 from agt_offline_assets.vehicle_profile import CanonicalVehicleProfile
 
@@ -165,3 +166,23 @@ def test_occupied_start_fails_closed_and_serialization_keeps_preview_boundary():
     assert payload["status"] == "DRAFT"
     assert payload["connectors"][0]["validation_scope"] == "PREVIEW_ONLY_NOT_R8_VEHICLE_READY"
     assert "NOT_ANALYTIC_REEDS_SHEPP" in payload["connectors"][0]["backend"]
+
+
+def test_start_center_inside_but_footprint_touching_boundary_fails_before_search():
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((-0.10, -1.0), (1.0, -1.0), (1.0, 1.0), (-0.10, 1.0)),
+    )
+    plan = derive_reverse_primitive_connector_plan(
+        (_request(),),
+        _admission("connector_002"),
+        _zones(),
+        _grid(),
+        _vehicle(),
+        site_boundary=boundary,
+    )
+    result = plan.connectors[0]
+    assert result.status == "SITE_BOUNDARY_CONFLICT"
+    assert result.search_expansions == 0
+    assert result.samples == ()
+    assert "site boundary" in result.reason.lower()
