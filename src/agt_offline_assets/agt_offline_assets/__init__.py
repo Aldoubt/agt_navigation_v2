@@ -209,10 +209,13 @@ from .site_boundary import (
     write_site_boundary,
 )
 from .traversability import (
+    TRAVERSABILITY_DERIVATION_SCHEMA,
     TRAVERSABILITY_EVIDENCE_SCHEMA,
     TraversabilityConfig,
     TraversabilityEvidence,
     derive_traversability_evidence,
+    load_traversability_evidence,
+    write_traversability_candidate,
 )
 
 __all__ = [
@@ -388,7 +391,10 @@ __all__ = [
     "rasterize_site_boundary",
     "polygon_strictly_inside_site_boundary",
     "TRAVERSABILITY_EVIDENCE_SCHEMA",
+    "TRAVERSABILITY_DERIVATION_SCHEMA",
     "TraversabilityConfig",
     "TraversabilityEvidence",
     "derive_traversability_evidence",
+    "load_traversability_evidence",
+    "write_traversability_candidate",
 ]
