@@ -356,6 +356,48 @@ footprint 0.05 alone causes the drop
 → preview envelope margin is the primary issue
 ```
 
+## Route Debug 2D
+
+```text
+CORE IMPLEMENTED / LOCAL ACCEPTANCE PENDING
+```
+
+Route Debug is a read-only 2D explainability layer inside the existing AGT Map
+Workbench. It joins frozen Navigation Map, structural aisle, Coverage, forward,
+R6A/R6B, vehicle-safe-lane and occupancy-source evidence into one shared map
+without rerunning route production in the GUI
+
+```text
+No production map/route semantics changed
+```
+
+The only run-directory artifact Route Debug may create or replace is:
+
+```text
+route_debug_overlay.geojson
+schema agt_route_debug_overlay/v1
+validation_scope DEBUG_RENDER_ONLY
+```
+
+Current intended inspection targets remain the frozen real-data baselines:
+
+```text
+aisle_005  structural width rejection
+aisle_003  RAW obstacle / footprint conflict probe
+aisle_013  PADDING_ONLY / footprint conflict probe
+connector_015  FORWARD → REVERSE → FORWARD, 2 cusps
+connector_017  R6A admitted, R6B searched, no preview solution
+```
+
+`NO_GO` is rendered as semantic operator exclusion evidence and remains visually
+separate from physical `OCCUPIED`
+
+Missing optional debug assets degrade to unavailable layers; invalid schema or
+incompatible frame evidence must fail closed for that layer
+
+Do not write `REAL-DATA OPERATOR ACCEPTANCE PASS` until the greenhouse visual
+smoke checklist is actually completed on the operator machine
+
 ## Current architecture boundary
 
 ```text
