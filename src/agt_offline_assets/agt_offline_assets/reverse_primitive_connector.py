@@ -1,20 +1,20 @@
 """R6B bounded reverse-aware local connector preview for agricultural aisles.
 
-This backend is deliberately *not* labelled analytic Reeds-Shepp.  It performs a
+This backend is deliberately not labelled analytic Reeds-Shepp. It performs a
 bounded deterministic search over Ackermann motion primitives inside one known
-aisle-pair headland neighborhood.  The search may use FORWARD and REVERSE motion
-with explicit cusp actions, respects the canonical minimum turning radius, and
-fails closed on OCCUPIED / UNKNOWN / out-of-grid Navigation Grid evidence.
+aisle-pair headland neighborhood and may use FORWARD/REVERSE with explicit cusp
+actions.
 
-R6B consumes only connector IDs admitted by the R6A reverse-fallback gate.  It
-is still preview evidence because MK-mini's exact on-vehicle ``base_footprint``
-reference has not been physically verified.  R8 remains the formal vehicle
-swept-footprint / Route-READY gate.
+V25-12F adds an optional hard Site Boundary invariant. Every preview footprint,
+including the start pose, primitive samples, and forward goal-shot samples, must
+remain strictly inside the vehicle-permitted inner perimeter. This is enforced
+in addition to the existing FREE-only Navigation Grid gate; no R6B search
+parameter is relaxed.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 import heapq
 import math
 from pathlib import Path
@@ -39,12 +39,15 @@ from .forward_connector_navigation_gate import (
 from .navigation_grid import NavigationGridEvidence
 from .navigation_map_derivation import FREE
 from .reverse_fallback_admission import ReverseFallbackAdmissionPlan
+from .site_boundary import SiteBoundary, polygon_strictly_inside_site_boundary
 from .turn_zones import TurnZone, TurnZoneSet, _points_inside_polygon
 from .vehicle_profile import CanonicalVehicleProfile
 
 
 REVERSE_PRIMITIVE_CONNECTOR_SCHEMA = "agt_reverse_primitive_connector_plan/v1"
-REVERSE_PRIMITIVE_BACKEND = "BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP"
+REVERSE_PRIMITIVE_BACKEND = (
+    "BOUNDED_REVERSE_PRIMITIVE_SEARCH_NOT_ANALYTIC_REEDS_SHEPP"
+)
 
 
 @dataclass(frozen=True)
@@ -144,7 +147,10 @@ class ReversePrimitiveConnectorPlan:
 
     @property
     def solved_count(self) -> int:
-        return sum(item.status == "REVERSE_PRIMITIVE_PREVIEW_FREE" for item in self.connectors)
+        return sum(
+            item.status == "REVERSE_PRIMITIVE_PREVIEW_FREE"
+            for item in self.connectors
+        )
 
     @property
     def unsolved_count(self) -> int:
@@ -213,44 +219,88 @@ def _inside_search_envelope(
     return u0 <= pu <= u1 and v0 <= pv <= v1
 
 
+def _preview_pose_status(
+    x: float,
+    y: float,
+    yaw: float,
+    navigation: NavigationGridEvidence,
+    local_footprint: tuple[tuple[float, float], ...],
+    site_boundary: SiteBoundary | None = None,
+) -> str:
+    probe = ForwardConnectorSample(
+        x=float(x),
+        y=float(y),
+        z=0.0,
+        yaw=float(yaw),
+    )
+    polygon = _transform_polygon(local_footprint, probe)
+    if site_boundary is not None and not polygon_strictly_inside_site_boundary(
+        site_boundary,
+        polygon,
+    ):
+        return "SITE_BOUNDARY_CONFLICT"
+
+    poly = np.asarray(polygon, dtype=np.float64)
+    px0, py0 = np.min(poly, axis=0)
+    px1, py1 = np.max(poly, axis=0)
+    min_x, min_y, max_x, max_y = navigation.bounds_m()
+    if px0 < min_x or py0 < min_y or px1 > max_x or py1 > max_y:
+        return "GRID_NOT_FREE"
+
+    resolution = float(navigation.resolution_m)
+    col0 = max(
+        0,
+        int(math.floor((float(px0) - navigation.origin_x_m) / resolution)),
+    )
+    col1 = min(
+        navigation.width - 1,
+        int(math.floor((float(px1) - navigation.origin_x_m) / resolution)),
+    )
+    row0 = max(
+        0,
+        int(math.floor((float(py0) - navigation.origin_y_m) / resolution)),
+    )
+    row1 = min(
+        navigation.height - 1,
+        int(math.floor((float(py1) - navigation.origin_y_m) / resolution)),
+    )
+    if row0 > row1 or col0 > col1:
+        return "GRID_NOT_FREE"
+
+    rows, cols = np.indices(
+        (row1 - row0 + 1, col1 - col0 + 1),
+        dtype=np.float64,
+    )
+    xx = navigation.origin_x_m + (cols + col0 + 0.5) * resolution
+    yy = navigation.origin_y_m + (rows + row0 + 0.5) * resolution
+    inside = _points_inside_polygon(xx, yy, polygon)
+    if not bool(np.any(inside)):
+        return "GRID_NOT_FREE"
+    cells = navigation.occupancy[row0 : row1 + 1, col0 : col1 + 1][inside]
+    if cells.size <= 0 or not np.all(cells == FREE):
+        return "GRID_NOT_FREE"
+    return "FREE"
+
+
 def _preview_pose_free(
     x: float,
     y: float,
     yaw: float,
     navigation: NavigationGridEvidence,
     local_footprint: tuple[tuple[float, float], ...],
+    site_boundary: SiteBoundary | None = None,
 ) -> bool:
-    probe = ForwardConnectorSample(x=float(x), y=float(y), z=0.0, yaw=float(yaw))
-    polygon = _transform_polygon(local_footprint, probe)
-    poly = np.asarray(polygon, dtype=np.float64)
-    px0, py0 = np.min(poly, axis=0)
-    px1, py1 = np.max(poly, axis=0)
-    min_x, min_y, max_x, max_y = navigation.bounds_m()
-    if px0 < min_x or py0 < min_y or px1 > max_x or py1 > max_y:
-        return False
-
-    resolution = float(navigation.resolution_m)
-    col0 = max(0, int(math.floor((float(px0) - navigation.origin_x_m) / resolution)))
-    col1 = min(
-        navigation.width - 1,
-        int(math.floor((float(px1) - navigation.origin_x_m) / resolution)),
+    return (
+        _preview_pose_status(
+            x,
+            y,
+            yaw,
+            navigation,
+            local_footprint,
+            site_boundary,
+        )
+        == "FREE"
     )
-    row0 = max(0, int(math.floor((float(py0) - navigation.origin_y_m) / resolution)))
-    row1 = min(
-        navigation.height - 1,
-        int(math.floor((float(py1) - navigation.origin_y_m) / resolution)),
-    )
-    if row0 > row1 or col0 > col1:
-        return False
-
-    rows, cols = np.indices((row1 - row0 + 1, col1 - col0 + 1), dtype=np.float64)
-    xx = navigation.origin_x_m + (cols + col0 + 0.5) * resolution
-    yy = navigation.origin_y_m + (rows + row0 + 0.5) * resolution
-    inside = _points_inside_polygon(xx, yy, polygon)
-    if not bool(np.any(inside)):
-        return False
-    cells = navigation.occupancy[row0 : row1 + 1, col0 : col1 + 1][inside]
-    return bool(cells.size > 0 and np.all(cells == FREE))
 
 
 def _integrate_primitive(
@@ -279,7 +329,10 @@ def _integrate_primitive(
     return tuple(output)
 
 
-def _state_key(node: _SearchNode, cfg: ReversePrimitiveConnectorConfig) -> tuple[int, ...]:
+def _state_key(
+    node: _SearchNode,
+    cfg: ReversePrimitiveConnectorConfig,
+) -> tuple[int, ...]:
     yaw_resolution = math.radians(cfg.state_yaw_resolution_deg)
     yaw_index = int(round(_wrap_pi(node.yaw) / yaw_resolution))
     return (
@@ -292,15 +345,25 @@ def _state_key(node: _SearchNode, cfg: ReversePrimitiveConnectorConfig) -> tuple
     )
 
 
-def _heuristic(node: _SearchNode, goal_pose: tuple[float, float, float, float], radius: float) -> float:
+def _heuristic(
+    node: _SearchNode,
+    goal_pose: tuple[float, float, float, float],
+    radius: float,
+) -> float:
     dx = float(goal_pose[0] - node.x)
     dy = float(goal_pose[1] - node.y)
     yaw_error = abs(_wrap_pi(float(goal_pose[3] - node.yaw)))
     return math.hypot(dx, dy) + 0.20 * radius * yaw_error
 
 
-def _goal_error(node: _SearchNode, goal_pose: tuple[float, float, float, float]) -> tuple[float, float]:
-    position = math.hypot(float(goal_pose[0] - node.x), float(goal_pose[1] - node.y))
+def _goal_error(
+    node: _SearchNode,
+    goal_pose: tuple[float, float, float, float],
+) -> tuple[float, float]:
+    position = math.hypot(
+        float(goal_pose[0] - node.x),
+        float(goal_pose[1] - node.y),
+    )
     yaw = abs(_wrap_pi(float(goal_pose[3] - node.yaw)))
     return position, yaw
 
@@ -310,11 +373,19 @@ def _edge_is_free(
     bounds,
     navigation: NavigationGridEvidence,
     local_footprint,
+    site_boundary: SiteBoundary | None = None,
 ) -> bool:
     for x, y, yaw, _direction, _curvature, _is_cusp in samples:
         if not _inside_search_envelope(x, y, bounds):
             return False
-        if not _preview_pose_free(x, y, yaw, navigation, local_footprint):
+        if not _preview_pose_free(
+            x,
+            y,
+            yaw,
+            navigation,
+            local_footprint,
+            site_boundary,
+        ):
             return False
     return True
 
@@ -327,10 +398,14 @@ def _try_forward_goal_shot(
     bounds,
     navigation: NavigationGridEvidence,
     local_footprint,
+    site_boundary: SiteBoundary | None = None,
 ) -> tuple[tuple[tuple[float, float, float, int, float, bool], ...], float] | None:
     if node.direction != 1:
         return None
-    distance = math.hypot(request.goal_pose[0] - node.x, request.goal_pose[1] - node.y)
+    distance = math.hypot(
+        request.goal_pose[0] - node.x,
+        request.goal_pose[1] - node.y,
+    )
     if distance > cfg.goal_shot_distance_m:
         return None
     start = (node.x, node.y, request.start_pose[2], node.yaw)
@@ -350,7 +425,13 @@ def _try_forward_goal_shot(
             (float(s.x), float(s.y), float(s.yaw), 1, 0.0, False)
             for s in sampled[1:]
         )
-        if _edge_is_free(converted, bounds, navigation, local_footprint):
+        if _edge_is_free(
+            converted,
+            bounds,
+            navigation,
+            local_footprint,
+            site_boundary,
+        ):
             return converted, float(length_m)
     return None
 
@@ -386,7 +467,11 @@ def _finalize_samples(
     distances = [0.0]
     for previous, current in zip(combined[:-1], combined[1:]):
         distances.append(
-            distances[-1] + math.hypot(float(current[0] - previous[0]), float(current[1] - previous[1]))
+            distances[-1]
+            + math.hypot(
+                float(current[0] - previous[0]),
+                float(current[1] - previous[1]),
+            )
         )
     total = distances[-1]
     z0 = float(request.start_pose[2])
@@ -413,16 +498,26 @@ def _finalize_samples(
     return tuple(output)
 
 
-def _path_metrics(samples: tuple[ReversePrimitiveSample, ...]) -> tuple[float, float, float, int]:
+def _path_metrics(
+    samples: tuple[ReversePrimitiveSample, ...],
+) -> tuple[float, float, float, int]:
     forward = 0.0
     reverse = 0.0
     for previous, current in zip(samples[:-1], samples[1:]):
-        distance = math.hypot(current.x - previous.x, current.y - previous.y)
+        distance = math.hypot(
+            current.x - previous.x,
+            current.y - previous.y,
+        )
         if current.motion_direction == "REVERSE":
             reverse += distance
         else:
             forward += distance
-    return forward + reverse, forward, reverse, sum(sample.is_cusp for sample in samples)
+    return (
+        forward + reverse,
+        forward,
+        reverse,
+        sum(sample.is_cusp for sample in samples),
+    )
 
 
 def _path_evidence(
@@ -443,6 +538,35 @@ def _path_evidence(
     return _evaluate_candidate(forward_samples, navigation, local_footprint)
 
 
+def _boundary_conflict_result(
+    request: ConnectorRequest,
+    radius: float,
+) -> ReversePrimitiveConnectorResult:
+    return ReversePrimitiveConnectorResult(
+        connector_id=request.connector_id,
+        from_aisle_id=request.from_aisle_id,
+        to_aisle_id=request.to_aisle_id,
+        turn_zone_id=request.turn_zone_id,
+        status="SITE_BOUNDARY_CONFLICT",
+        backend=REVERSE_PRIMITIVE_BACKEND,
+        minimum_turning_radius_m=radius,
+        samples=(),
+        path_length_m=None,
+        forward_distance_m=0.0,
+        reverse_distance_m=0.0,
+        cusp_count=0,
+        search_expansions=0,
+        goal_position_error_m=None,
+        goal_yaw_error_rad=None,
+        centerline_evidence=_empty_evidence(),
+        footprint_evidence=_empty_evidence(),
+        reason=(
+            "start preview footprint touches or crosses the Site Boundary; "
+            "the vehicle-permitted inner perimeter is a hard constraint"
+        ),
+    )
+
+
 def _search_one(
     request: ConnectorRequest,
     zone: TurnZone,
@@ -450,9 +574,13 @@ def _search_one(
     navigation: NavigationGridEvidence,
     vehicle: CanonicalVehicleProfile,
     cfg: ReversePrimitiveConnectorConfig,
+    site_boundary: SiteBoundary | None = None,
 ) -> ReversePrimitiveConnectorResult:
     radius = float(vehicle.minimum_turning_radius_m)
-    local_footprint = _preview_local_footprint(vehicle, cfg.preview_footprint_padding_m)
+    local_footprint = _preview_local_footprint(
+        vehicle,
+        cfg.preview_footprint_padding_m,
+    )
     bounds = _row_frame_bounds(request, zone, zones.row_direction_xy, cfg)
     start = _SearchNode(
         x=float(request.start_pose[0]),
@@ -466,7 +594,17 @@ def _search_one(
         parent_index=None,
         edge_samples=(),
     )
-    if not _preview_pose_free(start.x, start.y, start.yaw, navigation, local_footprint):
+    start_status = _preview_pose_status(
+        start.x,
+        start.y,
+        start.yaw,
+        navigation,
+        local_footprint,
+        site_boundary,
+    )
+    if start_status == "SITE_BOUNDARY_CONFLICT":
+        return _boundary_conflict_result(request, radius)
+    if start_status != "FREE":
         return ReversePrimitiveConnectorResult(
             connector_id=request.connector_id,
             from_aisle_id=request.from_aisle_id,
@@ -491,7 +629,10 @@ def _search_one(
     nodes = [start]
     queue: list[tuple[float, int, int]] = []
     counter = 0
-    heapq.heappush(queue, (_heuristic(start, request.goal_pose, radius), counter, 0))
+    heapq.heappush(
+        queue,
+        (_heuristic(start, request.goal_pose, radius), counter, 0),
+    )
     best_cost = {_state_key(start, cfg): 0.0}
     expansions = 0
     goal_yaw_tol = math.radians(cfg.goal_yaw_tolerance_deg)
@@ -509,7 +650,11 @@ def _search_one(
         expansions += 1
 
         position_error, yaw_error = _goal_error(node, request.goal_pose)
-        if node.direction == 1 and position_error <= cfg.goal_position_tolerance_m and yaw_error <= goal_yaw_tol:
+        if (
+            node.direction == 1
+            and position_error <= cfg.goal_position_tolerance_m
+            and yaw_error <= goal_yaw_tol
+        ):
             solved_index = node_index
             break
 
@@ -521,6 +666,7 @@ def _search_one(
             bounds,
             navigation,
             local_footprint,
+            site_boundary,
         )
         if shot is not None:
             solved_index = node_index
@@ -538,17 +684,30 @@ def _search_one(
                 cost=node.cost + cfg.cusp_penalty_m,
                 travel_m=node.travel_m,
                 parent_index=node_index,
-                edge_samples=((node.x, node.y, node.yaw, -node.direction, 0.0, True),),
+                edge_samples=(
+                    (
+                        node.x,
+                        node.y,
+                        node.yaw,
+                        -node.direction,
+                        0.0,
+                        True,
+                    ),
+                ),
             )
             switched_key = _state_key(switched, cfg)
-            if switched.cost + 1.0e-9 < best_cost.get(switched_key, float("inf")):
+            if switched.cost + 1.0e-9 < best_cost.get(
+                switched_key,
+                float("inf"),
+            ):
                 best_cost[switched_key] = switched.cost
                 nodes.append(switched)
                 counter += 1
                 heapq.heappush(
                     queue,
                     (
-                        switched.cost + _heuristic(switched, request.goal_pose, radius),
+                        switched.cost
+                        + _heuristic(switched, request.goal_pose, radius),
                         counter,
                         len(nodes) - 1,
                     ),
@@ -563,7 +722,13 @@ def _search_one(
                 cfg.primitive_length_m,
                 cfg.collision_sample_step_m,
             )
-            if not _edge_is_free(edge, bounds, navigation, local_footprint):
+            if not _edge_is_free(
+                edge,
+                bounds,
+                navigation,
+                local_footprint,
+                site_boundary,
+            ):
                 continue
             x, y, yaw, _direction, _curvature, _cusp = edge[-1]
             motion_cost = cfg.primitive_length_m * (
@@ -587,7 +752,10 @@ def _search_one(
                 edge_samples=edge,
             )
             child_key = _state_key(child, cfg)
-            if child.cost + 1.0e-9 >= best_cost.get(child_key, float("inf")):
+            if child.cost + 1.0e-9 >= best_cost.get(
+                child_key,
+                float("inf"),
+            ):
                 continue
             best_cost[child_key] = child.cost
             nodes.append(child)
@@ -622,23 +790,43 @@ def _search_one(
             footprint_evidence=_empty_evidence(),
             reason=(
                 "bounded F/R/F primitive search found no preview-footprint-free solution; "
-                "hand this connector to R7 rather than expanding R6B into a global planner"
+                "Navigation Grid and Site Boundary gates remain fail-closed; hand this "
+                "connector to R7 rather than expanding R6B into a global planner"
             ),
         )
 
     raw = _reconstruct_raw(nodes, solved_index)
     raw.extend(solved_shot)
     samples = _finalize_samples(request, raw)
-    path_length, forward_distance, reverse_distance, cusp_count = _path_metrics(samples)
+    path_length, forward_distance, reverse_distance, cusp_count = _path_metrics(
+        samples
+    )
     final = samples[-1]
-    goal_position_error = math.hypot(request.goal_pose[0] - final.x, request.goal_pose[1] - final.y)
+    goal_position_error = math.hypot(
+        request.goal_pose[0] - final.x,
+        request.goal_pose[1] - final.y,
+    )
     goal_yaw_error = abs(_wrap_pi(request.goal_pose[3] - final.yaw))
-    centerline_evidence, footprint_evidence = _path_evidence(samples, navigation, local_footprint)
+    centerline_evidence, footprint_evidence = _path_evidence(
+        samples,
+        navigation,
+        local_footprint,
+    )
     has_reverse = reverse_distance > 1.0e-6
-    status = "REVERSE_PRIMITIVE_PREVIEW_FREE" if has_reverse else "FORWARD_PRIMITIVE_PREVIEW_FREE"
+    status = (
+        "REVERSE_PRIMITIVE_PREVIEW_FREE"
+        if has_reverse
+        else "FORWARD_PRIMITIVE_PREVIEW_FREE"
+    )
     reason = (
-        "bounded local primitive path is FREE in frozen Navigation Grid under the preview footprint assumption; "
-        "this is not analytic Reeds-Shepp and is not R8 vehicle-READY evidence"
+        "bounded local primitive path is FREE in frozen Navigation Grid"
+        + (
+            " and strictly inside the Site Boundary"
+            if site_boundary is not None
+            else ""
+        )
+        + " under the preview footprint assumption; this is not analytic Reeds-Shepp "
+        "and is not R8 vehicle-READY evidence"
     )
     return ReversePrimitiveConnectorResult(
         connector_id=request.connector_id,
@@ -670,31 +858,61 @@ def derive_reverse_primitive_connector_plan(
     vehicle: CanonicalVehicleProfile,
     config: ReversePrimitiveConnectorConfig | None = None,
     *,
+    site_boundary: SiteBoundary | None = None,
     source: Mapping[str, Any] | None = None,
 ) -> ReversePrimitiveConnectorPlan:
     """Plan bounded reverse-aware connectors for R6A-admitted IDs only."""
     cfg = config or ReversePrimitiveConnectorConfig()
     cfg.validate()
     if vehicle.kinematics != "ackermann":
-        raise ValueError("R6B reverse primitive backend currently requires Ackermann kinematics")
+        raise ValueError(
+            "R6B reverse primitive backend currently requires Ackermann kinematics"
+        )
     if not vehicle.planning_preview_ready:
-        raise ValueError(f"vehicle profile {vehicle.profile_id} is not ready for planning preview")
-    if not vehicle.minimum_turning_radius_verified or vehicle.minimum_turning_radius_m <= 0.0:
+        raise ValueError(
+            f"vehicle profile {vehicle.profile_id} is not ready for planning preview"
+        )
+    if (
+        not vehicle.minimum_turning_radius_verified
+        or vehicle.minimum_turning_radius_m <= 0.0
+    ):
         raise ValueError("R6B requires verified Ackermann minimum turning radius")
     if admission.platform_id and admission.platform_id != vehicle.profile_id:
-        raise ValueError("R6A admission platform does not match canonical vehicle profile")
+        raise ValueError(
+            "R6A admission platform does not match canonical vehicle profile"
+        )
+    if site_boundary is not None:
+        site_boundary.validate(expected_frame_id=zones.frame_id)
 
-    request_map = {request.connector_id: request for request in connector_requests}
+    request_map = {
+        request.connector_id: request for request in connector_requests
+    }
     zone_map = {zone.zone_id: zone for zone in zones.zones}
     results: list[ReversePrimitiveConnectorResult] = []
     for connector_id in admission.eligible_connector_ids:
         request = request_map.get(connector_id)
         if request is None:
-            raise ValueError(f"R6A admitted connector is missing from coverage requests: {connector_id}")
+            raise ValueError(
+                "R6A admitted connector is missing from coverage requests: "
+                f"{connector_id}"
+            )
         zone = zone_map.get(request.turn_zone_id)
         if zone is None or zone.side != request.side:
-            raise ValueError(f"R6A admitted connector has invalid Turn Zone metadata: {connector_id}")
-        results.append(_search_one(request, zone, zones, navigation, vehicle, cfg))
+            raise ValueError(
+                "R6A admitted connector has invalid Turn Zone metadata: "
+                f"{connector_id}"
+            )
+        results.append(
+            _search_one(
+                request,
+                zone,
+                zones,
+                navigation,
+                vehicle,
+                cfg,
+                site_boundary,
+            )
+        )
 
     merged_source = dict(admission.source)
     merged_source.update(dict(navigation.source))
@@ -707,6 +925,7 @@ def derive_reverse_primitive_connector_plan(
             "z_semantics": "LINEAR_ENDPOINT_INTERPOLATION_PREVIEW_ONLY",
             "max_cusps": cfg.max_cusps,
             "minimum_turning_radius_m": float(vehicle.minimum_turning_radius_m),
+            "site_boundary_enforced": site_boundary is not None,
         }
     )
     return ReversePrimitiveConnectorPlan(
@@ -731,7 +950,9 @@ def _evidence_to_dict(evidence: GridPathEvidence) -> dict[str, Any]:
     }
 
 
-def reverse_primitive_connector_plan_to_dict(plan: ReversePrimitiveConnectorPlan) -> dict[str, Any]:
+def reverse_primitive_connector_plan_to_dict(
+    plan: ReversePrimitiveConnectorPlan,
+) -> dict[str, Any]:
     return {
         "schema": plan.schema,
         "status": plan.status,
@@ -761,8 +982,12 @@ def reverse_primitive_connector_plan_to_dict(plan: ReversePrimitiveConnectorPlan
                 "search_expansions": item.search_expansions,
                 "goal_position_error_m": item.goal_position_error_m,
                 "goal_yaw_error_rad": item.goal_yaw_error_rad,
-                "centerline_evidence": _evidence_to_dict(item.centerline_evidence),
-                "preview_footprint_evidence": _evidence_to_dict(item.footprint_evidence),
+                "centerline_evidence": _evidence_to_dict(
+                    item.centerline_evidence
+                ),
+                "preview_footprint_evidence": _evidence_to_dict(
+                    item.footprint_evidence
+                ),
                 "reason": item.reason,
                 "samples": [
                     {
