@@ -10,6 +10,7 @@ from agt_offline_assets.vehicle_profile import CanonicalVehicleProfile
 from agt_offline_assets.vehicle_safe_lane import (
     VehicleSafeLaneConfig,
     derive_vehicle_safe_lane_plan,
+    vehicle_safe_lane_plan_to_dict,
 )
 
 
@@ -224,3 +225,17 @@ def test_all_free_grid_still_rejects_lane_when_footprint_crosses_site_boundary()
     assert lane.site_boundary_rejected_pose_count > 0
     assert lane.site_boundary_limited_sample_count == lane.total_sample_count
     assert "SITE_BOUNDARY_CONFLICT" in lane.reason
+
+
+def test_vehicle_safe_lane_serialization_contract_stays_stable():
+    plan = derive_vehicle_safe_lane_plan(
+        _graph(width=1.60),
+        _navigation(center_obstacle=True),
+        _vehicle(),
+        _config(),
+    )
+    payload = vehicle_safe_lane_plan_to_dict(plan)
+    assert payload["schema"] == "agt_vehicle_safe_aisle_lane/v1"
+    assert payload["summary"] == {"ready": 1, "partial": 0, "unavailable": 0}
+    assert payload["aisles"][0]["status"] == "VEHICLE_SAFE_LANE_READY"
+    assert "segments" not in payload["aisles"][0]
