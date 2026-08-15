@@ -2,8 +2,9 @@
 
 This layer consumes the shared sample-level vehicle lane feasibility trace and
 preserves every maximal contiguous feasible run that already satisfies the
-minimum useful span.  Later TDD cycles add endpoint classification without
-changing this core extraction behavior.
+minimum useful span. Rejected short fragments remain diagnostic-only, while
+endpoint classification marks only outer active-segment ends as headland
+candidates when their retreat stays inside the frozen configured bound.
 """
 
 from __future__ import annotations
@@ -160,6 +161,11 @@ def derive_vehicle_feasible_segment_plan(
             site_boundary=site_boundary,
         )
         raw_runs = _maximal_feasible_runs(trace)
+        active_raw = tuple(
+            run
+            for run in raw_runs
+            if run.length_m + 1.0e-9 >= cfg.minimum_contiguous_span_m
+        )
         active_segments: list[VehicleFeasibleSegment] = []
         rejected_fragments: list[RejectedFeasibleFragment] = []
         segment_ordinal = 0
@@ -198,6 +204,21 @@ def derive_vehicle_feasible_segment_plan(
                 if structural_length <= 1.0e-12
                 else float(run.length_m / structural_length)
             )
+            is_first_active = bool(active_raw) and run == active_raw[0]
+            is_last_active = bool(active_raw) and run == active_raw[-1]
+            low_endpoint_type = (
+                LOW_U_HEADLAND
+                if is_first_active
+                and run.start_distance_m <= cfg.maximum_endpoint_retreat_m + 1.0e-9
+                else INTERIOR_BLOCKED_END
+            )
+            high_endpoint_type = (
+                HIGH_U_HEADLAND
+                if is_last_active
+                and structural_length - run.end_distance_m
+                <= cfg.maximum_endpoint_retreat_m + 1.0e-9
+                else INTERIOR_BLOCKED_END
+            )
 
             active_segments.append(
                 VehicleFeasibleSegment(
@@ -208,8 +229,8 @@ def derive_vehicle_feasible_segment_plan(
                     end_distance_m=run.end_distance_m,
                     length_m=run.length_m,
                     coverage_fraction_of_aisle=coverage_fraction,
-                    low_endpoint_type=INTERIOR_BLOCKED_END,
-                    high_endpoint_type=INTERIOR_BLOCKED_END,
+                    low_endpoint_type=low_endpoint_type,
+                    high_endpoint_type=high_endpoint_type,
                     centerline_xyz=selected_points,
                     lateral_offsets_m=selected_offsets,
                     maximum_used_lateral_shift_m=max(
@@ -235,6 +256,8 @@ def derive_vehicle_feasible_segment_plan(
             reason = trace.structural_width_blocked_reason
         elif active_segments:
             reason = "vehicle-feasible segments extracted from maximal contiguous runs"
+        elif raw_runs:
+            reason = "all vehicle-feasible fragments are below minimum useful segment length"
         else:
             reason = "no useful preview-footprint-free vehicle segment found"
 
