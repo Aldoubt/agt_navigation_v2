@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import sys
 from pathlib import Path
 
@@ -9,6 +10,7 @@ from PyQt5.QtCore import QPointF
 from PyQt5.QtGui import QBrush, QColor, QPen, QPolygonF
 from PyQt5.QtWidgets import (
     QApplication,
+    QDoubleSpinBox,
     QFileDialog,
     QGraphicsPolygonItem,
     QHBoxLayout,
@@ -25,19 +27,33 @@ from PyQt5.QtWidgets import (
 from agt_offline_assets import (
     AisleGraphConfig,
     SiteBoundary,
+    TraversabilityConfig,
+    TraversabilityEvidence,
     VehicleCorridorConfig,
     VehicleCorridorResult,
     derive_agricultural_aisle_graph,
+    derive_traversability_evidence,
     derive_vehicle_corridor,
     load_site_boundary,
     validate_site_boundary,
     write_agricultural_aisle_graph,
     write_site_boundary,
+    write_traversability_candidate,
 )
 
 from .agricultural_workbench import AgriculturalMapWorkbenchWindow
 from .review_3d import ThreeDReviewWidget
 from .route_debug_panel import RouteDebugPanel
+
+
+_TRAVERSABILITY_LAYER_SPECS = {
+    "12f_observed": ("observed_free_mask", (70, 220, 120, 160)),
+    "12f_inferred": ("inferred_traversable_mask", (40, 220, 255, 220)),
+    "12f_hard_blocked": ("hard_blocked_mask", (255, 55, 55, 205)),
+    "12f_sensor_obstacle": ("sensor_obstacle_mask", (255, 145, 40, 205)),
+    "12f_unknown": ("unknown_mask", (155, 160, 175, 120)),
+    "12f_geometric": ("aisle_geometric_envelope_mask", (245, 205, 65, 125)),
+}
 
 
 class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
@@ -61,12 +77,19 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self._site_boundary_export_button: QPushButton | None = None
         self._site_boundary_last_error = ""
 
+        self._traversability_evidence: TraversabilityEvidence | None = None
+        self._navigation_12f_result = None
+        self._traversability_gap: QDoubleSpinBox | None = None
+        self._traversability_status: QLabel | None = None
+        self._traversability_export_button: QPushButton | None = None
+
         super().__init__()
         self._control_tabs = self._locate_control_tabs()
         self.setWindowTitle(
             "AGT 地图工作台 — V25-12F 农业结构 + 3D 审查 + 路径调试"
         )
         self._install_site_boundary_authoring()
+        self._install_12f_candidate_controls()
         self._install_3d_review()
         self._install_offline_asset_actions()
         self._install_route_debug()
@@ -80,7 +103,6 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
                 return tabs
         raise RuntimeError("unable to locate the existing Workbench control QTabWidget")
 
-    # ------------------------------------------------------- Site Boundary authoring
     def _navigation_authoring_layout(self):
         page = self._control_tabs.widget(2)
         if page is None:
@@ -92,6 +114,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
             raise RuntimeError("Navigation Map authoring page has no layout")
         return layout
 
+    # ------------------------------------------------------- Site Boundary authoring
     def _install_site_boundary_authoring(self) -> None:
         panel = QWidget()
         layout = QVBoxLayout(panel)
@@ -177,12 +200,21 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self._refresh_site_boundary_graphics()
         self._refresh_site_boundary_status()
 
-    def _finish_site_boundary_authoring(self, _checked=False, *, show_errors: bool = True) -> bool:
+    def _finish_site_boundary_authoring(
+        self,
+        _checked=False,
+        *,
+        show_errors: bool = True,
+    ) -> bool:
         if len(self._site_boundary_vertices) < 3:
             self._site_boundary_last_error = "至少需要 3 个顶点"
             self._refresh_site_boundary_status()
             if show_errors:
-                QMessageBox.warning(self, "Site Boundary 未完成", self._site_boundary_last_error)
+                QMessageBox.warning(
+                    self,
+                    "Site Boundary 未完成",
+                    self._site_boundary_last_error,
+                )
             return False
 
         candidate = SiteBoundary(
@@ -204,6 +236,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self._site_boundary = candidate
         self._site_boundary_vertices = list(candidate.outer_boundary_xy)
         self._site_boundary_last_error = ""
+        self._clear_12f_candidate()
         if self._interaction_mode == "site_boundary":
             self._set_interaction_mode(None, "Site Boundary 已冻结为 READY 草案")
         self._refresh_site_boundary_graphics()
@@ -214,6 +247,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self._site_boundary = None
         self._site_boundary_vertices = []
         self._site_boundary_last_error = ""
+        self._clear_12f_candidate()
         if self._interaction_mode == "site_boundary":
             self._set_interaction_mode(None, "Site Boundary 已清除")
         self._refresh_site_boundary_graphics()
@@ -265,8 +299,15 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         if self._site_boundary_status is None:
             return
         if self._site_boundary_last_error:
-            ready_suffix = "；上一 READY 边界仍保留" if self._site_boundary is not None else ""
-            text = f"Site Boundary：INVALID 草稿 | {self._site_boundary_last_error}{ready_suffix}"
+            ready_suffix = (
+                "；上一 READY 边界仍保留"
+                if self._site_boundary is not None
+                else ""
+            )
+            text = (
+                f"Site Boundary：INVALID 草稿 | "
+                f"{self._site_boundary_last_error}{ready_suffix}"
+            )
         elif self._interaction_mode == "site_boundary" or (
             self._site_boundary_vertices and self._site_boundary is None
         ):
@@ -286,6 +327,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self._site_boundary = None
         self._site_boundary_vertices = []
         self._site_boundary_last_error = ""
+        self._clear_12f_candidate()
         if self._source_path is None:
             self._refresh_site_boundary_graphics()
             self._refresh_site_boundary_status()
@@ -344,6 +386,292 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self.statusBar().showMessage(f"site_boundary.yaml 已导出：{path}")
         return path
 
+    # ------------------------------------------------------- V25-12F candidate
+    def _install_12f_candidate_controls(self) -> None:
+        existing_keys = {
+            self._nav_layer.itemData(index)
+            for index in range(self._nav_layer.count())
+        }
+        if "aisle_geometric_envelope" not in existing_keys:
+            self._nav_layer.addItem(
+                "结构行道几何包络（未经过 Ground FREE 过滤）",
+                "aisle_geometric_envelope",
+            )
+        for label, key in (
+            ("12F Candidate 三态", "12f_candidate"),
+            ("12F OBSERVED_FREE", "12f_observed"),
+            ("12F INFERRED_TRAVERSABLE", "12f_inferred"),
+            ("12F HARD_BLOCKED", "12f_hard_blocked"),
+            ("12F SENSOR_OBSTACLE", "12f_sensor_obstacle"),
+            ("12F UNKNOWN", "12f_unknown"),
+            ("12F Aisle Geometric Envelope", "12f_geometric"),
+        ):
+            if key not in existing_keys:
+                self._nav_layer.addItem(label, key)
+
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 6, 0, 0)
+        title = QLabel("V25-12F Candidate（不会覆盖当前 Navigation Map）")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        gap = QDoubleSpinBox()
+        gap.setPrefix("最大遮挡补全缺口：")
+        gap.setSuffix(" m")
+        gap.setDecimals(2)
+        gap.setRange(0.10, 2.00)
+        gap.setSingleStep(0.10)
+        gap.setValue(0.60)
+        gap.valueChanged.connect(self._on_12f_gap_changed)
+        layout.addWidget(gap)
+        self._traversability_gap = gap
+
+        row = QHBoxLayout()
+        generate = QPushButton("生成 12F Candidate")
+        export = QPushButton("导出到当前 run 目录")
+        generate.clicked.connect(self._generate_12f_candidate)
+        export.clicked.connect(self._export_12f_candidate)
+        row.addWidget(generate)
+        row.addWidget(export)
+        layout.addLayout(row)
+        self._traversability_export_button = export
+
+        status = QLabel("12F Candidate：未生成")
+        status.setWordWrap(True)
+        layout.addWidget(status)
+        self._traversability_status = status
+
+        target_layout = self._navigation_authoring_layout()
+        target_layout.insertWidget(max(0, target_layout.count() - 1), panel)
+        self._refresh_12f_status()
+
+    def _on_12f_gap_changed(self, _value: float) -> None:
+        self._clear_12f_candidate()
+
+    def _clear_12f_candidate(self) -> None:
+        self._traversability_evidence = None
+        self._navigation_12f_result = None
+        self._refresh_12f_status()
+        if hasattr(self, "_nav_layer"):
+            layer = str(self._nav_layer.currentData())
+            if layer == "12f_candidate" or layer in _TRAVERSABILITY_LAYER_SPECS:
+                self._navigation_preview_item.clear_result()
+
+    def _refresh_12f_status(self) -> None:
+        if self._traversability_status is None:
+            return
+        if self._traversability_evidence is None or self._navigation_12f_result is None:
+            self._traversability_status.setText(
+                "12F Candidate：未生成 | 需要 Navigation / Row / Corridor / READY Site Boundary"
+            )
+            if self._traversability_export_button is not None:
+                self._traversability_export_button.setEnabled(False)
+            return
+        counts = self._traversability_evidence.counts()
+        self._traversability_status.setText(
+            "12F Candidate：DRAFT | "
+            f"OBSERVED_FREE {counts['observed_free']:,} | "
+            f"INFERRED {counts['inferred_traversable']:,} | "
+            f"HARD {counts['hard_blocked']:,} | "
+            f"SENSOR {counts['sensor_obstacle']:,} | "
+            f"UNKNOWN {counts['unknown']:,}"
+        )
+        if self._traversability_export_button is not None:
+            self._traversability_export_button.setEnabled(True)
+
+    def _generate_12f_candidate(
+        self,
+        _checked=False,
+        *,
+        show_errors: bool = True,
+    ) -> bool:
+        navigation = self._navigation_result
+        structure = self._navigation_structure_result
+        corridor = self._corridor_refinement_result
+        boundary = self._site_boundary
+        missing = []
+        if navigation is None:
+            missing.append("Navigation Map")
+        if structure is None:
+            missing.append("Row Structure")
+        if corridor is None:
+            missing.append("Corridor")
+        if boundary is None:
+            missing.append("READY Site Boundary")
+        if missing:
+            self._traversability_evidence = None
+            self._navigation_12f_result = None
+            self._refresh_12f_status()
+            if show_errors:
+                QMessageBox.information(
+                    self,
+                    "12F Candidate 条件不足",
+                    "缺少：" + " / ".join(missing),
+                )
+            return False
+
+        maximum_gap = (
+            float(self._traversability_gap.value())
+            if self._traversability_gap is not None
+            else 0.60
+        )
+        try:
+            evidence = derive_traversability_evidence(
+                navigation,
+                structure,
+                corridor,
+                boundary,
+                TraversabilityConfig(maximum_inferred_gap_m=maximum_gap),
+                overrides=self._navigation_overrides,
+                frame_id="map",
+                source={
+                    "workbench": "ReviewMapWorkbenchWindow",
+                    "source_pcd": (
+                        self._source_path.name if self._source_path is not None else ""
+                    ),
+                },
+            )
+            candidate = replace(
+                navigation,
+                occupancy=evidence.candidate_occupancy(),
+            )
+        except Exception as exc:
+            self._traversability_evidence = None
+            self._navigation_12f_result = None
+            self._refresh_12f_status()
+            if show_errors:
+                QMessageBox.critical(self, "12F Candidate 生成失败", str(exc))
+            return False
+
+        self._traversability_evidence = evidence
+        self._navigation_12f_result = candidate
+        self._refresh_12f_status()
+        self._update_navigation_overlay()
+        self.statusBar().showMessage(
+            "V25-12F Candidate 已生成；当前 frozen Navigation Map 未被修改"
+        )
+        return True
+
+    def _export_12f_candidate(self, _checked=False) -> Path | None:
+        if (
+            self._traversability_evidence is None
+            or self._navigation_12f_result is None
+            or self._site_boundary is None
+            or self._navigation_result is None
+        ):
+            QMessageBox.information(
+                self,
+                "12F Candidate 未就绪",
+                "请先生成 12F Candidate",
+            )
+            return None
+
+        if self._source_path is not None:
+            output_dir = self._source_path.parent
+        else:
+            selected = QFileDialog.getExistingDirectory(
+                self,
+                "选择 12F Candidate 输出目录",
+            )
+            if not selected:
+                return None
+            output_dir = Path(selected)
+
+        boundary_path = output_dir / "site_boundary.yaml"
+        if not boundary_path.is_file():
+            QMessageBox.information(
+                self,
+                "Site Boundary 尚未冻结",
+                f"请先导出 {boundary_path.name}，再导出 12F Candidate",
+            )
+            return None
+
+        candidate_names = (
+            "traversability_evidence.yaml",
+            "traversability_evidence.npz",
+            "navigation_map_12f.yaml",
+            "navigation_map_12f.pgm",
+            "navigation_map_12f_derivation.yaml",
+        )
+        existing = [name for name in candidate_names if (output_dir / name).exists()]
+        overwrite = False
+        if existing:
+            answer = QMessageBox.question(
+                self,
+                "覆盖已有 12F Candidate？",
+                "仅覆盖以下 12F 候选文件，不会改 navigation_map.yaml/pgm 或 derivation.yaml：\n\n"
+                + "\n".join(existing),
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return None
+            overwrite = True
+
+        try:
+            output = write_traversability_candidate(
+                self._traversability_evidence,
+                self._navigation_result,
+                self._site_boundary,
+                output_dir,
+                source_navigation_asset="navigation_map.yaml",
+                overwrite=overwrite,
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "12F Candidate 导出失败", str(exc))
+            return None
+        self.statusBar().showMessage(f"12F Candidate 已导出：{output}")
+        return output
+
+    def _update_navigation_overlay(self) -> None:
+        if not hasattr(self, "_nav_layer"):
+            return
+        layer = str(self._nav_layer.currentData())
+        if layer == "aisle_geometric_envelope":
+            if (
+                self._navigation_result is None
+                or self._corridor_refinement_result is None
+                or not self._nav_overlay_visible.isChecked()
+            ):
+                self._navigation_preview_item.clear_result()
+                return
+            self._navigation_preview_item.set_result(
+                self._navigation_result,
+                "aisle_geometric_envelope",
+                self._navigation_structure_result,
+                self._corridor_refinement_result,
+            )
+            return
+        if layer == "12f_candidate":
+            if (
+                self._navigation_12f_result is None
+                or not self._nav_overlay_visible.isChecked()
+            ):
+                self._navigation_preview_item.clear_result()
+                return
+            self._navigation_preview_item.set_result(
+                self._navigation_12f_result,
+                "final",
+            )
+            return
+        if layer in _TRAVERSABILITY_LAYER_SPECS:
+            if (
+                self._navigation_result is None
+                or self._traversability_evidence is None
+                or not self._nav_overlay_visible.isChecked()
+            ):
+                self._navigation_preview_item.clear_result()
+                return
+            attribute, rgba_value = _TRAVERSABILITY_LAYER_SPECS[layer]
+            self._navigation_preview_item.set_mask(
+                self._navigation_result,
+                getattr(self._traversability_evidence, attribute),
+                rgba_value,
+            )
+            return
+        super()._update_navigation_overlay()
+
     # ------------------------------------------------------- Route Debug
     def _install_route_debug(self) -> None:
         panel = RouteDebugPanel(self._scene, self._view, self)
@@ -362,7 +690,9 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
             return
         if active:
             self._pre_route_cloud_visible = bool(self._cloud_item.isVisible())
-            self._pre_route_navigation_visible = bool(self._navigation_preview_item.isVisible())
+            self._pre_route_navigation_visible = bool(
+                self._navigation_preview_item.isVisible()
+            )
             self._cloud_item.setVisible(False)
             self._navigation_preview_item.setVisible(False)
             self._set_site_boundary_authoring_visible(False)
@@ -370,7 +700,9 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
                 self._review_tabs.setCurrentIndex(0)
         else:
             self._cloud_item.setVisible(self._pre_route_cloud_visible)
-            self._navigation_preview_item.setVisible(self._pre_route_navigation_visible)
+            self._navigation_preview_item.setVisible(
+                self._pre_route_navigation_visible
+            )
             self._set_site_boundary_authoring_visible(True)
         self._route_debug_active = active
         self._route_debug_panel.set_active(active)
@@ -445,7 +777,9 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
                 centerline_sample_spacing_m=max(0.10, float(navigation.resolution_m))
             ),
             source={
-                "pcd_name": self._source_path.name if self._source_path is not None else "",
+                "pcd_name": (
+                    self._source_path.name if self._source_path is not None else ""
+                ),
                 "navigation_resolution_m": float(navigation.resolution_m),
                 "corridor_pair_count": len(corridor.aisle_pair_diagnostics),
             },
@@ -515,7 +849,10 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         )
 
     def _recompute_vehicle_corridor(self) -> None:
-        if self._navigation_result is None or self._corridor_refinement_result is None:
+        if (
+            self._navigation_result is None
+            or self._corridor_refinement_result is None
+        ):
             self._vehicle_corridor_result = None
             return
         self._vehicle_corridor_result = derive_vehicle_corridor(
@@ -551,11 +888,13 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
 
     def _recompute_navigation_structure(self) -> None:
         super()._recompute_navigation_structure()
+        self._clear_12f_candidate()
         self._recompute_vehicle_corridor()
         self._sync_3d_analysis()
 
     def _clear_navigation_state(self, *, clear_overrides: bool) -> None:
         self._vehicle_corridor_result = None
+        self._clear_12f_candidate()
         super()._clear_navigation_state(clear_overrides=clear_overrides)
         if self._review_3d is not None:
             self._sync_3d_analysis()
