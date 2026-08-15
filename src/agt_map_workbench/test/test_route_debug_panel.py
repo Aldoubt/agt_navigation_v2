@@ -5,6 +5,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt5.QtWidgets import QApplication, QGraphicsScene, QGraphicsView
 
+from agt_offline_assets.route_debug_12f import RouteDebug12FBundle
 from agt_offline_assets.route_debug_dataset import RouteDebugDataset
 from agt_map_workbench import route_debug_panel as panel_module
 from agt_map_workbench.route_debug_panel import RouteDebugPanel
@@ -27,6 +28,17 @@ def _dataset(run_dir: Path) -> RouteDebugDataset:
         connector_requests=(),
         connectors=(),
         occupancy_source_masks=None,
+        asset_states=(),
+    )
+
+
+def _empty_12f(run_dir: Path) -> RouteDebug12FBundle:
+    return RouteDebug12FBundle(
+        run_dir=run_dir.resolve(),
+        frame_id="map",
+        candidate_navigation=None,
+        site_boundary=None,
+        traversability=None,
         asset_states=(),
     )
 
@@ -75,6 +87,17 @@ def _overlay():
     }
 
 
+def _patch_base_loaders(monkeypatch, run_dir: Path, dataset, overlay):
+    monkeypatch.setattr(panel_module, "load_route_debug_dataset", lambda path: dataset)
+    monkeypatch.setattr(
+        panel_module,
+        "load_route_debug_12f",
+        lambda path, expected_frame_id="map": _empty_12f(run_dir),
+    )
+    monkeypatch.setattr(panel_module, "build_route_debug_overlay", lambda loaded: overlay)
+    monkeypatch.setattr(panel_module, "build_route_debug_12f_features", lambda bundle: [])
+
+
 def test_panel_loads_directory_writes_only_debug_overlay_and_populates_inspector(
     monkeypatch, tmp_path: Path
 ):
@@ -85,8 +108,7 @@ def test_panel_loads_directory_writes_only_debug_overlay_and_populates_inspector
     overlay = _overlay()
     writes = []
 
-    monkeypatch.setattr(panel_module, "load_route_debug_dataset", lambda path: dataset)
-    monkeypatch.setattr(panel_module, "build_route_debug_overlay", lambda loaded: overlay)
+    _patch_base_loaders(monkeypatch, run_dir, dataset, overlay)
 
     def fake_write(payload, path, *, overwrite=False):
         assert payload is overlay
@@ -115,15 +137,17 @@ def test_panel_loads_directory_writes_only_debug_overlay_and_populates_inspector
     assert "STRUCTURE" in panel.inspector_text()
 
 
-def test_panel_presets_keep_missing_reverse_layer_disabled(monkeypatch, tmp_path: Path):
+def test_panel_presets_keep_missing_reverse_and_12f_layers_disabled(
+    monkeypatch,
+    tmp_path: Path,
+):
     app = _qapp()
     run_dir = tmp_path / "debug_run"
     run_dir.mkdir()
     dataset = _dataset(run_dir)
     overlay = _overlay()
 
-    monkeypatch.setattr(panel_module, "load_route_debug_dataset", lambda path: dataset)
-    monkeypatch.setattr(panel_module, "build_route_debug_overlay", lambda loaded: overlay)
+    _patch_base_loaders(monkeypatch, run_dir, dataset, overlay)
     monkeypatch.setattr(
         panel_module,
         "write_route_debug_overlay",
@@ -140,3 +164,36 @@ def test_panel_presets_keep_missing_reverse_layer_disabled(monkeypatch, tmp_path
 
     assert panel.layer_enabled("coverage.order")
     assert not panel.layer_enabled("motion.reverse")
+
+    panel.apply_preset("12f")
+    app.processEvents()
+    assert not panel.layer_enabled("base.navigation_12f")
+    assert not panel.layer_enabled("traversability.inferred")
+    assert not panel.layer_enabled("semantics.site_boundary")
+
+
+def test_reload_reapplies_failure_focus(monkeypatch, tmp_path: Path):
+    app = _qapp()
+    run_dir = tmp_path / "debug_run"
+    run_dir.mkdir()
+    dataset = _dataset(run_dir)
+    overlay = _overlay()
+
+    _patch_base_loaders(monkeypatch, run_dir, dataset, overlay)
+    monkeypatch.setattr(
+        panel_module,
+        "write_route_debug_overlay",
+        lambda payload, path, *, overwrite=False: Path(path),
+    )
+
+    scene = QGraphicsScene()
+    view = QGraphicsView(scene)
+    panel = RouteDebugPanel(scene, view)
+    panel.set_active(True)
+    panel.load_run_directory(run_dir)
+    panel._failure_button.setChecked(True)
+    panel.reload_current_directory()
+    app.processEvents()
+
+    item = panel.controller._feature_items["aisle:aisle_001"]
+    assert item.opacity() < 0.2
