@@ -1,4 +1,5 @@
 from importlib import util
+import json
 from pathlib import Path
 
 import pytest
@@ -104,6 +105,78 @@ mode: trinary
     (run_dir / "navigation_map.pgm").write_bytes(
         f"P5\n{width} {height}\n255\n".encode("ascii")
         + bytes([254]) * (width * height)
+    )
+
+
+def _write_recovery_case_assets(run_dir: Path):
+    (run_dir / "aisle_graph.yaml").write_text(
+        """schema: agt_agricultural_aisle_graph/v1
+status: DRAFT
+frame_id: map
+row_direction_xy: [1.0, 0.0]
+nominal_row_spacing_m: 2.0
+aisle_count: 1
+source: {}
+aisles:
+  - aisle_id: aisle_016
+    kind: interior
+    pair_kind: ROW_ROW
+    adjacent_structure:
+      left: row_01
+      right: row_02
+    centerline_xyz:
+      - [0.0, 0.0, 0.0]
+      - [6.0, 0.0, 0.0]
+    start_pose: {x: 0.0, y: 0.0, z: 0.0, yaw: 0.0}
+    end_pose: {x: 6.0, y: 0.0, z: 0.0, yaw: 0.0}
+    length_m: 6.0
+    geometric_width_m: 1.6
+    minimum_required_width_m: 0.45
+    center_distance_m: 2.0
+    longitudinal_overlap_m: 6.0
+    evidence:
+      safe_cell_count: 60
+      centerline_cell_count: 61
+      diagnostic_status: ACCEPTED
+""",
+        encoding="utf-8",
+    )
+    (run_dir / "site_boundary.yaml").write_text(
+        """schema: agt_site_boundary/v1
+frame_id: map
+status: READY
+boundary_semantics: VEHICLE_PERMITTED_INNER_BOUNDARY
+outer_boundary_xy:
+  - [-2.0, -2.0]
+  - [8.0, -2.0]
+  - [8.0, 2.0]
+  - [-2.0, 2.0]
+source: {}
+""",
+        encoding="utf-8",
+    )
+    (run_dir / "navigation_map.yaml").write_text(
+        """image: navigation_map.pgm
+resolution: 0.05
+origin: [-2.0, -2.0, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+mode: trinary
+""",
+        encoding="utf-8",
+    )
+    width = 200
+    height = 80
+    pixels = bytearray([254]) * (width * height)
+    blocked_c0 = int((2.80 - (-2.0)) / 0.05)
+    blocked_c1 = int((3.20 - (-2.0)) / 0.05)
+    for row in range(height):
+        base = row * width
+        for col in range(blocked_c0, blocked_c1 + 1):
+            pixels[base + col] = 0
+    (run_dir / "navigation_map.pgm").write_bytes(
+        f"P5\n{width} {height}\n255\n".encode("ascii") + bytes(pixels)
     )
 
 
@@ -221,3 +294,69 @@ def test_a1_acceptance_harness_rejects_loaded_graph_navigation_frame_mismatch(
                 str(vehicle_profile),
             ]
         )
+
+
+def test_a1_acceptance_harness_reports_recoverable_segment_length(tmp_path, capsys):
+    tool = _load_tool()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_recovery_case_assets(run_dir)
+    vehicle_profile = ROOT / "profiles" / "platforms" / "mk_mini.yaml"
+
+    assert (
+        tool.main(
+            [
+                "--run-dir",
+                str(run_dir),
+                "--vehicle-profile",
+                str(vehicle_profile),
+            ]
+        )
+        == 0
+    )
+    output = capsys.readouterr().out.strip()
+    assert output, "A1 acceptance harness must emit a JSON report"
+    report = json.loads(output)
+
+    assert report["schema"] == tool.REPORT_SCHEMA
+    assert report["validation_scope"] == tool.VALIDATION_SCOPE
+    assert report["diagnostic_aisle_ids"] == list(tool.DIAGNOSTIC_AISLE_IDS)
+    assert len(report["aisles"]) == 1
+
+    aisle = report["aisles"][0]
+    assert tuple(aisle) == (
+        "aisle_id",
+        "structural_length_m",
+        "raw_feasible_fragment_count",
+        "active_segment_count",
+        "rejected_fragment_count",
+        "active_segment_length_m",
+        "current_longest_only_selected_span_m",
+        "recoverable_additional_length_m",
+        "active_segment_ids",
+        "endpoint_classifications",
+    )
+    assert aisle["aisle_id"] == "aisle_016"
+    assert aisle["active_segment_count"] == 2
+    assert aisle["raw_feasible_fragment_count"] == 2
+    assert aisle["rejected_fragment_count"] == 0
+    assert aisle["active_segment_ids"] == [
+        "aisle_016.segment_001",
+        "aisle_016.segment_002",
+    ]
+    assert aisle["active_segment_length_m"] > aisle["current_longest_only_selected_span_m"]
+    assert aisle["recoverable_additional_length_m"] == pytest.approx(
+        aisle["active_segment_length_m"]
+        - aisle["current_longest_only_selected_span_m"]
+    )
+    assert aisle["recoverable_additional_length_m"] > 1.0
+
+    summary = report["summary"]
+    assert summary["diagnostic_aisle_count"] == 1
+    assert summary["active_segment_count"] == 2
+    assert summary["recoverable_additional_length_m"] == pytest.approx(
+        aisle["recoverable_additional_length_m"]
+    )
+    assert summary["segment_recovery_fraction"] == pytest.approx(
+        aisle["active_segment_length_m"] / aisle["structural_length_m"]
+    )
