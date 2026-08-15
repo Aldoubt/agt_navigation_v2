@@ -146,6 +146,8 @@ def derive_vehicle_feasible_segment_plan(
 ) -> VehicleFeasibleSegmentPlan:
     """Preserve every useful maximal contiguous vehicle-feasible aisle run."""
     cfg = config or VehicleSafeLaneConfig()
+    if graph.frame_id != navigation.frame_id:
+        raise ValueError("Aisle Graph and Navigation Grid frame_id must match")
     direction = normalize_row_direction(graph.row_direction_xy)
     row_direction_xy = (float(direction[0]), float(direction[1]))
     yaw = math.atan2(row_direction_xy[1], row_direction_xy[0])
