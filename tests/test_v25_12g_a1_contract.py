@@ -36,6 +36,77 @@ def _touch_all_except(paths, missing_key: str | None = None):
         path.write_text("placeholder\n", encoding="utf-8")
 
 
+def _write_valid_frozen_assets(
+    run_dir: Path,
+    *,
+    graph_frame: str = "map",
+    boundary_frame: str = "map",
+):
+    (run_dir / "aisle_graph.yaml").write_text(
+        f"""schema: agt_agricultural_aisle_graph/v1
+status: DRAFT
+frame_id: {graph_frame}
+row_direction_xy: [1.0, 0.0]
+nominal_row_spacing_m: 2.0
+aisle_count: 1
+source: {{}}
+aisles:
+  - aisle_id: aisle_016
+    kind: interior
+    pair_kind: ROW_ROW
+    adjacent_structure:
+      left: row_01
+      right: row_02
+    centerline_xyz:
+      - [0.0, 0.0, 0.0]
+      - [2.0, 0.0, 0.0]
+    start_pose: {{x: 0.0, y: 0.0, z: 0.0, yaw: 0.0}}
+    end_pose: {{x: 2.0, y: 0.0, z: 0.0, yaw: 0.0}}
+    length_m: 2.0
+    geometric_width_m: 1.6
+    minimum_required_width_m: 0.45
+    center_distance_m: 2.0
+    longitudinal_overlap_m: 2.0
+    evidence:
+      safe_cell_count: 20
+      centerline_cell_count: 21
+      diagnostic_status: ACCEPTED
+""",
+        encoding="utf-8",
+    )
+    (run_dir / "site_boundary.yaml").write_text(
+        f"""schema: agt_site_boundary/v1
+frame_id: {boundary_frame}
+status: READY
+boundary_semantics: VEHICLE_PERMITTED_INNER_BOUNDARY
+outer_boundary_xy:
+  - [-1.0, -1.0]
+  - [3.0, -1.0]
+  - [3.0, 1.0]
+  - [-1.0, 1.0]
+source: {{}}
+""",
+        encoding="utf-8",
+    )
+    (run_dir / "navigation_map.yaml").write_text(
+        """image: navigation_map.pgm
+resolution: 0.05
+origin: [-1.0, -1.0, 0.0]
+negate: 0
+occupied_thresh: 0.65
+free_thresh: 0.196
+mode: trinary
+""",
+        encoding="utf-8",
+    )
+    width = 80
+    height = 40
+    (run_dir / "navigation_map.pgm").write_bytes(
+        f"P5\n{width} {height}\n255\n".encode("ascii")
+        + bytes([254]) * (width * height)
+    )
+
+
 def test_a1_acceptance_harness_freezes_contract_and_parser_defaults():
     tool = _load_tool()
 
@@ -110,5 +181,43 @@ def test_a1_acceptance_harness_refuses_existing_segment_asset_without_overwrite(
                 "--vehicle-profile",
                 str(vehicle_profile),
                 "--write-segments",
+            ]
+        )
+
+
+def test_a1_acceptance_harness_freezes_experiment_config():
+    tool = _load_tool()
+    cfg = tool._a1_config()
+
+    assert cfg.sample_spacing_m == pytest.approx(0.10)
+    assert cfg.lateral_search_step_m == pytest.approx(0.05)
+    assert cfg.maximum_lateral_shift_m == pytest.approx(0.50)
+    assert cfg.maximum_lateral_step_m == pytest.approx(0.15)
+    assert cfg.preview_footprint_padding_m == pytest.approx(0.05)
+    assert cfg.minimum_lane_coverage_fraction == pytest.approx(0.70)
+    assert cfg.maximum_endpoint_retreat_m == pytest.approx(2.00)
+    assert cfg.minimum_contiguous_span_m == pytest.approx(1.00)
+
+
+def test_a1_acceptance_harness_rejects_loaded_graph_navigation_frame_mismatch(
+    tmp_path,
+):
+    tool = _load_tool()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_valid_frozen_assets(
+        run_dir,
+        graph_frame="odom",
+        boundary_frame="odom",
+    )
+    vehicle_profile = ROOT / "profiles" / "platforms" / "mk_mini.yaml"
+
+    with pytest.raises(ValueError, match="frame"):
+        tool.main(
+            [
+                "--run-dir",
+                str(run_dir),
+                "--vehicle-profile",
+                str(vehicle_profile),
             ]
         )
