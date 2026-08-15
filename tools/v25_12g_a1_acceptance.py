@@ -8,14 +8,21 @@ without promoting either artifact to a route-ready contract.
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Sequence
 from pathlib import Path
 
 from agt_offline_assets.agricultural_route_io import load_agricultural_aisle_graph
 from agt_offline_assets.navigation_grid import load_navigation_grid
 from agt_offline_assets.site_boundary import load_site_boundary
+from agt_offline_assets.vehicle_feasible_segment import (
+    derive_vehicle_feasible_segment_plan,
+)
 from agt_offline_assets.vehicle_profile import load_canonical_vehicle_profile
-from agt_offline_assets.vehicle_safe_lane import VehicleSafeLaneConfig
+from agt_offline_assets.vehicle_safe_lane import (
+    VehicleSafeLaneConfig,
+    derive_vehicle_safe_lane_plan,
+)
 
 
 REPORT_SCHEMA = "agt_v25_12g_a1_acceptance_report/v1"
@@ -90,9 +97,7 @@ def _load_frozen_inputs(args: argparse.Namespace):
     navigation = load_navigation_grid(navigation_path)
     vehicle = load_canonical_vehicle_profile(vehicle_path)
 
-    if not (
-        graph.frame_id == navigation.frame_id == boundary.frame_id
-    ):
+    if not graph.frame_id == navigation.frame_id == boundary.frame_id:
         raise ValueError(
             "A1 acceptance frame mismatch: "
             f"aisle_graph={graph.frame_id}, "
@@ -103,10 +108,186 @@ def _load_frozen_inputs(args: argparse.Namespace):
     return graph, boundary, navigation, vehicle, _a1_config(), segment_output
 
 
+def _index_unique(items, *, label: str) -> dict[str, object]:
+    """Index aisle-like records and fail closed on duplicate IDs."""
+    result: dict[str, object] = {}
+    for item in items:
+        aisle_id = str(item.aisle_id)
+        if aisle_id in result:
+            raise ValueError(f"duplicate aisle_id in {label}: {aisle_id}")
+        result[aisle_id] = item
+    return result
+
+
+def _derive_comparable_plans(graph, boundary, navigation, vehicle, cfg):
+    """Derive legacy and A1 plans from identical frozen inputs."""
+    source = {"acceptance_stage": "v25_12g_a1"}
+    lane_plan = derive_vehicle_safe_lane_plan(
+        graph,
+        navigation,
+        vehicle,
+        cfg,
+        site_boundary=boundary,
+        source=source,
+    )
+    segment_plan = derive_vehicle_feasible_segment_plan(
+        graph,
+        navigation,
+        vehicle,
+        cfg,
+        site_boundary=boundary,
+        source=source,
+    )
+
+    graph_ids = [str(aisle.aisle_id) for aisle in graph.aisles]
+    if len(graph_ids) != len(set(graph_ids)):
+        raise ValueError("duplicate aisle_id in Agricultural Aisle Graph")
+
+    lanes = _index_unique(lane_plan.lanes, label="VehicleSafeLanePlan")
+    segments = _index_unique(segment_plan.aisles, label="VehicleFeasibleSegmentPlan")
+    expected = set(graph_ids)
+    if set(lanes) != expected:
+        missing = sorted(expected - set(lanes))
+        extra = sorted(set(lanes) - expected)
+        raise ValueError(
+            f"VehicleSafeLanePlan aisle IDs do not match graph: missing={missing} extra={extra}"
+        )
+    if set(segments) != expected:
+        missing = sorted(expected - set(segments))
+        extra = sorted(set(segments) - expected)
+        raise ValueError(
+            "VehicleFeasibleSegmentPlan aisle IDs do not match graph: "
+            f"missing={missing} extra={extra}"
+        )
+    return lane_plan, segment_plan, lanes, segments
+
+
+def _aisle_metrics(aisle_id: str, lane, segment_result) -> dict[str, object]:
+    """Build the exact frozen A1 per-aisle comparison metrics."""
+    active_segment_length_m = float(
+        sum(float(segment.length_m) for segment in segment_result.active_segments)
+    )
+    longest_only_span_m = float(lane.selected_span_m)
+    recoverable_additional_length_m = max(
+        0.0,
+        active_segment_length_m - longest_only_span_m,
+    )
+    endpoint_classifications = [
+        {
+            "segment_id": segment.segment_id,
+            "low_endpoint_type": segment.low_endpoint_type,
+            "high_endpoint_type": segment.high_endpoint_type,
+        }
+        for segment in segment_result.active_segments
+    ]
+    return {
+        "aisle_id": aisle_id,
+        "structural_length_m": float(segment_result.structural_length_m),
+        "raw_feasible_fragment_count": int(segment_result.raw_feasible_fragment_count),
+        "active_segment_count": len(segment_result.active_segments),
+        "rejected_fragment_count": len(segment_result.rejected_fragments),
+        "active_segment_length_m": active_segment_length_m,
+        "current_longest_only_selected_span_m": longest_only_span_m,
+        "recoverable_additional_length_m": recoverable_additional_length_m,
+        "active_segment_ids": [
+            segment.segment_id for segment in segment_result.active_segments
+        ],
+        "endpoint_classifications": endpoint_classifications,
+    }
+
+
+def _build_report(args, graph, vehicle, cfg, lanes, segments) -> dict[str, object]:
+    """Build the deterministic diagnostic report for the frozen aisle subset."""
+    metrics = [
+        _aisle_metrics(aisle_id, lanes[aisle_id], segments[aisle_id])
+        for aisle_id in DIAGNOSTIC_AISLE_IDS
+        if aisle_id in lanes and aisle_id in segments
+    ]
+
+    structural_length_total = float(
+        sum(float(item["structural_length_m"]) for item in metrics)
+    )
+    active_segment_length_total = float(
+        sum(float(item["active_segment_length_m"]) for item in metrics)
+    )
+    longest_only_total = float(
+        sum(float(item["current_longest_only_selected_span_m"]) for item in metrics)
+    )
+    recoverable_total = float(
+        sum(float(item["recoverable_additional_length_m"]) for item in metrics)
+    )
+    rejected_fragment_count = int(
+        sum(int(item["rejected_fragment_count"]) for item in metrics)
+    )
+    active_segment_count = int(
+        sum(int(item["active_segment_count"]) for item in metrics)
+    )
+    segment_recovery_fraction = (
+        0.0
+        if structural_length_total <= 1.0e-12
+        else float(active_segment_length_total / structural_length_total)
+    )
+
+    return {
+        "schema": REPORT_SCHEMA,
+        "validation_scope": VALIDATION_SCOPE,
+        "diagnostic_aisle_ids": list(DIAGNOSTIC_AISLE_IDS),
+        "frame_id": graph.frame_id,
+        "platform_id": vehicle.profile_id,
+        "run_dir": str(Path(args.run_dir).expanduser().resolve()),
+        "navigation_map": str(args.navigation_map),
+        "configuration": {
+            "sample_spacing_m": float(cfg.sample_spacing_m),
+            "lateral_search_step_m": float(cfg.lateral_search_step_m),
+            "maximum_lateral_shift_m": float(cfg.maximum_lateral_shift_m),
+            "maximum_lateral_step_m": float(cfg.maximum_lateral_step_m),
+            "preview_footprint_padding_m": float(cfg.preview_footprint_padding_m),
+            "minimum_lane_coverage_fraction": float(
+                cfg.minimum_lane_coverage_fraction
+            ),
+            "maximum_endpoint_retreat_m": float(cfg.maximum_endpoint_retreat_m),
+            "minimum_contiguous_span_m": float(cfg.minimum_contiguous_span_m),
+        },
+        "aisles": metrics,
+        "summary": {
+            "diagnostic_aisle_count": len(metrics),
+            "active_segment_count": active_segment_count,
+            "rejected_fragment_count": rejected_fragment_count,
+            "structural_length_m": structural_length_total,
+            "active_segment_length_m": active_segment_length_total,
+            "current_longest_only_selected_span_m": longest_only_total,
+            "recoverable_additional_length_m": recoverable_total,
+            "segment_recovery_fraction": segment_recovery_fraction,
+        },
+    }
+
+
+def _emit_report(report: dict[str, object], *, pretty: bool) -> None:
+    if pretty:
+        text = json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False)
+    else:
+        text = json.dumps(
+            report,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+    print(text)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    """Load and validate frozen A1 inputs; derivation follows in later cycles."""
+    """Run the frozen A1 longest-only versus all-segment diagnostic comparison."""
     args = build_parser().parse_args(argv)
-    _load_frozen_inputs(args)
+    graph, boundary, navigation, vehicle, cfg, _segment_output = _load_frozen_inputs(args)
+    _lane_plan, _segment_plan, lanes, segments = _derive_comparable_plans(
+        graph,
+        boundary,
+        navigation,
+        vehicle,
+        cfg,
+    )
+    report = _build_report(args, graph, vehicle, cfg, lanes, segments)
+    _emit_report(report, pretty=bool(args.pretty))
     return 0
 
 
