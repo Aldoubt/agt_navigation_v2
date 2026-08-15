@@ -44,10 +44,11 @@ _CORRIDOR_LAYERS = {
     "row_structural_band",
     "vegetation_envelope",
     "boundary_exclusion",
-    "refined_aisle",
-    "aisle_centerline",
     "boundary_aisle",
     "boundary_aisle_centerline",
+    "aisle_geometric_envelope",
+    "refined_aisle",
+    "aisle_centerline",
 }
 _STATUS_TEXT = {
     "ACCEPTED": "接受",
@@ -84,6 +85,10 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._nav_layer.addItem("墙体 / 地图边界排除带", "boundary_exclusion")
         self._nav_layer.addItem("边界行道候选（墙 ↔ 外侧垄）", "boundary_aisle")
         self._nav_layer.addItem("边界行道中心线", "boundary_aisle_centerline")
+        self._nav_layer.addItem(
+            "结构行道几何包络（未经过 Ground FREE 过滤）",
+            "aisle_geometric_envelope",
+        )
         self._nav_layer.addItem("精炼行道候选（含显式边界行道）", "refined_aisle")
         self._nav_layer.addItem("行道中心线（含显式边界行道）", "aisle_centerline")
 
@@ -335,6 +340,12 @@ class AgriculturalMapWorkbenchWindow(MapWorkbenchWindow):
         self._corridor_refinement_result = None
         super()._navigation_finished(result)
         self._recompute_navigation_structure()
+
+    def _apply_navigation_overrides_to_result(self) -> None:
+        super()._apply_navigation_overrides_to_result()
+        clear_candidate = getattr(self, "_clear_12f_candidate", None)
+        if callable(clear_candidate):
+            clear_candidate()
 
     def _clear_navigation_state(self, *, clear_overrides: bool) -> None:
         self._navigation_structure_result = None
