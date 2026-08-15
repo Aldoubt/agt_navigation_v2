@@ -85,6 +85,9 @@ class VehicleSafeLane:
     centerline_xyz: tuple[tuple[float, float, float], ...]
     lateral_offsets_m: tuple[float, ...]
     reason: str
+    site_boundary_rejected_pose_count: int = 0
+    site_boundary_limited_sample_count: int = 0
+    grid_rejected_pose_count: int = 0
 
     @property
     def low_u_pose(self) -> tuple[float, float, float] | None:
@@ -179,6 +182,9 @@ def _empty_lane(
     allowed_lateral_shift_m: float,
     total_sample_count: int,
     reason: str,
+    site_boundary_rejected_pose_count: int = 0,
+    site_boundary_limited_sample_count: int = 0,
+    grid_rejected_pose_count: int = 0,
 ) -> VehicleSafeLane:
     return VehicleSafeLane(
         aisle_id=aisle.aisle_id,
@@ -195,6 +201,9 @@ def _empty_lane(
         centerline_xyz=(),
         lateral_offsets_m=(),
         reason=reason,
+        site_boundary_rejected_pose_count=int(site_boundary_rejected_pose_count),
+        site_boundary_limited_sample_count=int(site_boundary_limited_sample_count),
+        grid_rejected_pose_count=int(grid_rejected_pose_count),
     )
 
 
@@ -250,10 +259,12 @@ def _derive_one_lane(
     selected_offsets: list[float | None] = []
     previous_offset: float | None = None
     boundary_rejections = 0
+    boundary_limited_samples = 0
     grid_rejections = 0
 
     for sample in samples:
         feasible: list[tuple[float, float, tuple[float, float, float]]] = []
+        grid_free_ignoring_boundary = False
         for offset in offsets:
             if (
                 previous_offset is not None
@@ -263,16 +274,26 @@ def _derive_one_lane(
                 continue
             x = float(sample[0] + offset * perpendicular[0])
             y = float(sample[1] + offset * perpendicular[1])
-            if not _pose_inside_site_boundary(
+            grid_free = _preview_pose_free(
+                x,
+                y,
+                yaw,
+                navigation,
+                local_footprint,
+            )
+            if grid_free:
+                grid_free_ignoring_boundary = True
+            inside_boundary = _pose_inside_site_boundary(
                 x,
                 y,
                 yaw,
                 local_footprint,
                 site_boundary,
-            ):
+            )
+            if not inside_boundary:
                 boundary_rejections += 1
                 continue
-            if not _preview_pose_free(x, y, yaw, navigation, local_footprint):
+            if not grid_free:
                 grid_rejections += 1
                 continue
             continuity = (
@@ -284,6 +305,8 @@ def _derive_one_lane(
             feasible.append((score, float(offset), (x, y, float(sample[2]))))
 
         if not feasible:
+            if site_boundary is not None and grid_free_ignoring_boundary:
+                boundary_limited_samples += 1
             selected.append(None)
             selected_offsets.append(None)
             previous_offset = None
@@ -308,9 +331,10 @@ def _derive_one_lane(
 
     if not segments:
         reasons = []
-        if boundary_rejections > 0:
+        if boundary_limited_samples > 0:
             reasons.append(
-                "SITE_BOUNDARY_CONFLICT: candidate preview footprints touch or cross the vehicle-permitted inner boundary"
+                "SITE_BOUNDARY_CONFLICT: boundary removes all grid-free candidates at "
+                f"{boundary_limited_samples}/{len(selected)} sampled aisle stations"
             )
         if grid_rejections > 0:
             reasons.append(
@@ -323,6 +347,9 @@ def _derive_one_lane(
             total_sample_count=len(selected),
             reason="; ".join(reasons)
             or "no preview-footprint-free pose was found near the structural aisle centerline",
+            site_boundary_rejected_pose_count=boundary_rejections,
+            site_boundary_limited_sample_count=boundary_limited_samples,
+            grid_rejected_pose_count=grid_rejections,
         )
 
     def segment_span(segment: tuple[int, int]) -> float:
@@ -375,8 +402,6 @@ def _derive_one_lane(
             reasons.append("continuous lane coverage fraction is below threshold")
         if not span_ok:
             reasons.append("continuous lane span is below threshold")
-        if boundary_rejections > 0:
-            reasons.append("SITE_BOUNDARY_CONFLICT removes some candidate poses")
         reason = "; ".join(reasons) or "vehicle-safe lane is incomplete"
 
     return VehicleSafeLane(
@@ -394,6 +419,9 @@ def _derive_one_lane(
         centerline_xyz=lane_points,
         lateral_offsets_m=lane_offsets,
         reason=reason,
+        site_boundary_rejected_pose_count=boundary_rejections,
+        site_boundary_limited_sample_count=boundary_limited_samples,
+        grid_rejected_pose_count=grid_rejections,
     )
 
 
@@ -490,6 +518,9 @@ def vehicle_safe_lane_plan_to_dict(plan: VehicleSafeLanePlan) -> dict[str, Any]:
                 "maximum_used_lateral_shift_m": lane.maximum_used_lateral_shift_m,
                 "safe_sample_count": lane.safe_sample_count,
                 "total_sample_count": lane.total_sample_count,
+                "site_boundary_rejected_pose_count": lane.site_boundary_rejected_pose_count,
+                "site_boundary_limited_sample_count": lane.site_boundary_limited_sample_count,
+                "grid_rejected_pose_count": lane.grid_rejected_pose_count,
                 "reason": lane.reason,
                 "centerline_xyz": [list(point) for point in lane.centerline_xyz],
                 "lateral_offsets_m": list(lane.lateral_offsets_m),
