@@ -1,18 +1,18 @@
 """Refine agricultural row evidence into explicit crop-row and aisle geometry.
 
-This layer keeps four concepts separate:
+This layer keeps five concepts separate:
 
 * row centerline / structural band: nominal crop-row geometry
 * vegetation envelope: observed raw obstacle evidence around plants
-* interior aisle candidate: corridor between adjacent valid crop rows
+* aisle geometric envelope: structurally valid corridor before Ground filtering
+* interior aisle candidate: safe corridor between adjacent valid crop rows
 * boundary aisle candidate: explicit wall/boundary-anchor to nearest crop row
 
-Interior aisles exist only between adjacent valid crop rows.
-Boundary aisles require an explicit boundary anchor and are never inferred from
-leftover free space near the map edge.
-
-It deliberately does not mutate the final OccupancyGrid. The output is review
-evidence for the later explicit navigation fusion policy.
+Interior aisles exist only between adjacent valid crop rows. Boundary aisles
+require an explicit boundary anchor and are never inferred from leftover free
+space near the map edge.  The geometric envelope deliberately survives missing
+ground evidence so later V25-12F traversability recovery can reason about short
+agricultural occlusion gaps without globally freeing UNKNOWN cells.
 """
 
 from __future__ import annotations
@@ -99,6 +99,7 @@ class CorridorRefinementResult:
     row_structural_band: np.ndarray
     vegetation_envelope: np.ndarray
     boundary_exclusion: np.ndarray
+    aisle_geometric_envelope: np.ndarray
     aisle_candidate: np.ndarray
     aisle_centerline: np.ndarray
     boundary_aisle_candidate: np.ndarray
@@ -369,6 +370,7 @@ def derive_corridor_refinement(
     interior_safe_base = safe_common & ~boundary_exclusion
     boundary_safe_base = safe_common
 
+    aisle_geometric_envelope = np.zeros(navigation.occupancy.shape, dtype=bool)
     aisle_candidate = np.zeros(navigation.occupancy.shape, dtype=bool)
     aisle_centerline = np.zeros(navigation.occupancy.shape, dtype=bool)
     boundary_aisle_candidate = np.zeros(navigation.occupancy.shape, dtype=bool)
@@ -387,7 +389,7 @@ def derive_corridor_refinement(
         corridor_max: float,
         safe_base: np.ndarray,
         pair_kind: str,
-    ) -> tuple[np.ndarray, np.ndarray, AislePairDiagnostic]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, AislePairDiagnostic]:
         pair_index = len(diagnostics) + 1
         center_distance = float(right_v - left_v)
         available_width = float(corridor_max - corridor_min)
@@ -405,7 +407,7 @@ def derive_corridor_refinement(
         empty = np.zeros(navigation.occupancy.shape, dtype=bool)
 
         if left_range is None or right_range is None:
-            return empty, empty, AislePairDiagnostic(
+            return empty, empty, empty, AislePairDiagnostic(
                 **base_kwargs,
                 longitudinal_overlap_m=None,
                 geometric_cell_count=0,
@@ -419,7 +421,7 @@ def derive_corridor_refinement(
         overlap_length = max(0.0, overlap_max - overlap_min)
 
         if available_width < cfg.aisle_minimum_width_m:
-            return empty, empty, AislePairDiagnostic(
+            return empty, empty, empty, AislePairDiagnostic(
                 **base_kwargs,
                 longitudinal_overlap_m=overlap_length,
                 geometric_cell_count=0,
@@ -428,7 +430,7 @@ def derive_corridor_refinement(
                 status="REJECTED_TOO_NARROW",
             )
         if overlap_length < cfg.minimum_row_longitudinal_span_m:
-            return empty, empty, AislePairDiagnostic(
+            return empty, empty, empty, AislePairDiagnostic(
                 **base_kwargs,
                 longitudinal_overlap_m=overlap_length,
                 geometric_cell_count=0,
@@ -469,15 +471,14 @@ def derive_corridor_refinement(
             centerline_cell_count=centerline_count,
             status=status,
         )
-        return safe, centerline, diagnostic
+        return geometry, safe, centerline, diagnostic
 
-    # Interior row-to-row corridors remain the normal conservative path.
     for index in range(max(0, accepted.size - 1)):
         left = float(accepted[index])
         right = float(accepted[index + 1])
         corridor_min = left + cfg.row_structural_half_width_m + cfg.aisle_side_clearance_m
         corridor_max = right - cfg.row_structural_half_width_m - cfg.aisle_side_clearance_m
-        safe, centerline, diagnostic = evaluate_corridor(
+        geometry, safe, centerline, diagnostic = evaluate_corridor(
             left_v=left,
             right_v=right,
             left_range=row_u_ranges[index] if index < len(row_u_ranges) else None,
@@ -490,13 +491,10 @@ def derive_corridor_refinement(
             pair_kind="ROW_ROW",
         )
         diagnostics.append(diagnostic)
+        aisle_geometric_envelope |= geometry
         aisle_candidate |= safe
         aisle_centerline |= centerline
 
-    # Explicit wall-to-nearest-row corridors. They are never generated merely
-    # because there is leftover space at the map boundary: a rejected row-like
-    # boundary anchor must exist close to the observed edge and have longitudinal
-    # support overlapping the nearest accepted crop row.
     if cfg.enable_boundary_aisles and accepted.size > 0:
         boundary_source = raw_obstacle | source_rows
         wall_support_half_width = max(
@@ -532,7 +530,7 @@ def derive_corridor_refinement(
                 - cfg.row_structural_half_width_m
                 - cfg.aisle_side_clearance_m
             )
-            safe, centerline, diagnostic = evaluate_corridor(
+            geometry, safe, centerline, diagnostic = evaluate_corridor(
                 left_v=low_anchor,
                 right_v=float(accepted[0]),
                 left_range=wall_range,
@@ -551,6 +549,7 @@ def derive_corridor_refinement(
                 pair_kind="BOUNDARY_LOW",
             )
             diagnostics.append(diagnostic)
+            aisle_geometric_envelope |= geometry
             boundary_aisle_candidate |= safe
             boundary_aisle_centerline |= centerline
 
@@ -582,7 +581,7 @@ def derive_corridor_refinement(
                 - cfg.boundary_wall_half_width_m
                 - cfg.boundary_wall_clearance_m
             )
-            safe, centerline, diagnostic = evaluate_corridor(
+            geometry, safe, centerline, diagnostic = evaluate_corridor(
                 left_v=float(accepted[-1]),
                 right_v=high_anchor,
                 left_range=row_u_ranges[-1] if row_u_ranges else None,
@@ -601,6 +600,7 @@ def derive_corridor_refinement(
                 pair_kind="BOUNDARY_HIGH",
             )
             diagnostics.append(diagnostic)
+            aisle_geometric_envelope |= geometry
             boundary_aisle_candidate |= safe
             boundary_aisle_centerline |= centerline
 
@@ -612,6 +612,7 @@ def derive_corridor_refinement(
         row_structural_band=row_structural_band,
         vegetation_envelope=vegetation_envelope,
         boundary_exclusion=boundary_exclusion,
+        aisle_geometric_envelope=aisle_geometric_envelope,
         aisle_candidate=aisle_candidate,
         aisle_centerline=aisle_centerline,
         boundary_aisle_candidate=boundary_aisle_candidate,
