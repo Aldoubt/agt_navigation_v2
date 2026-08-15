@@ -99,6 +99,9 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_vehicle_safe_lane_width_gate test/test_vehicle_safe_lane_width_gate.py
   )
+  ament_add_pytest_test(
+    test_vehicle_safe_lane_diagnostics test/test_vehicle_safe_lane_diagnostics.py
+  )
 endif()
 
 ament_package()
