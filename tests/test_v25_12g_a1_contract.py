@@ -360,3 +360,56 @@ def test_a1_acceptance_harness_reports_recoverable_segment_length(tmp_path, caps
     assert summary["segment_recovery_fraction"] == pytest.approx(
         aisle["active_segment_length_m"] / aisle["structural_length_m"]
     )
+
+
+def test_a1_acceptance_write_mode_only_materializes_segment_asset(tmp_path, capsys):
+    tool = _load_tool()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    _write_recovery_case_assets(run_dir)
+    vehicle_profile = ROOT / "profiles" / "platforms" / "mk_mini.yaml"
+
+    sentinel_names = (
+        "navigation_map.yaml",
+        "navigation_map.pgm",
+        "derivation.yaml",
+        "navigation_map_12f.yaml",
+        "navigation_map_12f.pgm",
+        "navigation_map_12f_derivation.yaml",
+        "traversability_evidence.yaml",
+    )
+    for name in sentinel_names[2:]:
+        (run_dir / name).write_bytes(f"sentinel:{name}\n".encode("utf-8"))
+    before = {name: (run_dir / name).read_bytes() for name in sentinel_names}
+
+    assert (
+        tool.main(
+            [
+                "--run-dir",
+                str(run_dir),
+                "--vehicle-profile",
+                str(vehicle_profile),
+                "--write-segments",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    segment_output = run_dir / "vehicle_feasible_segments.yaml"
+    assert segment_output.is_file(), "write mode must materialize the A1 segment asset"
+
+    from agt_offline_assets.vehicle_feasible_segment import (
+        load_vehicle_feasible_segment_plan,
+    )
+
+    plan = load_vehicle_feasible_segment_plan(segment_output)
+    assert plan.platform_id == "mk_mini"
+    assert [result.aisle_id for result in plan.aisles] == ["aisle_016"]
+    assert [segment.segment_id for segment in plan.aisles[0].active_segments] == [
+        "aisle_016.segment_001",
+        "aisle_016.segment_002",
+    ]
+
+    after = {name: (run_dir / name).read_bytes() for name in sentinel_names}
+    assert after == before
