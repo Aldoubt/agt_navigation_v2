@@ -41,22 +41,22 @@ raw obstacle 0.436
 geometry     0.069
 padding only 0.495
 
- aisle_011
+aisle_011
 raw obstacle 0.344
 geometry     0.122
 padding only 0.534
 
- aisle_013
+aisle_013
 raw obstacle 0.208
 geometry     0.031
 padding only 0.761
 
- aisle_015
+aisle_015
 raw obstacle 0.263
 geometry     0.037
 padding only 0.700
 
- aisle_020
+aisle_020
 raw obstacle 0.057
 geometry     0.161
 padding only 0.781
@@ -67,24 +67,32 @@ padding as the dominant source of their remaining occupied pose-cell conflicts
 
 ## Important discretization fact
 
-The frozen derivation configuration uses the ground-relative Navigation Map
-implementation whose default obstacle padding is:
+The current ground-relative Navigation Map implementation has the default:
 
 ```text
 obstacle_padding_m = 0.05 m
 resolution_m       = 0.10 m
 ```
 
-The current derivation converts metric padding to integer cells using:
+The exact padding value used by the frozen greenhouse derivation must be read
+from its `derivation.yaml`; the source-audit terminal output above did not print
+that field. The next sensitivity asset therefore records both:
+
+```text
+current_requested_obstacle_padding_m
+current_effective_padding_cells
+```
+
+The derivation converts metric padding to integer cells using:
 
 ```text
 ceil(obstacle_padding_m / resolution_m)
 ```
 
-Therefore a requested 0.05 m padding becomes one full grid cell at 0.10 m
-resolution and the existing square maximum-filter dilation expands into the
-8-neighborhood. The route preview separately checks the complete MK-mini
-footprint and currently adds another 0.05 m preview-footprint padding
+Thus if the frozen greenhouse asset uses the 0.05 m default, it becomes one full
+grid cell at 0.10 m resolution and the square maximum-filter dilation expands
+into the 8-neighborhood. The route preview separately checks the complete
+MK-mini footprint and currently adds another 0.05 m preview-footprint padding
 
 This creates a credible double-margin hypothesis, but the source audit alone is
 not enough to justify changing the production map
