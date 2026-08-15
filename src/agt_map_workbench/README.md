@@ -16,9 +16,14 @@ AGT Map Workbench
 │   └── polygon × Z → agt_pointcloud_processing_recipe/v1
 ├── Map Frame Calibration
 │   └── 原点 + X墙 + Z柱 → map_frame.yaml
-└── Ground-relative Navigation Map
-    └── local ground → relative obstacle / slope / step / unknown
-        → navigation_map.pgm / navigation_map.yaml
+├── Ground-relative Navigation Map
+│   └── local ground → relative obstacle / slope / step / unknown
+│       → navigation_map.pgm / navigation_map.yaml
+└── V25-12F Candidate
+    ├── Site Boundary
+    ├── Agricultural aisle geometry
+    ├── bounded occlusion recovery
+    └── navigation_map_12f.* + traversability_evidence.*
 ```
 
 显示采样不会改变正式处理输入
@@ -187,8 +192,12 @@ agt_ground_relative_navigation_map/v1
 - 障碍点证据
 - 坡度
 - 台阶高度
+- Ground Confidence / Robust Slope
+- 精炼行道
+- 结构行道几何包络
+- V25-12F Candidate 与 rich traversability masks
 
-这些层作为半透明栅格叠加在当前已加载 PCD 上，便于判断错误来自 ground model、障碍高度还是 traversability 阈值
+这些层作为半透明栅格叠加在当前已加载 PCD 上，便于判断错误来自 ground model、障碍高度、农业结构还是 traversability 合同
 
 当前 Navigation Map 派生使用**已加载 PCD 的坐标系**
 
@@ -226,6 +235,122 @@ ground_support_count.npy
 
 `navigation_map.yaml` 使用 Nav2 / map_server 常见 trinary 参数
 
+## V25-12F Site Boundary 与 Traversability Candidate
+
+V25-12F 不直接替换当前冻结 Navigation Map，而是先建立独立候选层
+
+### Site Boundary
+
+`Site Boundary` 表示**车辆允许进入区域的内边界**，不是墙体中心线
+
+它由操作者在 Navigation Map 页面点选一次并冻结为
+
+```text
+site_boundary.yaml
+schema agt_site_boundary/v1
+boundary_semantics VEHICLE_PERMITTED_INNER_BOUNDARY
+```
+
+边界已经吸收墙体厚度、墙侧不确定性和期望贴墙安全距离，因此规划阶段不再二次猜墙宽
+
+固定安全规则
+
+```text
+continuous vehicle footprint strictly inside site_boundary → admissible
+footprint touching boundary                           → SITE_BOUNDARY_CONFLICT
+footprint crossing boundary                           → SITE_BOUNDARY_CONFLICT
+```
+
+该规则独立于 Navigation Grid 栅格值；即使墙外误出现 FREE，Vehicle-Safe Lane、Forward Connector gate 与 R6B primitive search 仍不能让 footprint 穿过 Site Boundary
+
+没有 READY `site_boundary.yaml` 时不能生成 12F Candidate，也不会自动使用地图矩形边界替代
+
+### 结构行道几何包络
+
+V25-12F 把两个过去容易混淆的概念拆开
+
+```text
+aisle_geometric_envelope
+= 已通过行距 / 结构宽度 / 纵向重叠检查的农业行道几何
+= 不要求每一个 cell 都有直接 Ground FREE 证据
+
+aisle_candidate / 精炼行道
+= geometric envelope 再经过 Ground / confidence / slope / obstacle gates 后的安全证据
+```
+
+因此植被遮挡造成的短 Ground 缺口不会把“这里结构上本来就是行道”这一层信息一起删除
+
+`Vehicle Corridor / required_envelope_mask` 仍然只是围绕行道中心线的期望车辆包络，不作为 observed FREE 真值
+
+### Rich Traversability
+
+内部证据至少保留
+
+```text
+OBSERVED_FREE
+INFERRED_TRAVERSABLE
+HARD_BLOCKED
+SENSOR_OBSTACLE
+UNKNOWN
+```
+
+A-first 策略只恢复满足全部 gate 的**纵向短 UNKNOWN 缺口**
+
+```text
+inside aisle_geometric_envelope
+inside site_boundary
+outside NO_GO
+outside row_structural_band
+current cell is UNKNOWN, not OCCUPIED
+known local aisle direction
+both longitudinal ends have OBSERVED_FREE support
+gap <= maximum_inferred_gap_m
+endpoint height / slope / step continuity acceptable
+```
+
+初始
+
+```text
+maximum_inferred_gap_m = 0.60 m
+```
+
+禁止全局 `UNKNOWN -> FREE`，禁止横向跨垄形态学补洞，当前 OCCUPIED 在 A-first candidate 中仍然保持阻塞
+
+最终只有在 Nav2 compatibility export 时才压成
+
+```text
+OBSERVED_FREE        -> FREE
+INFERRED_TRAVERSABLE -> FREE
+HARD_BLOCKED         -> OCCUPIED
+SENSOR_OBSTACLE      -> OCCUPIED
+NO_GO                -> OCCUPIED
+UNKNOWN              -> UNKNOWN
+```
+
+### Candidate 输出
+
+12F Candidate 固定写出
+
+```text
+traversability_evidence.yaml
+traversability_evidence.npz
+navigation_map_12f.yaml
+navigation_map_12f.pgm
+navigation_map_12f_derivation.yaml
+```
+
+当前冻结文件
+
+```text
+navigation_map.yaml
+navigation_map.pgm
+derivation.yaml
+```
+
+不会被 Candidate 导出覆盖
+
+Workbench 中的 `生成 12F Candidate` 只更新旁路 candidate state，不会把 `_navigation_result` 偷换成候选地图
+
 ## 路径调试 Route Debug 2D
 
 右侧 `路径调试` 是现有 Workbench 内的 **2D、只读** 路径生产证据查看器
@@ -240,11 +365,15 @@ ground_support_count.npy
 ├── turn_zones.yaml
 ├── coverage_order.yaml
 ├── forward / R5.6 / R6A / R6B 可选冻结资产
-└── vehicle-safe-lane / occupancy-source 可选冻结资产
+├── vehicle-safe-lane / occupancy-source 可选冻结资产
+└── V25-12F optional candidate
+    ├── site_boundary.yaml
+    ├── navigation_map_12f.yaml / pgm
+    └── traversability_evidence.yaml / npz
         ↓
-RouteDebugDataset
+12E RouteDebugDataset + optional RouteDebug12FBundle
         ↓
-agt_route_debug_overlay/v1
+agt_route_debug_overlay/v1 + read-only raster layers
         ↓
 共享 QGraphicsScene
 ```
@@ -255,11 +384,16 @@ agt_route_debug_overlay/v1
 Coverage 总览
 规划结果
 碰撞诊断
+12F A/B
 ```
+
+`12F A/B` 可同时查看 current/candidate Navigation Map、Site Boundary、`INFERRED_TRAVERSABLE`、`HARD_BLOCKED`、`SENSOR_OBSTACLE` 与 `Aisle Geometric Envelope`
+
+12F optional assets 缺失不会让原有 12E Route Debug 数据集失败；缺失只显示为无证据，schema/frame/内容无效则对应 12F layer fail-closed
 
 `ConnectorRequest` 与真实已求解运动轨迹分层显示，Coverage 行道方向不会被误画成倒车；只有冻结 R6B sample 明确包含 `motion_direction=REVERSE` 时才显示 Reverse 段和 cusp
 
-`NO_GO` 保持为独立的语义排除证据，不与物理 `OCCUPIED` 混为一种状态
+`NO_GO` 保持为独立的语义排除证据，不与物理 `OCCUPIED` 或 Site Boundary 混为一种状态
 
 碰撞诊断可以叠加
 
@@ -281,9 +415,20 @@ route_debug_overlay.geojson
 
 该文件只是 `DEBUG_RENDER_ONLY` 派生证据，不是新的路径真值，也不能用于 READY promotion
 
-可选资产缺失时只关闭对应图层；已有资产若 schema、`frame_id` 或内容合同无效，则该图层 fail-closed，不做静默坐标转换
+## V25-12F A/B 验收工具
 
-真实温室视觉验收必须由操作者实际完成后再标记 PASS；当前工具实现本身不能代替现场检查
+候选文件冻结后，可用同一 MK-mini 配置比较 current/candidate Vehicle-Safe Lane，并用同一组未修改的 R6B 默认参数重放 `connector_015` 与 `connector_017`
+
+```bash
+python3 tools/v25_12f_acceptance.py \
+  --run-dir runtime/maps/agt_workbench_run \
+  --vehicle-profile profiles/platforms/mk_mini.yaml \
+  --pretty
+```
+
+输出是 `agt_v25_12f_acceptance_report/v1` JSON，只用于离线 A/B 审查，不会把 candidate promotion 为 READY
+
+真实温室视觉验收和 A/B 数据必须由操作者实际完成后再标记 PASS；代码实现本身不能代替现场检查
 
 ## 产品边界
 
@@ -291,20 +436,25 @@ route_debug_overlay.geojson
 master / cleaned PCD
 ├── pointcloud recipe → immutable processed PCD
 ├── map_frame.yaml
-└── ground-relative navigation derivation
-    ├── evidence layers
-    ├── polygon overrides
-    └── PGM/YAML
+├── ground-relative navigation derivation
+│   ├── evidence layers
+│   ├── polygon overrides
+│   └── current PGM/YAML
+└── V25-12F candidate
+    ├── manually frozen Site Boundary
+    ├── rich traversability evidence
+    └── candidate PGM/YAML
 ```
 
 Workbench 是 authoring/review 工具，不是第二套运行时地图真源
 
 ## 下一步
 
-- materialize `map_frame.yaml` 为新的不可变 transformed PCD revision
-- 在真实 `green house full.pcd` 上调 Ground-relative 参数并记录 acceptance evidence
-- 将 Navigation Map derivation 绑定 Map Version / Site Package lineage
-- 增加更强的 DTM / progressive morphology 候选，与当前 elevation-grid MVP 对比
+- 在真实 `runtime/maps/agt_workbench_run` 上人工冻结 Site Boundary
+- 生成 12F candidate 并完成 Route Debug current/candidate A/B
+- 用相同 MK-mini profile 运行 `tools/v25_12f_acceptance.py`
+- 检查 `aisle_003 / 005 / 013` 与 `connector_015 / 017`
+- 只有真实 A/B 验收后才决定是否 promotion 12F candidate 为 canonical Navigation Map
 - Localization Prior
 - Semantic Map
 - Route Preview
