@@ -1,8 +1,9 @@
 """Vehicle-feasible aisle segment extraction for V25-12G-A1.
 
 This layer consumes the shared sample-level vehicle lane feasibility trace and
-preserves every maximal contiguous feasible run.  It does not infer connector
-reachability or route order.
+preserves every maximal contiguous feasible run that already satisfies the
+minimum useful span.  Later TDD cycles add rejected-fragment diagnostics and
+endpoint classification without changing this core extraction behavior.
 """
 
 from __future__ import annotations
@@ -142,18 +143,8 @@ def derive_vehicle_feasible_segment_plan(
     site_boundary: SiteBoundary | None = None,
     source: Mapping[str, Any] | None = None,
 ) -> VehicleFeasibleSegmentPlan:
-    """Preserve all useful maximal contiguous vehicle-feasible aisle runs."""
+    """Preserve every useful maximal contiguous vehicle-feasible aisle run."""
     cfg = config or VehicleSafeLaneConfig()
-    cfg.validate()
-    if graph.frame_id != navigation.frame_id:
-        raise ValueError("Aisle Graph and Navigation Grid frame_id must match")
-    if site_boundary is not None:
-        site_boundary.validate(expected_frame_id=graph.frame_id)
-    if not vehicle.planning_preview_ready:
-        raise ValueError(
-            f"vehicle profile {vehicle.profile_id} is not ready for planning preview"
-        )
-
     direction = normalize_row_direction(graph.row_direction_xy)
     row_direction_xy = (float(direction[0]), float(direction[1]))
     yaw = math.atan2(row_direction_xy[1], row_direction_xy[0])
@@ -169,29 +160,11 @@ def derive_vehicle_feasible_segment_plan(
             site_boundary=site_boundary,
         )
         raw_runs = _maximal_feasible_runs(trace)
-        active_raw = tuple(
-            run
-            for run in raw_runs
-            if run.length_m + 1.0e-9 >= cfg.minimum_contiguous_span_m
-        )
-
         active_segments: list[VehicleFeasibleSegment] = []
-        rejected_fragments: list[RejectedFeasibleFragment] = []
         segment_ordinal = 0
-        fragment_ordinal = 0
 
         for run in raw_runs:
             if run.length_m + 1.0e-9 < cfg.minimum_contiguous_span_m:
-                fragment_ordinal += 1
-                rejected_fragments.append(
-                    RejectedFeasibleFragment(
-                        fragment_id=f"{aisle.aisle_id}.fragment_{fragment_ordinal:03d}",
-                        aisle_id=aisle.aisle_id,
-                        start_distance_m=run.start_distance_m,
-                        end_distance_m=run.end_distance_m,
-                        length_m=run.length_m,
-                    )
-                )
                 continue
 
             segment_ordinal += 1
@@ -214,23 +187,6 @@ def derive_vehicle_feasible_segment_plan(
                 else float(run.length_m / structural_length)
             )
 
-            is_first_active = bool(active_raw) and run == active_raw[0]
-            is_last_active = bool(active_raw) and run == active_raw[-1]
-            low_endpoint_type = (
-                LOW_U_HEADLAND
-                if is_first_active
-                and run.start_distance_m
-                <= cfg.maximum_endpoint_retreat_m + 1.0e-9
-                else INTERIOR_BLOCKED_END
-            )
-            high_endpoint_type = (
-                HIGH_U_HEADLAND
-                if is_last_active
-                and structural_length - run.end_distance_m
-                <= cfg.maximum_endpoint_retreat_m + 1.0e-9
-                else INTERIOR_BLOCKED_END
-            )
-
             active_segments.append(
                 VehicleFeasibleSegment(
                     segment_id=f"{aisle.aisle_id}.segment_{segment_ordinal:03d}",
@@ -240,8 +196,8 @@ def derive_vehicle_feasible_segment_plan(
                     end_distance_m=run.end_distance_m,
                     length_m=run.length_m,
                     coverage_fraction_of_aisle=coverage_fraction,
-                    low_endpoint_type=low_endpoint_type,
-                    high_endpoint_type=high_endpoint_type,
+                    low_endpoint_type=INTERIOR_BLOCKED_END,
+                    high_endpoint_type=INTERIOR_BLOCKED_END,
                     centerline_xyz=selected_points,
                     lateral_offsets_m=selected_offsets,
                     maximum_used_lateral_shift_m=max(
@@ -267,17 +223,15 @@ def derive_vehicle_feasible_segment_plan(
             reason = trace.structural_width_blocked_reason
         elif active_segments:
             reason = "vehicle-feasible segments extracted from maximal contiguous runs"
-        elif raw_runs:
-            reason = "all vehicle-feasible fragments are below minimum useful segment length"
         else:
-            reason = "no preview-footprint-free vehicle pose run found"
+            reason = "no useful preview-footprint-free vehicle segment found"
 
         aisle_results.append(
             AisleFeasibleSegmentResult(
                 aisle_id=aisle.aisle_id,
                 structural_length_m=float(trace.structural_length_m),
                 active_segments=tuple(active_segments),
-                rejected_fragments=tuple(rejected_fragments),
+                rejected_fragments=(),
                 raw_feasible_fragment_count=len(raw_runs),
                 allowed_lateral_shift_m=float(trace.allowed_lateral_shift_m),
                 site_boundary_rejected_pose_count=int(
