@@ -5,6 +5,7 @@ import numpy as np
 from agt_offline_assets.agricultural_aisle_graph import AislePrimitive, AgriculturalAisleGraph
 from agt_offline_assets.navigation_grid import NavigationGridEvidence
 from agt_offline_assets.navigation_map_derivation import FREE, OCCUPIED
+from agt_offline_assets.site_boundary import SiteBoundary
 from agt_offline_assets.vehicle_profile import CanonicalVehicleProfile
 from agt_offline_assets.vehicle_safe_lane import (
     VehicleSafeLaneConfig,
@@ -85,9 +86,6 @@ def _navigation(*, center_obstacle=False):
     height = 48
     occupancy = np.full((height, width), FREE, dtype=np.uint8)
     if center_obstacle:
-        # A thin obstacle ridge occupies the structural centerline for the full
-        # aisle length.  A wide aisle can shift the vehicle lane laterally,
-        # while a narrow aisle cannot.
         y0, y1 = -0.05, 0.05
         x0, x1 = -0.5, 4.5
         c0 = int(math.floor((x0 - origin_x) / resolution))
@@ -155,3 +153,21 @@ def test_narrow_aisle_does_not_force_vehicle_lane_through_occupied_cells():
     assert lane.status == "NO_VEHICLE_SAFE_LANE"
     assert lane.allowed_lateral_shift_m < 0.05
     assert lane.centerline_xyz == ()
+
+
+def test_all_free_grid_still_rejects_lane_when_footprint_crosses_site_boundary():
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((-1.0, -0.20), (5.0, -0.20), (5.0, 0.20), (-1.0, 0.20)),
+    )
+    plan = derive_vehicle_safe_lane_plan(
+        _graph(width=1.60),
+        _navigation(),
+        _vehicle(),
+        _config(),
+        site_boundary=boundary,
+    )
+    lane = plan.lanes[0]
+    assert lane.status == "NO_VEHICLE_SAFE_LANE"
+    assert lane.centerline_xyz == ()
+    assert "SITE_BOUNDARY_CONFLICT" in lane.reason
