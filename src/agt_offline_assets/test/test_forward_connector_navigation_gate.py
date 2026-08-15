@@ -7,6 +7,7 @@ from agt_offline_assets import (
     ConnectorRequest,
     ForwardConnectorNavigationGateConfig,
     NavigationGridEvidence,
+    SiteBoundary,
     TurnZone,
     TurnZoneSet,
     derive_forward_connector_navigation_gate,
@@ -103,8 +104,6 @@ def test_all_free_navigation_grid_accepts_one_forward_preview_candidate():
     assert result.footprint_evidence.occupied_count == 0
     assert result.footprint_evidence.unknown_count == 0
     assert result.footprint_evidence.grid_coverage_fraction == 1.0
-    # The original narrow Turn Zone may still need expansion; navigation safety
-    # and search-envelope size are deliberately separate questions.
     assert result.max_required_zone_extension_m >= 0.0
 
 
@@ -121,6 +120,24 @@ def test_fully_occupied_navigation_grid_rejects_all_forward_preview_candidates()
     assert result.status == "NO_FORWARD_PREVIEW_FREE_CANDIDATE"
     assert result.footprint_evidence.occupied_fraction == 1.0
     assert len(result.samples) > 2
+
+
+def test_free_grid_candidate_is_rejected_when_swept_footprint_crosses_boundary():
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((-0.10, -0.20), (0.10, -0.20), (0.10, 2.20), (-0.10, 2.20)),
+    )
+    plan = derive_forward_connector_navigation_gate(
+        (_request(),),
+        _zones(),
+        _grid(),
+        _vehicle(),
+        site_boundary=boundary,
+    )
+    assert plan.preview_free_count == 0
+    result = plan.connectors[0]
+    assert result.status == "NO_FORWARD_PREVIEW_FREE_CANDIDATE"
+    assert "SITE_BOUNDARY_CONFLICT" in result.reason
 
 
 def test_serialization_preserves_preview_only_boundary_and_path_evidence():
