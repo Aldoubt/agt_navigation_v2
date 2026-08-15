@@ -107,3 +107,16 @@ def test_site_boundary_is_shared_by_lane_forward_and_r6b_gates():
     assert "SITE_BOUNDARY_CONFLICT" in lane
     assert "SITE_BOUNDARY_CONFLICT" in forward
     assert "SITE_BOUNDARY_CONFLICT" in reverse
+
+
+def test_acceptance_separates_boundary_rejected_poses_from_lane_blocking():
+    text = _read("tools/v25_12f_acceptance.py")
+    for token in (
+        "site_boundary_rejected_pose_count",
+        "site_boundary_limited_sample_count",
+        "site_boundary_rejected_pose_aisles",
+        "site_boundary_limited_aisles",
+        "site_boundary_fully_blocked_aisles",
+    ):
+        assert token in text
+    assert 'if "SITE_BOUNDARY_CONFLICT" in str(lane.reason)' not in text
