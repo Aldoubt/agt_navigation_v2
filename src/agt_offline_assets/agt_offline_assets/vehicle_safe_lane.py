@@ -6,17 +6,10 @@ vehicle. This layer keeps that graph immutable and derives a vehicle-specific
 lane near each structural centerline using the frozen Navigation Grid and the
 canonical preview footprint.
 
-The current implementation is intentionally conservative:
-
-* aisle samples keep the canonical row heading
-* candidate points may shift only laterally in the row frame
-* the lateral shift is bounded by both configuration and aisle width surplus
-* every selected pose must be preview-footprint FREE in the frozen grid
-* consecutive selected poses have a bounded lateral-step change
-* the longest contiguous safe segment is frozen as review evidence
-
-This is still PREVIEW_ONLY_NOT_R8_VEHICLE_READY because MK-mini's exact physical
-base_footprint reference and final mounted envelope are not yet measured.
+V25-12F optionally adds one independent hard invariant: when a Site Boundary is
+provided, every continuous preview footprint must stay strictly inside the
+vehicle-permitted inner perimeter. This does not weaken the existing Navigation
+Grid FREE requirement.
 """
 
 from __future__ import annotations
@@ -30,9 +23,14 @@ import numpy as np
 import yaml
 
 from .agricultural_aisle_graph import AislePrimitive, AgriculturalAisleGraph
-from .forward_connector_navigation_gate import _preview_local_footprint
+from .forward_connector import ForwardConnectorSample
+from .forward_connector_navigation_gate import (
+    _preview_local_footprint,
+    _transform_polygon,
+)
 from .navigation_grid import NavigationGridEvidence
 from .reverse_primitive_connector import _preview_pose_free
+from .site_boundary import SiteBoundary, polygon_strictly_inside_site_boundary
 from .vehicle_profile import CanonicalVehicleProfile
 
 
@@ -62,7 +60,10 @@ class VehicleSafeLaneConfig:
             value = float(getattr(self, name))
             if not math.isfinite(value) or value <= 0.0:
                 raise ValueError(f"{name} must be finite and > 0")
-        if not math.isfinite(self.preview_footprint_padding_m) or self.preview_footprint_padding_m < 0.0:
+        if (
+            not math.isfinite(self.preview_footprint_padding_m)
+            or self.preview_footprint_padding_m < 0.0
+        ):
             raise ValueError("preview_footprint_padding_m must be finite and >= 0")
         if not 0.0 <= self.minimum_lane_coverage_fraction <= 1.0:
             raise ValueError("minimum_lane_coverage_fraction must be in [0, 1]")
@@ -145,8 +146,14 @@ def _resample_polyline(
         index = int(np.searchsorted(cumulative, distance, side="right") - 1)
         index = min(max(index, 0), len(cumulative) - 2)
         span = float(cumulative[index + 1] - cumulative[index])
-        ratio = 0.0 if span <= 1.0e-12 else (float(distance) - float(cumulative[index])) / span
-        output[out_index] = points[index] + ratio * (points[index + 1] - points[index])
+        ratio = (
+            0.0
+            if span <= 1.0e-12
+            else (float(distance) - float(cumulative[index])) / span
+        )
+        output[out_index] = points[index] + ratio * (
+            points[index + 1] - points[index]
+        )
     return output, distances
 
 
@@ -160,7 +167,9 @@ def _offset_candidates(maximum_shift_m: float, step_m: float) -> tuple[float, ..
         values.extend((-value, value))
     if count * step_m < maximum_shift_m - 1.0e-9:
         values.extend((-maximum_shift_m, maximum_shift_m))
-    return tuple(sorted(set(float(v) for v in values), key=lambda v: (abs(v), v)))
+    return tuple(
+        sorted(set(float(v) for v in values), key=lambda v: (abs(v), v))
+    )
 
 
 def _empty_lane(
@@ -189,6 +198,20 @@ def _empty_lane(
     )
 
 
+def _pose_inside_site_boundary(
+    x: float,
+    y: float,
+    yaw: float,
+    local_footprint,
+    site_boundary: SiteBoundary | None,
+) -> bool:
+    if site_boundary is None:
+        return True
+    sample = ForwardConnectorSample(x=float(x), y=float(y), z=0.0, yaw=float(yaw))
+    polygon = _transform_polygon(local_footprint, sample)
+    return polygon_strictly_inside_site_boundary(site_boundary, polygon)
+
+
 def _derive_one_lane(
     aisle: AislePrimitive,
     navigation: NavigationGridEvidence,
@@ -197,10 +220,13 @@ def _derive_one_lane(
     perpendicular: np.ndarray,
     local_footprint,
     cfg: VehicleSafeLaneConfig,
+    site_boundary: SiteBoundary | None,
 ) -> VehicleSafeLane:
     samples, distances = _resample_polyline(aisle, cfg.sample_spacing_m)
     total = float(distances[-1]) if distances.size else 0.0
-    required_lateral_width = float(vehicle.navigation_width_m + 2.0 * cfg.preview_footprint_padding_m)
+    required_lateral_width = float(
+        vehicle.navigation_width_m + 2.0 * cfg.preview_footprint_padding_m
+    )
 
     if float(aisle.geometric_width_m) + 1.0e-9 < required_lateral_width:
         return _empty_lane(
@@ -210,7 +236,8 @@ def _derive_one_lane(
             total_sample_count=int(samples.shape[0]),
             reason=(
                 "STRUCTURAL_WIDTH_BELOW_PREVIEW_VEHICLE_WIDTH: "
-                f"aisle={aisle.geometric_width_m:.3f} m required={required_lateral_width:.3f} m"
+                f"aisle={aisle.geometric_width_m:.3f} m "
+                f"required={required_lateral_width:.3f} m"
             ),
         )
 
@@ -222,17 +249,37 @@ def _derive_one_lane(
     selected: list[tuple[float, float, float] | None] = []
     selected_offsets: list[float | None] = []
     previous_offset: float | None = None
+    boundary_rejections = 0
+    grid_rejections = 0
 
     for sample in samples:
         feasible: list[tuple[float, float, tuple[float, float, float]]] = []
         for offset in offsets:
-            if previous_offset is not None and abs(float(offset) - previous_offset) > cfg.maximum_lateral_step_m + 1.0e-9:
+            if (
+                previous_offset is not None
+                and abs(float(offset) - previous_offset)
+                > cfg.maximum_lateral_step_m + 1.0e-9
+            ):
                 continue
             x = float(sample[0] + offset * perpendicular[0])
             y = float(sample[1] + offset * perpendicular[1])
-            if not _preview_pose_free(x, y, yaw, navigation, local_footprint):
+            if not _pose_inside_site_boundary(
+                x,
+                y,
+                yaw,
+                local_footprint,
+                site_boundary,
+            ):
+                boundary_rejections += 1
                 continue
-            continuity = 0.0 if previous_offset is None else abs(float(offset) - previous_offset)
+            if not _preview_pose_free(x, y, yaw, navigation, local_footprint):
+                grid_rejections += 1
+                continue
+            continuity = (
+                0.0
+                if previous_offset is None
+                else abs(float(offset) - previous_offset)
+            )
             score = abs(float(offset)) + 0.5 * continuity
             feasible.append((score, float(offset), (x, y, float(sample[2]))))
 
@@ -260,12 +307,22 @@ def _derive_one_lane(
         segments.append((start, len(selected) - 1))
 
     if not segments:
+        reasons = []
+        if boundary_rejections > 0:
+            reasons.append(
+                "SITE_BOUNDARY_CONFLICT: candidate preview footprints touch or cross the vehicle-permitted inner boundary"
+            )
+        if grid_rejections > 0:
+            reasons.append(
+                "no preview-footprint-free pose was found in the Navigation Grid near the structural aisle centerline"
+            )
         return _empty_lane(
             aisle,
             structural_length_m=total,
             allowed_lateral_shift_m=allowed_shift,
             total_sample_count=len(selected),
-            reason="no preview-footprint-free pose was found near the structural aisle centerline",
+            reason="; ".join(reasons)
+            or "no preview-footprint-free pose was found near the structural aisle centerline",
         )
 
     def segment_span(segment: tuple[int, int]) -> float:
@@ -274,14 +331,26 @@ def _derive_one_lane(
 
     best_start, best_end = max(
         segments,
-        key=lambda segment: (segment_span(segment), segment[1] - segment[0], -segment[0]),
+        key=lambda segment: (
+            segment_span(segment),
+            segment[1] - segment[0],
+            -segment[0],
+        ),
     )
     span = segment_span((best_start, best_end))
     low_retreat = float(distances[best_start])
     high_retreat = float(total - distances[best_end])
     coverage = 0.0 if total <= 1.0e-12 else float(span / total)
-    lane_points = tuple(selected[index] for index in range(best_start, best_end + 1) if selected[index] is not None)
-    lane_offsets = tuple(float(selected_offsets[index]) for index in range(best_start, best_end + 1) if selected_offsets[index] is not None)
+    lane_points = tuple(
+        selected[index]
+        for index in range(best_start, best_end + 1)
+        if selected[index] is not None
+    )
+    lane_offsets = tuple(
+        float(selected_offsets[index])
+        for index in range(best_start, best_end + 1)
+        if selected_offsets[index] is not None
+    )
     maximum_used_shift = max((abs(v) for v in lane_offsets), default=0.0)
     safe_count = sum(point is not None for point in selected)
 
@@ -293,7 +362,10 @@ def _derive_one_lane(
     span_ok = span + 1.0e-9 >= cfg.minimum_contiguous_span_m
     if endpoint_ok and coverage_ok and span_ok:
         status = "VEHICLE_SAFE_LANE_READY"
-        reason = "a continuous preview-footprint-free lane spans the structural aisle with bounded endpoint retreat"
+        reason = (
+            "a continuous preview-footprint-free lane spans the structural aisle "
+            "with bounded endpoint retreat"
+        )
     else:
         status = "VEHICLE_SAFE_LANE_PARTIAL"
         reasons = []
@@ -303,6 +375,8 @@ def _derive_one_lane(
             reasons.append("continuous lane coverage fraction is below threshold")
         if not span_ok:
             reasons.append("continuous lane span is below threshold")
+        if boundary_rejections > 0:
+            reasons.append("SITE_BOUNDARY_CONFLICT removes some candidate poses")
         reason = "; ".join(reasons) or "vehicle-safe lane is incomplete"
 
     return VehicleSafeLane(
@@ -329,6 +403,7 @@ def derive_vehicle_safe_lane_plan(
     vehicle: CanonicalVehicleProfile,
     config: VehicleSafeLaneConfig | None = None,
     *,
+    site_boundary: SiteBoundary | None = None,
     source: Mapping[str, Any] | None = None,
 ) -> VehicleSafeLanePlan:
     """Derive vehicle-pose-free lanes without mutating structural map evidence."""
@@ -336,12 +411,19 @@ def derive_vehicle_safe_lane_plan(
     cfg.validate()
     if graph.frame_id != navigation.frame_id:
         raise ValueError("Aisle Graph and Navigation Grid frame_id must match")
+    if site_boundary is not None:
+        site_boundary.validate(expected_frame_id=graph.frame_id)
     if not vehicle.planning_preview_ready:
-        raise ValueError(f"vehicle profile {vehicle.profile_id} is not ready for planning preview")
+        raise ValueError(
+            f"vehicle profile {vehicle.profile_id} is not ready for planning preview"
+        )
 
     direction = _normalize(graph.row_direction_xy)
     perpendicular = np.array([-direction[1], direction[0]], dtype=np.float64)
-    local_footprint = _preview_local_footprint(vehicle, cfg.preview_footprint_padding_m)
+    local_footprint = _preview_local_footprint(
+        vehicle,
+        cfg.preview_footprint_padding_m,
+    )
     lanes = tuple(
         _derive_one_lane(
             aisle,
@@ -351,6 +433,7 @@ def derive_vehicle_safe_lane_plan(
             perpendicular,
             local_footprint,
             cfg,
+            site_boundary,
         )
         for aisle in graph.aisles
     )
@@ -366,6 +449,7 @@ def derive_vehicle_safe_lane_plan(
             "structural_width_gate_preserved": True,
             "structural_aisle_graph_mutated": False,
             "navigation_occupancy_mutated": False,
+            "site_boundary_enforced": site_boundary is not None,
         }
     )
     return VehicleSafeLanePlan(
@@ -419,7 +503,11 @@ def write_vehicle_safe_lane_plan(plan: VehicleSafeLanePlan, path: str | Path) ->
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(
-        yaml.safe_dump(vehicle_safe_lane_plan_to_dict(plan), sort_keys=False, allow_unicode=True),
+        yaml.safe_dump(
+            vehicle_safe_lane_plan_to_dict(plan),
+            sort_keys=False,
+            allow_unicode=True,
+        ),
         encoding="utf-8",
     )
     return output
