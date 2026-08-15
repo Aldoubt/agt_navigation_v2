@@ -1,6 +1,8 @@
+from dataclasses import replace
 import math
 
 import numpy as np
+import pytest
 
 from agt_offline_assets.agricultural_aisle_graph import AislePrimitive, AgriculturalAisleGraph
 from agt_offline_assets.navigation_grid import NavigationGridEvidence
@@ -173,3 +175,15 @@ def test_only_outer_active_segment_endpoints_are_headland_candidates():
     assert first.high_endpoint_type == INTERIOR_BLOCKED_END
     assert second.low_endpoint_type == INTERIOR_BLOCKED_END
     assert second.high_endpoint_type == HIGH_U_HEADLAND
+
+
+def test_frame_mismatch_fails_closed_before_segment_generation():
+    navigation = replace(_navigation_with_blocked_x_ranges(()), frame_id="odom")
+
+    with pytest.raises(ValueError, match="frame_id"):
+        derive_vehicle_feasible_segment_plan(
+            _graph(length_m=5.0),
+            navigation,
+            _vehicle(),
+            _config(minimum_contiguous_span_m=1.0),
+        )
