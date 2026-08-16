@@ -13,8 +13,12 @@ from .vehicle_feasible_segment import (
 
 SERVICE_LOW_TO_HIGH = "SERVICE_LOW_TO_HIGH"
 SERVICE_HIGH_TO_LOW = "SERVICE_HIGH_TO_LOW"
+DEAD_END_FORWARD_IN_REVERSE_OUT = "DEAD_END_FORWARD_IN_REVERSE_OUT"
 FORWARD = "FORWARD"
 TOPOLOGY_SERVICE_CANDIDATE = "TOPOLOGY_SERVICE_CANDIDATE"
+REQUIRES_A3_REVERSE_SERVICE_VALIDATION = (
+    "REQUIRES_A3_REVERSE_SERVICE_VALIDATION"
+)
 HEADLAND_TOPOLOGY_CANDIDATE = "HEADLAND_TOPOLOGY_CANDIDATE"
 EXTERNAL_REACHABILITY_UNPROVEN = "EXTERNAL_REACHABILITY_UNPROVEN"
 
@@ -74,7 +78,7 @@ def _entry_reachability(endpoint_type: str) -> str:
 def _build_service_resources_and_states(
     segment_plan: VehicleFeasibleSegmentPlan,
 ) -> tuple[tuple[ServiceResource, ...], tuple[ServiceState, ...]]:
-    """Copy A1 physical segment truth and expand two ordinary forward states."""
+    """Copy A1 segment truth and expand ordinary plus one-headland states."""
     segments = sorted(
         (
             segment
@@ -152,5 +156,37 @@ def _build_service_resources_and_states(
                 validation_status=TOPOLOGY_SERVICE_CANDIDATE,
             )
         )
+
+        low_is_headland = resource.low_endpoint_type in _HEADLAND_TYPES
+        high_is_headland = resource.high_endpoint_type in _HEADLAND_TYPES
+        if low_is_headland != high_is_headland:
+            if low_is_headland:
+                endpoint_type = resource.low_endpoint_type
+                endpoint_pose = resource.low_endpoint_pose
+            else:
+                endpoint_type = resource.high_endpoint_type
+                endpoint_pose = _reverse_heading(resource.high_endpoint_pose)
+
+            states.append(
+                ServiceState(
+                    service_state_id=(
+                        f"{resource.segment_id}.dead_end_forward_in_reverse_out"
+                    ),
+                    segment_id=resource.segment_id,
+                    aisle_id=resource.aisle_id,
+                    service_type=DEAD_END_FORWARD_IN_REVERSE_OUT,
+                    entry_endpoint_type=endpoint_type,
+                    exit_endpoint_type=endpoint_type,
+                    entry_pose=endpoint_pose,
+                    exit_pose=endpoint_pose,
+                    service_motion_direction=FORWARD,
+                    forward_service_distance_m=resource.coverage_length_m,
+                    reverse_service_distance_m=resource.coverage_length_m,
+                    coverage_segment_id=resource.segment_id,
+                    coverage_reward_length_m=resource.coverage_length_m,
+                    external_reachability_status=HEADLAND_TOPOLOGY_CANDIDATE,
+                    validation_status=REQUIRES_A3_REVERSE_SERVICE_VALIDATION,
+                )
+            )
 
     return tuple(resources), tuple(states)
