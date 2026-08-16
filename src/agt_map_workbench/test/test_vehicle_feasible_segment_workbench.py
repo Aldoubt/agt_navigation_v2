@@ -129,3 +129,33 @@ def test_valid_vehicle_feasible_segment_sibling_loads_plan_and_preview(tmp_path)
         app.processEvents()
     finally:
         window.close()
+
+
+def test_invalid_vehicle_feasible_segment_sibling_is_local_and_legacy_dispatch_survives(
+    tmp_path,
+):
+    app = qapp()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    source = run_dir / "map.pcd"
+    source.write_text("placeholder\n", encoding="utf-8")
+    (run_dir / "vehicle_feasible_segments.yaml").write_text(
+        "schema: not-an-a1-segment-plan\nstatus: DRAFT\n",
+        encoding="utf-8",
+    )
+
+    window = ReviewMapWorkbenchWindow()
+    try:
+        window._source_path = source
+        window._load_vehicle_feasible_segment_sibling()
+
+        assert window._vehicle_feasible_segment_plan is None
+        assert window._vehicle_feasible_segment_last_error
+        assert window._vehicle_feasible_segment_preview.active_item_count == 0
+        assert window._vehicle_feasible_segment_preview.rejected_fragment_count == 0
+
+        window._nav_layer.setCurrentIndex(0)
+        window._update_navigation_overlay()
+        app.processEvents()
+    finally:
+        window.close()
