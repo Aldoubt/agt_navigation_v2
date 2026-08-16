@@ -5,7 +5,7 @@ Date: 2026-08-16
 Status:
 
 ```text
-CODE IMPLEMENTED / FOCUSED AUTOMATED VERIFICATION PASS / PACKAGE-LEVEL COLCON TEST PASS / REAL-DATA A1 EXPERIMENT PENDING / NOT ROUTE-READY
+CODE IMPLEMENTED / FOCUSED AUTOMATED VERIFICATION PASS / PACKAGE-LEVEL COLCON TEST PASS / REAL-DATA A1 OBSERVED / SUPPORTED WITH MAP/FOOTPRINT CAVEATS / NOT ROUTE-READY
 ```
 
 This checkpoint starts the V25-12G Maximum Feasible Coverage implementation series after the frozen V25-12F safety / traversability experiment
@@ -247,6 +247,78 @@ Workspace-wide historical failures from unrelated packages, including third-part
 
 Therefore the focused and package-level automated verification gates for V25-12G-A1 Workbench integration are accepted as PASS
 
+## Real-data evidence checkpoint
+
+The real greenhouse A1 experiment is frozen in:
+
+```text
+docs/v2.5/V25_12G_A1_REAL_DATA_2026-08-16.md
+```
+
+The five diagnostic aisles `aisle_016` through `aisle_020` produced:
+
+```text
+structural length total                131.096874 m
+legacy longest-only selected span      69.718350 m
+A1 active segment length               97.356674 m
+recoverable additional segment length  27.638324 m
+active segments                        14
+rejected short fragments               23
+A1 segment recovery fraction            0.742632
+```
+
+The 23 rejected feasible fragments total approximately 2.893816 m and are predominantly very short feasible islands below the frozen 1.0 m threshold
+
+The narrow real-run write created only:
+
+```text
+vehicle_feasible_segments.yaml
+```
+
+Operator SHA256 verification reported all frozen canonical/input assets unchanged after the write:
+
+```text
+navigation_map.yaml  OK
+navigation_map.pgm   OK
+derivation.yaml      OK
+aisle_graph.yaml     OK
+site_boundary.yaml   OK
+```
+
+Workbench review showed the active A1 geometry aligned with the real greenhouse aisle structure without gross transform, cross-row, or boundary-scale errors
+
+`aisle_020` remained the clean one-segment LOW_U_HEADLAND -> HIGH_U_HEADLAND control case
+
+`aisle_016`, `aisle_017`, `aisle_018`, and especially `aisle_019` retained spatially credible active geometry but exposed substantial fragmentation in the frozen configuration-space evidence
+
+A diagnostic-only sensitivity probe over 277 blocked longitudinal samples found:
+
+```text
+recovered when Site Boundary omitted          45 / 277
+recovered when extra 0.05 m padding removed 148 / 277
+```
+
+These counterfactual probes overlap and are not independent causal categories
+
+They do show that padding / Navigation Grid / base-footprint interaction is more broadly influential than Site Boundary in this diagnostic subset, while Site Boundary remains a valid hard safety invariant and is locally material in some aisle regions
+
+One provenance caveat remains recorded:
+
+```text
+derivation.yaml frame_id = source_map
+aisle_graph / site_boundary / A1 frame_id = map
+```
+
+Code-path review and the real Workbench overlay indicate shared numeric geometry with inconsistent metadata naming rather than an observed rigid-transform error
+
+The real-data classification is therefore:
+
+```text
+A1 SEGMENT REPRESENTATION SUPPORTED WITH MAP/FOOTPRINT CAVEATS
+```
+
+This does not authorize removing Site Boundary, changing the frozen 0.05 m padding, or treating A1 as route-ready
+
 ## Current A1 decision
 
 ```text
@@ -257,39 +329,44 @@ short-fragment non-spatial diagnostics         KEEP
 deterministic vehicle_feasible_segments.yaml   KEEP
 A1 diagnostic acceptance harness               KEEP
 Workbench review-only segment layer             KEEP
+real-data segment representation                ACCEPT WITH MAP/FOOTPRINT CAVEATS
+Site Boundary hard invariant                    KEEP
+0.05 m preview padding                          KEEP FROZEN AT A1 CHECKPOINT
+frame metadata inconsistency                    RECORD FOR SEPARATE CORRECTION
 rejected-fragment geometry reconstruction       DO NOT ADD
 Workbench A1 derivation                         DO NOT ADD
 canonical map mutation                          DO NOT ADD
 route / connector / ordering semantics          NOT IN A1
 ```
 
-## Remaining A1 gate
+## A1 gate status
 
-A1 is code-complete for the current extraction / serialization / diagnostic visualization scope, but it is not yet accepted as a real greenhouse evidence checkpoint
+A1 is accepted as a real greenhouse segment-representation checkpoint with explicit map/footprint caveats
 
-The remaining gate is the real-data A1 experiment
+The evidence supports preserving all useful contiguous feasible runs rather than retaining only one longest span per aisle
 
-The next run must use a real greenhouse run directory and record at minimum:
+The evidence does not prove that separate segments can reach one another or that every active segment can be serviced from the vehicle start state
 
-```text
-old longest-only feasible span per diagnostic aisle
-new active segment count per aisle
-new active feasible length per aisle
-recoverable additional feasible length
-rejected short-fragment count / total length
-endpoint class distribution
-whether the additional segments are spatially credible in Workbench
-whether any apparent gain comes from map / footprint configuration artifacts
-```
-
-The experiment must remain diagnostic-only
-
-No A2 service/connectivity graph, A3 connector feasibility, A4 optimizer, manual force-accept, RL policy, or canonical navigation-map promotion may be inferred from A1 results alone
+That connectivity question belongs to the next design increment
 
 ## Next step
 
 ```text
-V25-12G-A1 Real-Data Acceptance
+V25-12G-A2 Service / Connectivity Graph Design
 ```
 
-Only after that evidence is reviewed should V25-12G proceed to the A2 service / connectivity graph design
+A2 may now use A1 active segments as service primitives, but it must independently model reachable endpoints and legal service transitions
+
+In particular:
+
+```text
+HEADLAND endpoints
+-> may become cross-aisle connector candidates subject to later feasibility gates
+
+INTERIOR_BLOCKED_END
+-> cannot imply cross-row connectivity
+-> may terminate service
+-> requires separately validated dead-end return semantics if used by future routing
+```
+
+No A2 implementation is part of the A1 checkpoint
