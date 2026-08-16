@@ -202,3 +202,50 @@ def test_source_change_clears_stale_vehicle_feasible_segment_state(monkeypatch, 
         app.processEvents()
     finally:
         window.close()
+
+
+def test_vehicle_feasible_segment_layer_selected_with_overlay_enabled_shows_preview(
+    tmp_path,
+):
+    app = qapp()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    source = run_dir / "map.pcd"
+    source.write_text("placeholder\n", encoding="utf-8")
+    write_vehicle_feasible_segment_plan(
+        _valid_plan(),
+        run_dir / "vehicle_feasible_segments.yaml",
+    )
+
+    window = ReviewMapWorkbenchWindow()
+    try:
+        window._source_path = source
+        window._load_vehicle_feasible_segment_sibling()
+        assert window._vehicle_feasible_segment_preview.active_item_count == 1
+
+        layer_index = next(
+            (
+                index
+                for index in range(window._nav_layer.count())
+                if str(window._nav_layer.itemData(index)) == "vehicle_feasible_segments"
+            ),
+            -1,
+        )
+        assert layer_index >= 0
+        assert window._nav_layer.itemText(layer_index) == "12G-A1 Vehicle-Feasible Segments"
+
+        window._nav_overlay_visible.setChecked(True)
+        window._nav_layer.setCurrentIndex(layer_index)
+        window._update_navigation_overlay()
+
+        a1_items = [
+            item
+            for item in window._scene.items()
+            if item.zValue() == pytest.approx(12.0)
+        ]
+        assert len(a1_items) == 1
+        assert all(item.isVisible() for item in a1_items)
+        assert not window._navigation_preview_item.isVisible()
+        app.processEvents()
+    finally:
+        window.close()
