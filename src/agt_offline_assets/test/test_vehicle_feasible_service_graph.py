@@ -593,3 +593,146 @@ def test_derive_service_graph_reports_static_candidate_diagnostics():
     assert graph.source["derivation_kind"] == "V25_12G_A2_STATIC_SERVICE_TOPOLOGY"
     assert graph.source["vehicle_feasible_segment_schema"] == plan.schema
     assert graph.source["turn_zone_schema"] == zones.schema
+
+
+def _graph_fixture():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    first = _segment(
+        segment_id="aisle_001.segment_001",
+        aisle_id="aisle_001",
+    )
+    second = _segment(
+        segment_id="aisle_002.segment_001",
+        aisle_id="aisle_002",
+        y=2.0,
+    )
+    return service_graph.derive_vehicle_feasible_service_graph(
+        _plan(first, second),
+        _zones(_zone(aisle_ids=("aisle_001", "aisle_002"))),
+    )
+
+
+def test_service_graph_yaml_round_trip_is_equal_and_byte_stable(tmp_path):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    graph = _graph_fixture()
+    first = tmp_path / "first.yaml"
+    second = tmp_path / "second.yaml"
+    service_graph.write_vehicle_feasible_service_graph(graph, first)
+    loaded = service_graph.load_vehicle_feasible_service_graph(first)
+    service_graph.write_vehicle_feasible_service_graph(loaded, second)
+
+    assert loaded == graph
+    assert first.read_bytes() == second.read_bytes()
+
+
+def test_service_graph_writer_refuses_overwrite_by_default(tmp_path):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    graph = _graph_fixture()
+    output = tmp_path / "vehicle_feasible_service_graph.yaml"
+    service_graph.write_vehicle_feasible_service_graph(graph, output)
+
+    with pytest.raises(FileExistsError, match="vehicle_feasible_service_graph.yaml"):
+        service_graph.write_vehicle_feasible_service_graph(graph, output)
+
+
+def _write_tampered_graph(tmp_path, mutate):
+    import yaml
+
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    valid = tmp_path / "valid.yaml"
+    tampered = tmp_path / "tampered.yaml"
+    service_graph.write_vehicle_feasible_service_graph(_graph_fixture(), valid)
+    payload = yaml.safe_load(valid.read_text(encoding="utf-8"))
+    mutate(payload)
+    tampered.write_text(
+        yaml.safe_dump(payload, sort_keys=False),
+        encoding="utf-8",
+    )
+    return tampered
+
+
+def test_loader_rejects_unknown_schema(tmp_path):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    path = _write_tampered_graph(
+        tmp_path,
+        lambda payload: payload.__setitem__("schema", "unknown/v1"),
+    )
+    with pytest.raises(ValueError, match="schema"):
+        service_graph.load_vehicle_feasible_service_graph(path)
+
+
+def test_loader_rejects_duplicate_service_state_id(tmp_path):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    def mutate(payload):
+        payload["service_states"][1]["service_state_id"] = payload[
+            "service_states"
+        ][0]["service_state_id"]
+
+    path = _write_tampered_graph(tmp_path, mutate)
+    with pytest.raises(ValueError, match="duplicate.*service_state"):
+        service_graph.load_vehicle_feasible_service_graph(path)
+
+
+def test_loader_rejects_connector_pose_not_matching_state_endpoint(tmp_path):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    def mutate(payload):
+        payload["connector_candidates"][0]["start_pose"][0] += 0.25
+
+    path = _write_tampered_graph(tmp_path, mutate)
+    with pytest.raises(ValueError, match="start_pose"):
+        service_graph.load_vehicle_feasible_service_graph(path)
+
+
+def test_loader_rejects_tampered_component_coverage(tmp_path):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    def mutate(payload):
+        payload["candidate_components"][0]["total_unique_coverage_length_m"] += 1.0
+
+    path = _write_tampered_graph(tmp_path, mutate)
+    with pytest.raises(ValueError, match="component.*coverage"):
+        service_graph.load_vehicle_feasible_service_graph(path)
+
+
+def test_loader_rejects_tampered_diagnostics(tmp_path):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    def mutate(payload):
+        payload["diagnostics"]["resource_count"] += 1
+
+    path = _write_tampered_graph(tmp_path, mutate)
+    with pytest.raises(ValueError, match="diagnostics"):
+        service_graph.load_vehicle_feasible_service_graph(path)
+
+
+def test_loader_rejects_forbidden_route_ready_field(tmp_path):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    path = _write_tampered_graph(
+        tmp_path,
+        lambda payload: payload.__setitem__("route_ready", True),
+    )
+    with pytest.raises(ValueError, match="route_ready|forbidden"):
+        service_graph.load_vehicle_feasible_service_graph(path)
+
+
+def test_public_a2_yaml_api_is_exported():
+    import agt_offline_assets as assets
+
+    expected = (
+        "VEHICLE_FEASIBLE_SERVICE_GRAPH_SCHEMA",
+        "VehicleFeasibleServiceGraph",
+        "derive_vehicle_feasible_service_graph",
+        "vehicle_feasible_service_graph_to_dict",
+        "write_vehicle_feasible_service_graph",
+        "load_vehicle_feasible_service_graph",
+    )
+    missing = [name for name in expected if not hasattr(assets, name)]
+    assert missing == []
