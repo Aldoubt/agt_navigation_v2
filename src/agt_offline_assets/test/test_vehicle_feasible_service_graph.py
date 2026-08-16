@@ -337,3 +337,259 @@ def test_same_side_shared_turn_zone_emits_independent_directed_candidates():
             candidate.validation_status
             == service_graph.REQUIRES_A3_CONNECTOR_VALIDATION
         )
+
+
+def test_connector_candidates_never_use_interior_ports():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    interior = _segment(
+        segment_id="aisle_001.segment_001",
+        aisle_id="aisle_001",
+        low_type=INTERIOR_BLOCKED_END,
+        high_type=INTERIOR_BLOCKED_END,
+    )
+    through = _segment(
+        segment_id="aisle_002.segment_001",
+        aisle_id="aisle_002",
+        y=2.0,
+    )
+    _resources, states = service_graph._build_service_resources_and_states(
+        _plan(interior, through)
+    )
+    candidates = service_graph._build_connector_candidates(
+        states,
+        _zones(_zone(aisle_ids=("aisle_001", "aisle_002"))),
+    )
+
+    assert all(
+        interior.segment_id not in (candidate.from_segment_id, candidate.to_segment_id)
+        for candidate in candidates
+    )
+
+
+def test_connector_candidates_never_cross_low_and_high_domains():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    first = _segment(
+        segment_id="aisle_001.segment_001",
+        aisle_id="aisle_001",
+    )
+    second = _segment(
+        segment_id="aisle_002.segment_001",
+        aisle_id="aisle_002",
+        y=2.0,
+    )
+    _resources, states = service_graph._build_service_resources_and_states(
+        _plan(first, second)
+    )
+    candidates = service_graph._build_connector_candidates(
+        states,
+        _zones(
+            _zone(
+                zone_id="turn_low_u",
+                side="LOW_U",
+                aisle_ids=("aisle_001", "aisle_002"),
+            ),
+            _zone(
+                zone_id="turn_high_u",
+                side="HIGH_U",
+                aisle_ids=("aisle_001", "aisle_002"),
+            ),
+        ),
+    )
+
+    state_by_id = {state.service_state_id: state for state in states}
+    side_to_endpoint = {
+        "LOW_U": LOW_U_HEADLAND,
+        "HIGH_U": HIGH_U_HEADLAND,
+    }
+    assert candidates
+    for candidate in candidates:
+        from_state = state_by_id[candidate.from_service_state_id]
+        to_state = state_by_id[candidate.to_service_state_id]
+        assert from_state.exit_endpoint_type == side_to_endpoint[candidate.side]
+        assert to_state.entry_endpoint_type == side_to_endpoint[candidate.side]
+
+
+def test_connector_candidates_respect_allow_turn_and_supported_aisles():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    first = _segment(
+        segment_id="aisle_001.segment_001",
+        aisle_id="aisle_001",
+    )
+    second = _segment(
+        segment_id="aisle_002.segment_001",
+        aisle_id="aisle_002",
+        y=2.0,
+    )
+    _resources, states = service_graph._build_service_resources_and_states(
+        _plan(first, second)
+    )
+
+    disabled = service_graph._build_connector_candidates(
+        states,
+        _zones(
+            _zone(
+                aisle_ids=("aisle_001", "aisle_002"),
+                allow_turn=False,
+            )
+        ),
+    )
+    unsupported = service_graph._build_connector_candidates(
+        states,
+        _zones(_zone(aisle_ids=("aisle_001",))),
+    )
+
+    assert disabled == ()
+    assert unsupported == ()
+
+
+def test_connector_candidates_forbid_same_physical_segment():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    segment = _segment()
+    _resources, states = service_graph._build_service_resources_and_states(
+        _plan(segment)
+    )
+    candidates = service_graph._build_connector_candidates(
+        states,
+        _zones(_zone(aisle_ids=(segment.aisle_id,))),
+    )
+
+    assert candidates == ()
+
+
+def test_same_aisle_different_segment_is_not_hard_forbidden():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    first = _segment(
+        segment_id="aisle_001.segment_001",
+        aisle_id="aisle_001",
+        ordinal=1,
+        length=3.0,
+    )
+    second = _segment(
+        segment_id="aisle_001.segment_002",
+        aisle_id="aisle_001",
+        ordinal=2,
+        length=3.0,
+        y=0.2,
+    )
+    _resources, states = service_graph._build_service_resources_and_states(
+        _plan(first, second)
+    )
+    candidates = service_graph._build_connector_candidates(
+        states,
+        _zones(_zone(aisle_ids=("aisle_001",))),
+    )
+
+    low_candidates = [candidate for candidate in candidates if candidate.side == "LOW_U"]
+    assert {
+        (candidate.from_segment_id, candidate.to_segment_id)
+        for candidate in low_candidates
+    } == {
+        (first.segment_id, second.segment_id),
+        (second.segment_id, first.segment_id),
+    }
+
+
+def test_same_resource_states_share_component_without_fake_motion_edge():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    segment = _segment(
+        low_type=INTERIOR_BLOCKED_END,
+        high_type=INTERIOR_BLOCKED_END,
+    )
+    resources, states = service_graph._build_service_resources_and_states(
+        _plan(segment)
+    )
+
+    components = service_graph._build_candidate_components(resources, states, ())
+
+    assert len(components) == 1
+    component = components[0]
+    assert component.classification == service_graph.CANDIDATE_TOPOLOGY_COMPONENT
+    assert component.service_state_ids == tuple(
+        sorted(state.service_state_id for state in states)
+    )
+    assert component.segment_ids == (segment.segment_id,)
+    assert component.connector_candidate_ids == ()
+    assert component.total_unique_coverage_length_m == pytest.approx(segment.length_m)
+
+
+def test_connector_candidate_joins_resources_and_component_coverage_deduplicates_segment():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    first = _segment(
+        segment_id="aisle_001.segment_001",
+        aisle_id="aisle_001",
+        length=4.0,
+    )
+    second = _segment(
+        segment_id="aisle_002.segment_001",
+        aisle_id="aisle_002",
+        length=6.0,
+        y=2.0,
+    )
+    resources, states = service_graph._build_service_resources_and_states(
+        _plan(first, second)
+    )
+    candidates = service_graph._build_connector_candidates(
+        states,
+        _zones(_zone(aisle_ids=("aisle_001", "aisle_002"))),
+    )
+
+    components = service_graph._build_candidate_components(
+        resources,
+        states,
+        candidates,
+    )
+
+    assert len(components) == 1
+    assert components[0].segment_ids == (
+        "aisle_001.segment_001",
+        "aisle_002.segment_001",
+    )
+    assert components[0].total_unique_coverage_length_m == pytest.approx(10.0)
+
+
+def test_derive_service_graph_reports_static_candidate_diagnostics():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    first = _segment(
+        segment_id="aisle_001.segment_001",
+        aisle_id="aisle_001",
+        length=4.0,
+    )
+    second = _segment(
+        segment_id="aisle_002.segment_001",
+        aisle_id="aisle_002",
+        length=4.0,
+        y=2.0,
+        high_type=INTERIOR_BLOCKED_END,
+    )
+    plan = _plan(first, second)
+    zones = _zones(_zone(aisle_ids=("aisle_001", "aisle_002")))
+
+    graph = service_graph.derive_vehicle_feasible_service_graph(
+        plan,
+        zones,
+        source={
+            "vehicle_feasible_segments_asset": "vehicle_feasible_segments.yaml",
+            "turn_zones_asset": "turn_zones.yaml",
+        },
+    )
+
+    assert graph.schema == service_graph.VEHICLE_FEASIBLE_SERVICE_GRAPH_SCHEMA
+    assert graph.status == service_graph.TOPOLOGY_CANDIDATE_ONLY
+    assert graph.frame_id == "map"
+    assert graph.platform_id == "mk_mini"
+    assert graph.diagnostics.resource_count == 2
+    assert graph.diagnostics.ordinary_service_state_count == 4
+    assert graph.diagnostics.dead_end_candidate_count == 1
+    assert graph.diagnostics.total_service_state_count == 5
+    assert graph.diagnostics.unique_coverage_length_m == pytest.approx(8.0)
+    assert graph.source["derivation_kind"] == "V25_12G_A2_STATIC_SERVICE_TOPOLOGY"
+    assert graph.source["vehicle_feasible_segment_schema"] == plan.schema
+    assert graph.source["turn_zone_schema"] == zones.schema
