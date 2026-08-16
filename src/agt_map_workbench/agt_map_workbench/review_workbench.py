@@ -855,6 +855,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         super()._open_pcd()
         if self._source_path != previous:
             self._load_site_boundary_sibling()
+            self._load_vehicle_feasible_segment_sibling()
         if self._review_3d is None or self._cloud is None:
             return
         if self._source_path != previous:
