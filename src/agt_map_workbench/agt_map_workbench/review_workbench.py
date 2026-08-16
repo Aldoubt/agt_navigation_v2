@@ -44,6 +44,7 @@ from agt_offline_assets import (
 from .agricultural_workbench import AgriculturalMapWorkbenchWindow
 from .review_3d import ThreeDReviewWidget
 from .route_debug_panel import RouteDebugPanel
+from .vehicle_feasible_segment_preview import VehicleFeasibleSegmentPreview
 
 
 _TRAVERSABILITY_LAYER_SPECS = {
@@ -83,7 +84,12 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self._traversability_status: QLabel | None = None
         self._traversability_export_button: QPushButton | None = None
 
+        self._vehicle_feasible_segment_plan = None
+        self._vehicle_feasible_segment_last_error = ""
+        self._vehicle_feasible_segment_preview: VehicleFeasibleSegmentPreview | None = None
+
         super().__init__()
+        self._vehicle_feasible_segment_preview = VehicleFeasibleSegmentPreview(self._scene)
         self._control_tabs = self._locate_control_tabs()
         self.setWindowTitle(
             "AGT 地图工作台 — V25-12F 农业结构 + 3D 审查 + 路径调试"
@@ -355,6 +361,19 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         self._refresh_site_boundary_graphics()
         self._refresh_site_boundary_status()
         self.statusBar().showMessage(f"Site Boundary 已加载：{candidate}")
+
+    def _load_vehicle_feasible_segment_sibling(self) -> None:
+        """Clear stale A1 state and quietly tolerate a missing sibling asset."""
+        if self._vehicle_feasible_segment_preview is not None:
+            self._vehicle_feasible_segment_preview.clear()
+        self._vehicle_feasible_segment_plan = None
+        self._vehicle_feasible_segment_last_error = ""
+
+        if self._source_path is None:
+            return
+        candidate = self._source_path.parent / "vehicle_feasible_segments.yaml"
+        if not candidate.is_file():
+            return
 
     def _export_site_boundary(self, _checked=False) -> Path | None:
         if self._site_boundary is None:
