@@ -35,6 +35,7 @@ from agt_offline_assets import (
     derive_traversability_evidence,
     derive_vehicle_corridor,
     load_site_boundary,
+    load_vehicle_feasible_segment_plan,
     validate_site_boundary,
     write_agricultural_aisle_graph,
     write_site_boundary,
@@ -374,6 +375,12 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         candidate = self._source_path.parent / "vehicle_feasible_segments.yaml"
         if not candidate.is_file():
             return
+
+        plan = load_vehicle_feasible_segment_plan(candidate)
+        self._vehicle_feasible_segment_plan = plan
+        if self._vehicle_feasible_segment_preview is not None:
+            self._vehicle_feasible_segment_preview.set_plan(plan)
+            self._vehicle_feasible_segment_preview.set_visible(False)
 
     def _export_site_boundary(self, _checked=False) -> Path | None:
         if self._site_boundary is None:
