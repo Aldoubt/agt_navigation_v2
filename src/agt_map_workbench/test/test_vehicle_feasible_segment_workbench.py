@@ -386,3 +386,58 @@ def test_route_debug_mode_hides_vehicle_feasible_segment_preview_without_clearin
         assert not any(item.isVisible() for item in a1_items)
     finally:
         window.close()
+
+
+def test_leaving_route_debug_redispatches_current_vehicle_feasible_segment_visibility(
+    tmp_path,
+):
+    app = qapp()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    source = run_dir / "map.pcd"
+    source.write_text("placeholder\n", encoding="utf-8")
+    write_vehicle_feasible_segment_plan(
+        _valid_plan(),
+        run_dir / "vehicle_feasible_segments.yaml",
+    )
+
+    window = ReviewMapWorkbenchWindow()
+    try:
+        window._source_path = source
+        window._load_vehicle_feasible_segment_sibling()
+        a1_index = next(
+            index
+            for index in range(window._nav_layer.count())
+            if str(window._nav_layer.itemData(index)) == "vehicle_feasible_segments"
+        )
+        window._nav_layer.setCurrentIndex(a1_index)
+        window._nav_overlay_visible.setChecked(False)
+        window._update_navigation_overlay()
+
+        a1_items = [
+            item
+            for item in window._scene.items()
+            if item.zValue() == pytest.approx(12.0)
+        ]
+        assert len(a1_items) == 1
+        assert not any(item.isVisible() for item in a1_items)
+
+        window._control_tabs.setCurrentIndex(window._route_debug_tab_index)
+        app.processEvents()
+        assert window._route_debug_active
+
+        window._nav_overlay_visible.blockSignals(True)
+        try:
+            window._nav_overlay_visible.setChecked(True)
+        finally:
+            window._nav_overlay_visible.blockSignals(False)
+
+        window._control_tabs.setCurrentIndex(2)
+        app.processEvents()
+
+        assert not window._route_debug_active
+        assert str(window._nav_layer.currentData()) == "vehicle_feasible_segments"
+        assert window._nav_overlay_visible.isChecked()
+        assert all(item.isVisible() for item in a1_items)
+    finally:
+        window.close()
