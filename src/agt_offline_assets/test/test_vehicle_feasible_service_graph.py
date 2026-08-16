@@ -2,6 +2,7 @@ import math
 
 import pytest
 
+from agt_offline_assets.turn_zones import TurnZone, TurnZoneSet
 from agt_offline_assets.vehicle_feasible_segment import (
     HIGH_U_HEADLAND,
     INTERIOR_BLOCKED_END,
@@ -87,6 +88,33 @@ def _plan(*segments, frame_id="map", row_direction=(1.0, 0.0)):
         row_direction_xy=row_direction,
         aisles=tuple(aisles),
         source=dict(_A1_SOURCE),
+    )
+
+
+def _zone(
+    zone_id="turn_low_u",
+    side="LOW_U",
+    aisle_ids=("aisle_001",),
+    allow_turn=True,
+):
+    aisle_ids = tuple(aisle_ids)
+    return TurnZone(
+        zone_id=zone_id,
+        side=side,
+        polygon_xy=((-1.0, -2.0), (1.0, -2.0), (1.0, 2.0), (-1.0, 2.0)),
+        supported_aisle_ids=aisle_ids,
+        endpoint_count=len(aisle_ids),
+        free_fraction=1.0,
+        allow_turn=allow_turn,
+    )
+
+
+def _zones(*zones, frame_id="map", row_direction=(1.0, 0.0)):
+    return TurnZoneSet(
+        frame_id=frame_id,
+        row_direction_xy=row_direction,
+        zones=tuple(zones),
+        source={},
     )
 
 
@@ -222,3 +250,48 @@ def test_double_interior_is_preserved_without_dead_end_candidate():
         == service_graph.EXTERNAL_REACHABILITY_UNPROVEN
         for state in states
     )
+
+
+@pytest.mark.parametrize(
+    ("plan_frame", "zone_frame"),
+    (("map", "odom"), ("odom", "map")),
+)
+def test_validate_a2_inputs_rejects_frame_mismatch(plan_frame, zone_frame):
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    with pytest.raises(ValueError, match="frame"):
+        service_graph._validate_a2_inputs(
+            _plan(_segment(), frame_id=plan_frame),
+            _zones(_zone(), frame_id=zone_frame),
+        )
+
+
+def test_validate_a2_inputs_rejects_opposite_row_direction():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    with pytest.raises(ValueError, match="row_direction"):
+        service_graph._validate_a2_inputs(
+            _plan(_segment(), row_direction=(1.0, 0.0)),
+            _zones(_zone(), row_direction=(-1.0, 0.0)),
+        )
+
+
+def test_validate_a2_inputs_rejects_duplicate_zone_ids():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    duplicate = _zone()
+    with pytest.raises(ValueError, match="duplicate.*zone"):
+        service_graph._validate_a2_inputs(
+            _plan(_segment()),
+            _zones(duplicate, duplicate),
+        )
+
+
+def test_validate_a2_inputs_rejects_unknown_endpoint_type():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    with pytest.raises(ValueError, match="endpoint"):
+        service_graph._validate_a2_inputs(
+            _plan(_segment(low_type="UNKNOWN_ENDPOINT")),
+            _zones(_zone()),
+        )
