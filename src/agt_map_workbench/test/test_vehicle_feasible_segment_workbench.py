@@ -12,6 +12,7 @@ from agt_offline_assets.vehicle_feasible_segment import (
     VehicleFeasibleSegmentPlan,
     write_vehicle_feasible_segment_plan,
 )
+from agt_map_workbench.agricultural_workbench import AgriculturalMapWorkbenchWindow
 from agt_map_workbench.review_workbench import ReviewMapWorkbenchWindow
 
 
@@ -156,6 +157,48 @@ def test_invalid_vehicle_feasible_segment_sibling_is_local_and_legacy_dispatch_s
 
         window._nav_layer.setCurrentIndex(0)
         window._update_navigation_overlay()
+        app.processEvents()
+    finally:
+        window.close()
+
+
+def test_source_change_clears_stale_vehicle_feasible_segment_state(monkeypatch, tmp_path):
+    app = qapp()
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first_source = first_dir / "map.pcd"
+    second_source = second_dir / "map.pcd"
+    first_source.write_text("placeholder\n", encoding="utf-8")
+    second_source.write_text("placeholder\n", encoding="utf-8")
+    write_vehicle_feasible_segment_plan(
+        _valid_plan(),
+        first_dir / "vehicle_feasible_segments.yaml",
+    )
+
+    window = ReviewMapWorkbenchWindow()
+    try:
+        window._source_path = first_source
+        window._load_vehicle_feasible_segment_sibling()
+        assert window._vehicle_feasible_segment_plan is not None
+        assert window._vehicle_feasible_segment_preview.active_item_count == 1
+
+        def _fake_base_open_pcd(self):
+            self._source_path = second_source
+
+        monkeypatch.setattr(
+            AgriculturalMapWorkbenchWindow,
+            "_open_pcd",
+            _fake_base_open_pcd,
+        )
+        window._open_pcd()
+
+        assert window._source_path == second_source
+        assert window._vehicle_feasible_segment_plan is None
+        assert window._vehicle_feasible_segment_last_error == ""
+        assert window._vehicle_feasible_segment_preview.active_item_count == 0
+        assert window._vehicle_feasible_segment_preview.rejected_fragment_count == 0
         app.processEvents()
     finally:
         window.close()
