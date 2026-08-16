@@ -259,3 +259,171 @@ def write_turn_zones(
         encoding="utf-8",
     )
     return output
+
+
+def _require_mapping(value: Any, field_name: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{field_name} must be a mapping")
+    return value
+
+
+def _require_sequence(value: Any, field_name: str) -> list[Any] | tuple[Any, ...]:
+    if not isinstance(value, (list, tuple)):
+        raise ValueError(f"{field_name} must be a sequence")
+    return value
+
+
+def _finite_float(value: Any, field_name: str) -> float:
+    numeric = float(value)
+    if not np.isfinite(numeric):
+        raise ValueError(f"{field_name} must be finite")
+    return numeric
+
+
+def _fixed_floats(value: Any, length: int, field_name: str) -> tuple[float, ...]:
+    values = _require_sequence(value, field_name)
+    if len(values) != length:
+        raise ValueError(f"{field_name} must contain exactly {length} values")
+    return tuple(_finite_float(item, field_name) for item in values)
+
+
+def load_turn_zones(path: str | Path) -> TurnZoneSet:
+    """Load and strictly validate one v1 turn-zone asset."""
+    input_path = Path(path).expanduser().resolve()
+    if not input_path.is_file():
+        raise FileNotFoundError(f"turn-zone YAML not found: {input_path}")
+
+    payload = yaml.safe_load(input_path.read_text(encoding="utf-8")) or {}
+    data = _require_mapping(payload, "turn-zone YAML")
+    required_top = {
+        "schema",
+        "status",
+        "frame_id",
+        "source",
+        "row_direction_xy",
+        "zone_count",
+        "zones",
+    }
+    missing_top = required_top.difference(data)
+    if missing_top:
+        raise ValueError(f"turn-zone YAML missing required keys: {sorted(missing_top)}")
+    if str(data["schema"]) != TURN_ZONE_SCHEMA:
+        raise ValueError(f"expected {TURN_ZONE_SCHEMA}, got {data['schema']}")
+
+    frame_id = str(data["frame_id"])
+    if not frame_id:
+        raise ValueError("turn-zone frame_id must not be empty")
+    row_direction = _fixed_floats(data["row_direction_xy"], 2, "row_direction_xy")
+    if float(np.linalg.norm(np.asarray(row_direction, dtype=np.float64))) <= 1.0e-12:
+        raise ValueError("row_direction_xy must be non-zero")
+
+    source = dict(_require_mapping(data["source"], "source"))
+    raw_zones = _require_sequence(data["zones"], "zones")
+    zone_count = int(data["zone_count"])
+    if zone_count != len(raw_zones):
+        raise ValueError("zone_count does not match zones length")
+
+    zones: list[TurnZone] = []
+    seen_zone_ids: set[str] = set()
+    for raw_zone in raw_zones:
+        zone_data = _require_mapping(raw_zone, "turn zone")
+        required_zone = {
+            "zone_id",
+            "side",
+            "source_kind",
+            "polygon_xy",
+            "supported_aisle_ids",
+            "endpoint_count",
+            "free_fraction",
+            "permissions",
+            "semantics",
+        }
+        missing_zone = required_zone.difference(zone_data)
+        if missing_zone:
+            raise ValueError(
+                f"turn zone missing required keys: {sorted(missing_zone)}"
+            )
+
+        zone_id = str(zone_data["zone_id"])
+        if not zone_id or zone_id in seen_zone_ids:
+            raise ValueError(f"duplicate or empty turn-zone id: {zone_id}")
+        seen_zone_ids.add(zone_id)
+
+        side = str(zone_data["side"])
+        if side not in {"LOW_U", "HIGH_U"}:
+            raise ValueError(f"turn zone {zone_id} has invalid side: {side}")
+
+        raw_polygon = _require_sequence(zone_data["polygon_xy"], "polygon_xy")
+        if len(raw_polygon) < 3:
+            raise ValueError(f"turn zone {zone_id} polygon must have at least 3 points")
+        polygon = tuple(
+            _fixed_floats(point, 2, f"turn zone {zone_id} polygon_xy")
+            for point in raw_polygon
+        )
+
+        raw_aisles = _require_sequence(
+            zone_data["supported_aisle_ids"], "supported_aisle_ids"
+        )
+        supported_aisles = tuple(str(value) for value in raw_aisles)
+        if any(not value for value in supported_aisles):
+            raise ValueError(f"turn zone {zone_id} has empty supported aisle id")
+        if len(supported_aisles) != len(set(supported_aisles)):
+            raise ValueError(f"turn zone {zone_id} has duplicate supported aisle IDs")
+
+        endpoint_count = int(zone_data["endpoint_count"])
+        if endpoint_count < 0 or endpoint_count != len(supported_aisles):
+            raise ValueError(
+                f"turn zone {zone_id} endpoint_count does not match supported aisles"
+            )
+
+        raw_free_fraction = zone_data["free_fraction"]
+        if raw_free_fraction is None:
+            free_fraction = float("nan")
+        else:
+            free_fraction = _finite_float(
+                raw_free_fraction, f"turn zone {zone_id} free_fraction"
+            )
+            if not 0.0 <= free_fraction <= 1.0:
+                raise ValueError(
+                    f"turn zone {zone_id} free_fraction must be within [0, 1]"
+                )
+
+        permissions = _require_mapping(zone_data["permissions"], "permissions")
+        required_permissions = {"turn", "reverse", "direction_change"}
+        if required_permissions.difference(permissions):
+            raise ValueError(f"turn zone {zone_id} permissions are incomplete")
+        for permission in required_permissions:
+            if not isinstance(permissions[permission], bool):
+                raise ValueError(
+                    f"turn zone {zone_id} permission {permission} must be boolean"
+                )
+
+        if str(zone_data["semantics"]) != "SEARCH_ENVELOPE_NOT_FREE_SPACE_TRUTH":
+            raise ValueError(f"turn zone {zone_id} has invalid semantics")
+        source_kind = str(zone_data["source_kind"])
+        if not source_kind:
+            raise ValueError(f"turn zone {zone_id} source_kind must not be empty")
+
+        zones.append(
+            TurnZone(
+                zone_id=zone_id,
+                side=side,
+                polygon_xy=polygon,
+                supported_aisle_ids=supported_aisles,
+                endpoint_count=endpoint_count,
+                free_fraction=free_fraction,
+                allow_turn=permissions["turn"],
+                allow_reverse=permissions["reverse"],
+                allow_direction_change=permissions["direction_change"],
+                source_kind=source_kind,
+            )
+        )
+
+    return TurnZoneSet(
+        frame_id=frame_id,
+        row_direction_xy=row_direction,
+        zones=tuple(zones),
+        source=source,
+        schema=str(data["schema"]),
+        status=str(data["status"]),
+    )
