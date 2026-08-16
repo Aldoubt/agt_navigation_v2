@@ -376,7 +376,11 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         if not candidate.is_file():
             return
 
-        plan = load_vehicle_feasible_segment_plan(candidate)
+        try:
+            plan = load_vehicle_feasible_segment_plan(candidate)
+        except Exception as exc:
+            self._vehicle_feasible_segment_last_error = str(exc)
+            return
         self._vehicle_feasible_segment_plan = plan
         if self._vehicle_feasible_segment_preview is not None:
             self._vehicle_feasible_segment_preview.set_plan(plan)
