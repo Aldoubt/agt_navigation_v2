@@ -4,6 +4,7 @@ import pytest
 
 from agt_offline_assets.vehicle_feasible_segment import (
     HIGH_U_HEADLAND,
+    INTERIOR_BLOCKED_END,
     LOW_U_HEADLAND,
     AisleFeasibleSegmentResult,
     VehicleFeasibleSegment,
@@ -140,3 +141,84 @@ def test_resource_expands_into_two_forward_directional_states():
     assert high_to_low.entry_pose[3] == pytest.approx(-math.pi)
     assert high_to_low.exit_pose[3] == pytest.approx(-math.pi)
     assert high_to_low.service_motion_direction == service_graph.FORWARD
+
+
+def test_exactly_one_low_headland_adds_forward_in_reverse_out_candidate():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    segment = _segment(high_type=INTERIOR_BLOCKED_END)
+    _resources, states = service_graph._build_service_resources_and_states(
+        _plan(segment)
+    )
+
+    dead_end = [
+        state
+        for state in states
+        if state.service_type == service_graph.DEAD_END_FORWARD_IN_REVERSE_OUT
+    ]
+    assert len(dead_end) == 1
+    state = dead_end[0]
+    assert state.entry_endpoint_type == LOW_U_HEADLAND
+    assert state.exit_endpoint_type == LOW_U_HEADLAND
+    assert state.entry_pose == segment.low_endpoint_pose
+    assert state.exit_pose == segment.low_endpoint_pose
+    assert state.forward_service_distance_m == pytest.approx(segment.length_m)
+    assert state.reverse_service_distance_m == pytest.approx(segment.length_m)
+    assert state.coverage_segment_id == segment.segment_id
+    assert (
+        state.validation_status
+        == service_graph.REQUIRES_A3_REVERSE_SERVICE_VALIDATION
+    )
+    assert (
+        state.external_reachability_status
+        == service_graph.HEADLAND_TOPOLOGY_CANDIDATE
+    )
+
+
+def test_exactly_one_high_headland_reverses_dead_end_entry_heading():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    segment = _segment(
+        low_type=INTERIOR_BLOCKED_END,
+        high_type=HIGH_U_HEADLAND,
+        yaw=0.25,
+    )
+    _resources, states = service_graph._build_service_resources_and_states(
+        _plan(segment)
+    )
+
+    state = next(
+        state
+        for state in states
+        if state.service_type == service_graph.DEAD_END_FORWARD_IN_REVERSE_OUT
+    )
+    expected_yaw = (0.25 + math.pi + math.pi) % (2.0 * math.pi) - math.pi
+    assert state.entry_endpoint_type == HIGH_U_HEADLAND
+    assert state.exit_endpoint_type == HIGH_U_HEADLAND
+    assert state.entry_pose[:3] == segment.high_endpoint_pose[:3]
+    assert state.entry_pose[3] == pytest.approx(expected_yaw)
+    assert state.exit_pose == state.entry_pose
+
+
+def test_double_interior_is_preserved_without_dead_end_candidate():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    segment = _segment(
+        low_type=INTERIOR_BLOCKED_END,
+        high_type=INTERIOR_BLOCKED_END,
+    )
+    resources, states = service_graph._build_service_resources_and_states(
+        _plan(segment)
+    )
+
+    assert len(resources) == 1
+    assert len(states) == 2
+    assert all(
+        state.service_type != service_graph.DEAD_END_FORWARD_IN_REVERSE_OUT
+        for state in states
+    )
+    assert all(
+        state.external_reachability_status
+        == service_graph.EXTERNAL_REACHABILITY_UNPROVEN
+        for state in states
+    )
