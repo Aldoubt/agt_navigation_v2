@@ -205,13 +205,13 @@ A2 writes one sibling artifact:
 vehicle_feasible_service_graph.yaml
 ```
 
-Recommended schema:
+Schema:
 
 ```text
 agt_vehicle_feasible_service_graph/v1
 ```
 
-Recommended top-level status:
+Top-level status:
 
 ```text
 TOPOLOGY_CANDIDATE_ONLY
@@ -277,12 +277,13 @@ resource_count == A1 active segment count
 and:
 
 ```text
-sum(unique resource coverage_length_m)
-==
-sum(A1 active segment length_m)
+abs(
+  sum(unique resource coverage_length_m)
+  - sum(A1 active segment length_m)
+) <= 1e-9 m
 ```
 
-within the project floating-point tolerance.
+before serialization rounding.
 
 ## 6. ServiceState contract
 
@@ -331,11 +332,20 @@ validation_status = TOPOLOGY_SERVICE_CANDIDATE
 A1 endpoint yaw follows the canonical LOW -> HIGH row heading. Therefore HIGH -> LOW forward travel must reverse the heading by pi while keeping endpoint position unchanged.
 
 ```text
+entry_endpoint_type = resource.high_endpoint_type
+exit_endpoint_type  = resource.low_endpoint_type
+
 entry xyz = A1.high_endpoint_pose.xyz
-entry yaw = normalize(A1.high_endpoint_pose.yaw + pi)
+entry yaw = normalize_angle(A1.high_endpoint_pose.yaw + pi)
 
 exit xyz  = A1.low_endpoint_pose.xyz
-exit yaw  = normalize(A1.low_endpoint_pose.yaw + pi)
+exit yaw  = normalize_angle(A1.low_endpoint_pose.yaw + pi)
+```
+
+`normalize_angle()` uses the canonical half-open range:
+
+```text
+[-pi, pi)
 ```
 
 Other fields match ordinary forward service accounting:
@@ -372,6 +382,8 @@ INTERIOR_BLOCKED_END + INTERIOR_BLOCKED_END
 For a LOW_U headland dead-end:
 
 ```text
+entry_endpoint_type = LOW_U_HEADLAND
+exit_endpoint_type  = LOW_U_HEADLAND
 entry_pose = A1.low_endpoint_pose
 exit_pose  = A1.low_endpoint_pose
 ```
@@ -379,9 +391,13 @@ exit_pose  = A1.low_endpoint_pose
 For a HIGH_U headland dead-end:
 
 ```text
+entry_endpoint_type = HIGH_U_HEADLAND
+exit_endpoint_type  = HIGH_U_HEADLAND
 entry_pose = reverse_heading(A1.high_endpoint_pose)
 exit_pose  = reverse_heading(A1.high_endpoint_pose)
 ```
+
+`reverse_heading(pose)` preserves position and applies `normalize_angle(yaw + pi)`.
 
 Dead-end accounting:
 
@@ -406,16 +422,21 @@ HEADLAND_TOPOLOGY_CANDIDATE
 EXTERNAL_REACHABILITY_UNPROVEN
 ```
 
-A double-interior ordinary state is valid topology evidence but carries:
+The field is defined from the service state's actual entry endpoint only:
+
+```text
+if entry_endpoint_type in {LOW_U_HEADLAND, HIGH_U_HEADLAND}:
+    external_reachability_status = HEADLAND_TOPOLOGY_CANDIDATE
+else:
+    external_reachability_status = EXTERNAL_REACHABILITY_UNPROVEN
+```
+
+`HEADLAND_TOPOLOGY_CANDIDATE` means only that the state begins at a headland and may later receive a compatible incoming topology candidate. It does not mean such a connector exists or is executable.
+
+A double-interior ordinary state therefore always carries:
 
 ```text
 EXTERNAL_REACHABILITY_UNPROVEN
-```
-
-A state whose relevant entry/exit participates in headland topology may carry:
-
-```text
-HEADLAND_TOPOLOGY_CANDIDATE
 ```
 
 No A2 status may claim actual reachability.
@@ -446,7 +467,7 @@ side
 pose
 ```
 
-Ports are an implementation concept. They do not need to become public serialized objects in schema v1.
+Ports are an implementation concept. They do not become public serialized objects in schema v1.
 
 ## 8. ConnectorCandidate contract
 
@@ -466,6 +487,13 @@ candidate_kind = HEADLAND_CONNECTOR_CANDIDATE
 validation_status = REQUIRES_A3_CONNECTOR_VALIDATION
 ```
 
+For every candidate:
+
+```text
+start_pose = from_service_state.exit_pose
+goal_pose  = to_service_state.entry_pose
+```
+
 ### 8.1 Directed edge semantics
 
 Every connector is:
@@ -480,7 +508,7 @@ A2 never generates an undirected executable edge.
 
 Connector identity is semantic, not traversal-order numbering.
 
-Recommended logical identity:
+The logical uniqueness key is exactly:
 
 ```text
 (
@@ -490,13 +518,13 @@ Recommended logical identity:
 )
 ```
 
-A serialized ID may encode these values directly, for example:
+The serialized `connector_candidate_id` is exactly:
 
 ```text
 headland.<turn_zone_id>.<from_service_state_id>.to.<to_service_state_id>
 ```
 
-The exact escaping convention may be selected in implementation, but the identity must remain deterministic and independent of list insertion order.
+The ID is used as an opaque stable identifier; consumers must use the explicit fields rather than reparsing the string.
 
 ### 8.3 Connector emission rules
 
@@ -621,6 +649,14 @@ candidate_component_002
 
 Component IDs are deterministic diagnostic labels, not permanent domain identities.
 
+An isolated component is defined exactly as a component whose:
+
+```text
+connector_candidate_count == 0
+```
+
+It may still contain multiple service states belonging to the same physical segment through the non-motion resource-membership relation.
+
 ## 10. Deterministic generation algorithm
 
 A2 derivation is fixed to the following sequence:
@@ -696,18 +732,19 @@ The following are hard errors:
 A1.frame_id != TurnZoneSet.frame_id
 ```
 
-Row direction must match in orientation, not merely axis:
+Row direction must match in orientation, not merely axis. Define:
 
 ```text
-normalize(A1.row_direction_xy)
-approximately equals
-normalize(TurnZoneSet.row_direction_xy)
+a = normalize(A1.row_direction_xy)
+b = normalize(TurnZoneSet.row_direction_xy)
 ```
 
-and specifically:
+and require:
 
 ```text
-dot(normalized_A1, normalized_TurnZoneSet) > 0
+||a - b||_2 <= 1e-9
+AND
+dot(a, b) > 0
 ```
 
 A reversed row direction is an error because it swaps LOW_U / HIGH_U meaning.
@@ -725,8 +762,10 @@ Also reject:
 - non-finite row direction;
 - zero row direction;
 - segment length `<= 0`;
-- platform metadata inconsistency;
-- platform-profile digest inconsistency when both compared objects provide that identity.
+- empty `platform_id`;
+- empty `platform_profile_sha256`.
+
+The A2 output copies `platform_id` and `platform_profile_sha256` exactly from A1. `TurnZoneSet` currently has no platform identity and therefore is not a platform-metadata comparison source in A2 v1.
 
 ### 11.2 Normal no-edge outcomes
 
@@ -744,7 +783,7 @@ A2 must represent lack of connectivity honestly instead of manufacturing edges t
 
 ## 12. Provenance
 
-Recommended top-level source metadata:
+Top-level source metadata is:
 
 ```yaml
 source:
@@ -759,7 +798,7 @@ Provenance is for auditability. The loader/deriver must still validate loaded ob
 
 ## 13. Diagnostics
 
-Top-level diagnostics should include at least:
+Top-level diagnostics include at least:
 
 ```text
 resource_count
@@ -776,7 +815,9 @@ unique_coverage_length_m
 distinct_aisle_count
 ```
 
-Each component should expose at least:
+`isolated_component_count` counts exactly those components with zero connector candidates.
+
+Each component exposes at least:
 
 ```text
 service_state_count
@@ -786,7 +827,7 @@ unique_coverage_length_m
 distinct_aisle_count
 ```
 
-Required internal sanity checks:
+Required internal sanity checks before serialization rounding:
 
 ```text
 resource_count == A1 active segment count
@@ -795,12 +836,11 @@ resource_count == A1 active segment count
 and:
 
 ```text
-unique_coverage_length_m
-==
-sum(A1 active segment lengths)
+abs(
+  unique_coverage_length_m
+  - sum(A1 active segment lengths)
+) <= 1e-9 m
 ```
-
-within project tolerance.
 
 ## 14. Forbidden A2 claims and fields
 
@@ -921,7 +961,7 @@ Tests must prove:
 - every resource produces exactly two ordinary directional states;
 - exactly-one-headland resource produces exactly one dead-end candidate;
 - zero-headland and two-headland resources produce no dead-end state;
-- HIGH -> LOW yaw is reversed by pi and normalized;
+- HIGH -> LOW yaw is reversed by pi and normalized to `[-pi, pi)`;
 - no interior cross-aisle connector exists;
 - no LOW_U <-> HIGH_U direct connector exists;
 - no self-segment connector exists;
@@ -972,7 +1012,7 @@ The current A1 real-data checkpoint contains:
 A2 real-data acceptance must verify without preselecting expected connector counts:
 
 - all 14 A1 active segments are preserved as resources;
-- unique coverage remains 97.35667393520538 m within tolerance;
+- `abs(A2_unique_coverage_m - 97.35667393520538) <= 1e-6 m`;
 - A2 does not regress to longest-only behavior;
 - double-interior segments remain preserved;
 - one-headland segments receive the correct dead-end candidate state;
