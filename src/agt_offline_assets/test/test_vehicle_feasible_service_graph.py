@@ -295,3 +295,45 @@ def test_validate_a2_inputs_rejects_unknown_endpoint_type():
             _plan(_segment(low_type="UNKNOWN_ENDPOINT")),
             _zones(_zone()),
         )
+
+
+def test_same_side_shared_turn_zone_emits_independent_directed_candidates():
+    from agt_offline_assets import vehicle_feasible_service_graph as service_graph
+
+    first = _segment(
+        segment_id="aisle_001.segment_001",
+        aisle_id="aisle_001",
+        y=0.0,
+    )
+    second = _segment(
+        segment_id="aisle_002.segment_001",
+        aisle_id="aisle_002",
+        y=2.0,
+    )
+    _resources, states = service_graph._build_service_resources_and_states(
+        _plan(first, second)
+    )
+    zone = _zone(aisle_ids=("aisle_001", "aisle_002"))
+
+    candidates = service_graph._build_connector_candidates(states, _zones(zone))
+
+    low_candidates = [candidate for candidate in candidates if candidate.side == "LOW_U"]
+    assert len(low_candidates) == 2
+    assert {
+        (candidate.from_segment_id, candidate.to_segment_id)
+        for candidate in low_candidates
+    } == {
+        ("aisle_001.segment_001", "aisle_002.segment_001"),
+        ("aisle_002.segment_001", "aisle_001.segment_001"),
+    }
+
+    state_by_id = {state.service_state_id: state for state in states}
+    for candidate in low_candidates:
+        from_state = state_by_id[candidate.from_service_state_id]
+        to_state = state_by_id[candidate.to_service_state_id]
+        assert candidate.start_pose == from_state.exit_pose
+        assert candidate.goal_pose == to_state.entry_pose
+        assert (
+            candidate.validation_status
+            == service_graph.REQUIRES_A3_CONNECTOR_VALIDATION
+        )
