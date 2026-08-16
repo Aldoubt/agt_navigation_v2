@@ -736,6 +736,8 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
             )
             self._cloud_item.setVisible(False)
             self._navigation_preview_item.setVisible(False)
+            if self._vehicle_feasible_segment_preview is not None:
+                self._vehicle_feasible_segment_preview.set_visible(False)
             self._set_site_boundary_authoring_visible(False)
             if self._review_tabs is not None:
                 self._review_tabs.setCurrentIndex(0)
