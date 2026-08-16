@@ -5,9 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
+from .turn_zones import TurnZoneSet
 from .vehicle_feasible_segment import (
     HIGH_U_HEADLAND,
+    INTERIOR_BLOCKED_END,
     LOW_U_HEADLAND,
+    VEHICLE_FEASIBLE_SEGMENT_SCHEMA,
     VehicleFeasibleSegmentPlan,
 )
 
@@ -23,6 +26,12 @@ HEADLAND_TOPOLOGY_CANDIDATE = "HEADLAND_TOPOLOGY_CANDIDATE"
 EXTERNAL_REACHABILITY_UNPROVEN = "EXTERNAL_REACHABILITY_UNPROVEN"
 
 _HEADLAND_TYPES = {LOW_U_HEADLAND, HIGH_U_HEADLAND}
+_VALID_ENDPOINT_TYPES = {
+    LOW_U_HEADLAND,
+    HIGH_U_HEADLAND,
+    INTERIOR_BLOCKED_END,
+}
+_VALID_ZONE_SIDES = {"LOW_U", "HIGH_U"}
 
 
 @dataclass(frozen=True)
@@ -73,6 +82,116 @@ def _entry_reachability(endpoint_type: str) -> str:
     if endpoint_type in _HEADLAND_TYPES:
         return HEADLAND_TOPOLOGY_CANDIDATE
     return EXTERNAL_REACHABILITY_UNPROVEN
+
+
+def _normalized_xy(
+    value: tuple[float, float],
+    *,
+    field_name: str,
+) -> tuple[float, float]:
+    x = float(value[0])
+    y = float(value[1])
+    if not math.isfinite(x) or not math.isfinite(y):
+        raise ValueError(f"A2 {field_name} must be finite")
+    norm = math.hypot(x, y)
+    if norm <= 1.0e-12:
+        raise ValueError(f"A2 {field_name} must be non-zero")
+    return (x / norm, y / norm)
+
+
+def _pose_is_finite(pose: tuple[float, float, float, float]) -> bool:
+    return len(pose) == 4 and all(math.isfinite(float(value)) for value in pose)
+
+
+def _validate_a2_inputs(
+    segment_plan: VehicleFeasibleSegmentPlan,
+    turn_zones: TurnZoneSet,
+) -> None:
+    """Fail closed on malformed or semantically inconsistent A2 inputs."""
+    if segment_plan.schema != VEHICLE_FEASIBLE_SEGMENT_SCHEMA:
+        raise ValueError(
+            "A2 vehicle-feasible segment schema mismatch: "
+            f"expected {VEHICLE_FEASIBLE_SEGMENT_SCHEMA}, got {segment_plan.schema}"
+        )
+    if not str(segment_plan.frame_id):
+        raise ValueError("A2 segment frame_id must not be empty")
+    if not str(segment_plan.platform_id):
+        raise ValueError("A2 platform_id must not be empty")
+    if not str(segment_plan.platform_profile_sha256):
+        raise ValueError("A2 platform_profile_sha256 must not be empty")
+    if segment_plan.frame_id != turn_zones.frame_id:
+        raise ValueError(
+            "A2 frame mismatch: "
+            f"segments={segment_plan.frame_id} turn_zones={turn_zones.frame_id}"
+        )
+
+    segment_direction = _normalized_xy(
+        segment_plan.row_direction_xy,
+        field_name="row_direction_xy",
+    )
+    zone_direction = _normalized_xy(
+        turn_zones.row_direction_xy,
+        field_name="row_direction_xy",
+    )
+    dot = (
+        segment_direction[0] * zone_direction[0]
+        + segment_direction[1] * zone_direction[1]
+    )
+    if dot <= 0.0:
+        raise ValueError("A2 row_direction_xy orientation mismatch")
+    if max(
+        abs(segment_direction[0] - zone_direction[0]),
+        abs(segment_direction[1] - zone_direction[1]),
+    ) > 1.0e-9:
+        raise ValueError("A2 row_direction_xy mismatch")
+
+    seen_segment_ids: set[str] = set()
+    for aisle in segment_plan.aisles:
+        for segment in aisle.active_segments:
+            segment_id = str(segment.segment_id)
+            if not segment_id or segment_id in seen_segment_ids:
+                raise ValueError(f"A2 duplicate or empty segment_id: {segment_id}")
+            seen_segment_ids.add(segment_id)
+
+            length_m = float(segment.length_m)
+            if not math.isfinite(length_m) or length_m <= 0.0:
+                raise ValueError(f"A2 segment {segment_id} length_m must be finite and > 0")
+
+            if segment.low_endpoint_type not in _VALID_ENDPOINT_TYPES:
+                raise ValueError(
+                    f"A2 segment {segment_id} has invalid low endpoint type: "
+                    f"{segment.low_endpoint_type}"
+                )
+            if segment.high_endpoint_type not in _VALID_ENDPOINT_TYPES:
+                raise ValueError(
+                    f"A2 segment {segment_id} has invalid high endpoint type: "
+                    f"{segment.high_endpoint_type}"
+                )
+            if not _pose_is_finite(segment.low_endpoint_pose):
+                raise ValueError(f"A2 segment {segment_id} low endpoint pose is invalid")
+            if not _pose_is_finite(segment.high_endpoint_pose):
+                raise ValueError(f"A2 segment {segment_id} high endpoint pose is invalid")
+            if not segment.centerline_xyz:
+                raise ValueError(f"A2 segment {segment_id} centerline must not be empty")
+            for point in segment.centerline_xyz:
+                if len(point) != 3 or not all(
+                    math.isfinite(float(value)) for value in point
+                ):
+                    raise ValueError(
+                        f"A2 segment {segment_id} centerline contains invalid point"
+                    )
+
+    seen_zone_ids: set[str] = set()
+    for zone in turn_zones.zones:
+        zone_id = str(zone.zone_id)
+        if not zone_id or zone_id in seen_zone_ids:
+            raise ValueError(f"A2 duplicate or empty zone_id: {zone_id}")
+        seen_zone_ids.add(zone_id)
+        if zone.side not in _VALID_ZONE_SIDES:
+            raise ValueError(f"A2 zone {zone_id} has invalid side: {zone.side}")
+        aisle_ids = tuple(str(value) for value in zone.supported_aisle_ids)
+        if len(aisle_ids) != len(set(aisle_ids)):
+            raise ValueError(f"A2 zone {zone_id} has duplicate supported aisle IDs")
 
 
 def _build_service_resources_and_states(
