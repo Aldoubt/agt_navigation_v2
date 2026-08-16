@@ -664,6 +664,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
             if self._vehicle_feasible_segment_preview is not None:
                 self._vehicle_feasible_segment_preview.set_visible(
                     self._vehicle_feasible_segment_plan is not None
+                    and self._nav_overlay_visible.isChecked()
                 )
             return
         if self._vehicle_feasible_segment_preview is not None:
