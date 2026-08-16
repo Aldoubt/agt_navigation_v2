@@ -61,6 +61,14 @@ if(BUILD_TESTING)
     test_site_boundary_workbench
     test/test_site_boundary_workbench.py
   )
+  ament_add_pytest_test(
+    test_vehicle_feasible_segment_preview
+    test/test_vehicle_feasible_segment_preview.py
+  )
+  ament_add_pytest_test(
+    test_vehicle_feasible_segment_workbench
+    test/test_vehicle_feasible_segment_workbench.py
+  )
 endif()
 
 ament_package()
