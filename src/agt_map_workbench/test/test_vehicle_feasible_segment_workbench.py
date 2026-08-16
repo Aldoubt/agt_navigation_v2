@@ -341,3 +341,48 @@ def test_vehicle_feasible_segment_layer_respects_navigation_overlay_toggle(tmp_p
         app.processEvents()
     finally:
         window.close()
+
+
+def test_route_debug_mode_hides_vehicle_feasible_segment_preview_without_clearing_plan(
+    tmp_path,
+):
+    app = qapp()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    source = run_dir / "map.pcd"
+    source.write_text("placeholder\n", encoding="utf-8")
+    expected = _valid_plan()
+    write_vehicle_feasible_segment_plan(
+        expected,
+        run_dir / "vehicle_feasible_segments.yaml",
+    )
+
+    window = ReviewMapWorkbenchWindow()
+    try:
+        window._source_path = source
+        window._load_vehicle_feasible_segment_sibling()
+        a1_index = next(
+            index
+            for index in range(window._nav_layer.count())
+            if str(window._nav_layer.itemData(index)) == "vehicle_feasible_segments"
+        )
+        window._nav_overlay_visible.setChecked(True)
+        window._nav_layer.setCurrentIndex(a1_index)
+        window._update_navigation_overlay()
+
+        a1_items = [
+            item
+            for item in window._scene.items()
+            if item.zValue() == pytest.approx(12.0)
+        ]
+        assert len(a1_items) == 1
+        assert all(item.isVisible() for item in a1_items)
+
+        window._control_tabs.setCurrentIndex(window._route_debug_tab_index)
+        app.processEvents()
+
+        assert window._route_debug_active
+        assert window._vehicle_feasible_segment_plan == expected
+        assert not any(item.isVisible() for item in a1_items)
+    finally:
+        window.close()
