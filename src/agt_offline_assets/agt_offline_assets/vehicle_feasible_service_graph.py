@@ -24,6 +24,8 @@ REQUIRES_A3_REVERSE_SERVICE_VALIDATION = (
 )
 HEADLAND_TOPOLOGY_CANDIDATE = "HEADLAND_TOPOLOGY_CANDIDATE"
 EXTERNAL_REACHABILITY_UNPROVEN = "EXTERNAL_REACHABILITY_UNPROVEN"
+HEADLAND_CONNECTOR_CANDIDATE = "HEADLAND_CONNECTOR_CANDIDATE"
+REQUIRES_A3_CONNECTOR_VALIDATION = "REQUIRES_A3_CONNECTOR_VALIDATION"
 
 _HEADLAND_TYPES = {LOW_U_HEADLAND, HIGH_U_HEADLAND}
 _VALID_ENDPOINT_TYPES = {
@@ -67,6 +69,21 @@ class ServiceState:
     validation_status: str
 
 
+@dataclass(frozen=True)
+class ConnectorCandidate:
+    connector_candidate_id: str
+    from_service_state_id: str
+    to_service_state_id: str
+    from_segment_id: str
+    to_segment_id: str
+    side: str
+    turn_zone_id: str
+    start_pose: tuple[float, float, float, float]
+    goal_pose: tuple[float, float, float, float]
+    candidate_kind: str = HEADLAND_CONNECTOR_CANDIDATE
+    validation_status: str = REQUIRES_A3_CONNECTOR_VALIDATION
+
+
 def _normalize_angle(yaw: float) -> float:
     return (float(yaw) + math.pi) % (2.0 * math.pi) - math.pi
 
@@ -82,6 +99,14 @@ def _entry_reachability(endpoint_type: str) -> str:
     if endpoint_type in _HEADLAND_TYPES:
         return HEADLAND_TOPOLOGY_CANDIDATE
     return EXTERNAL_REACHABILITY_UNPROVEN
+
+
+def _endpoint_side(endpoint_type: str) -> str | None:
+    if endpoint_type == LOW_U_HEADLAND:
+        return "LOW_U"
+    if endpoint_type == HIGH_U_HEADLAND:
+        return "HIGH_U"
+    return None
 
 
 def _normalized_xy(
@@ -309,3 +334,57 @@ def _build_service_resources_and_states(
             )
 
     return tuple(resources), tuple(states)
+
+
+def _build_connector_candidates(
+    states: tuple[ServiceState, ...],
+    turn_zones: TurnZoneSet,
+) -> tuple[ConnectorCandidate, ...]:
+    """Build directed headland exit-to-entry topology candidates."""
+    candidates: list[ConnectorCandidate] = []
+
+    for zone in turn_zones.zones:
+        if not zone.allow_turn:
+            continue
+        supported = set(str(value) for value in zone.supported_aisle_ids)
+
+        for from_state in states:
+            from_side = _endpoint_side(from_state.exit_endpoint_type)
+            if from_side != zone.side or from_state.aisle_id not in supported:
+                continue
+
+            for to_state in states:
+                to_side = _endpoint_side(to_state.entry_endpoint_type)
+                if to_side != zone.side or to_state.aisle_id not in supported:
+                    continue
+                if from_state.segment_id == to_state.segment_id:
+                    continue
+
+                candidates.append(
+                    ConnectorCandidate(
+                        connector_candidate_id=(
+                            f"headland.{zone.zone_id}."
+                            f"{from_state.service_state_id}.to."
+                            f"{to_state.service_state_id}"
+                        ),
+                        from_service_state_id=from_state.service_state_id,
+                        to_service_state_id=to_state.service_state_id,
+                        from_segment_id=from_state.segment_id,
+                        to_segment_id=to_state.segment_id,
+                        side=str(zone.side),
+                        turn_zone_id=str(zone.zone_id),
+                        start_pose=from_state.exit_pose,
+                        goal_pose=to_state.entry_pose,
+                    )
+                )
+
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda candidate: (
+                candidate.turn_zone_id,
+                candidate.from_service_state_id,
+                candidate.to_service_state_id,
+            ),
+        )
+    )
