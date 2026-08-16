@@ -749,6 +749,8 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
             self._set_site_boundary_authoring_visible(True)
         self._route_debug_active = active
         self._route_debug_panel.set_active(active)
+        if not active:
+            self._update_navigation_overlay()
 
     # ------------------------------------------------------- 3D review
     def _install_3d_review(self) -> None:
