@@ -428,6 +428,7 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
                 "aisle_geometric_envelope",
             )
         for label, key in (
+            ("12G-A1 Vehicle-Feasible Segments", "vehicle_feasible_segments"),
             ("12F Candidate 三态", "12f_candidate"),
             ("12F OBSERVED_FREE", "12f_observed"),
             ("12F INFERRED_TRAVERSABLE", "12f_inferred"),
@@ -658,6 +659,13 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
         if not hasattr(self, "_nav_layer"):
             return
         layer = str(self._nav_layer.currentData())
+        if layer == "vehicle_feasible_segments":
+            self._navigation_preview_item.clear_result()
+            if self._vehicle_feasible_segment_preview is not None:
+                self._vehicle_feasible_segment_preview.set_visible(
+                    self._vehicle_feasible_segment_plan is not None
+                )
+            return
         if layer == "aisle_geometric_envelope":
             if (
                 self._navigation_result is None
