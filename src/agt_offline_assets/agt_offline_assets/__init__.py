@@ -111,6 +111,34 @@ from .vehicle_feasible_segment import (
     vehicle_feasible_segment_plan_to_dict,
     write_vehicle_feasible_segment_plan,
 )
+from . import vehicle_feasible_service_graph as vehicle_feasible_service_graph
+from .vehicle_feasible_service_graph import (
+    VEHICLE_FEASIBLE_SERVICE_GRAPH_SCHEMA,
+    TOPOLOGY_CANDIDATE_ONLY,
+    SERVICE_LOW_TO_HIGH,
+    SERVICE_HIGH_TO_LOW,
+    DEAD_END_FORWARD_IN_REVERSE_OUT,
+    FORWARD,
+    TOPOLOGY_SERVICE_CANDIDATE,
+    REQUIRES_A3_REVERSE_SERVICE_VALIDATION,
+    HEADLAND_TOPOLOGY_CANDIDATE,
+    EXTERNAL_REACHABILITY_UNPROVEN,
+    HEADLAND_CONNECTOR_CANDIDATE,
+    REQUIRES_A3_CONNECTOR_VALIDATION,
+    CANDIDATE_TOPOLOGY_COMPONENT,
+    ServiceResource,
+    ServiceState,
+    ConnectorCandidate,
+    CandidateTopologyComponent,
+    ServiceGraphDiagnostics,
+    VehicleFeasibleServiceGraph,
+    derive_vehicle_feasible_service_graph,
+)
+from .vehicle_feasible_service_graph_io import (
+    load_vehicle_feasible_service_graph,
+    vehicle_feasible_service_graph_to_dict,
+    write_vehicle_feasible_service_graph,
+)
 from .agricultural_coverage_ordering import (
     COVERAGE_ORDER_SCHEMA,
     AisleRejection,
@@ -232,6 +260,18 @@ from .traversability import (
     write_traversability_candidate,
 )
 
+# Keep the historical submodule import path usable while the deterministic IO
+# implementation remains separated from the topology derivation primitives.
+vehicle_feasible_service_graph.vehicle_feasible_service_graph_to_dict = (
+    vehicle_feasible_service_graph_to_dict
+)
+vehicle_feasible_service_graph.write_vehicle_feasible_service_graph = (
+    write_vehicle_feasible_service_graph
+)
+vehicle_feasible_service_graph.load_vehicle_feasible_service_graph = (
+    load_vehicle_feasible_service_graph
+)
+
 __all__ = [
     "AssetContractError",
     "DatasetBinding",
@@ -329,6 +369,29 @@ __all__ = [
     "vehicle_feasible_segment_plan_to_dict",
     "write_vehicle_feasible_segment_plan",
     "load_vehicle_feasible_segment_plan",
+    "VEHICLE_FEASIBLE_SERVICE_GRAPH_SCHEMA",
+    "TOPOLOGY_CANDIDATE_ONLY",
+    "SERVICE_LOW_TO_HIGH",
+    "SERVICE_HIGH_TO_LOW",
+    "DEAD_END_FORWARD_IN_REVERSE_OUT",
+    "FORWARD",
+    "TOPOLOGY_SERVICE_CANDIDATE",
+    "REQUIRES_A3_REVERSE_SERVICE_VALIDATION",
+    "HEADLAND_TOPOLOGY_CANDIDATE",
+    "EXTERNAL_REACHABILITY_UNPROVEN",
+    "HEADLAND_CONNECTOR_CANDIDATE",
+    "REQUIRES_A3_CONNECTOR_VALIDATION",
+    "CANDIDATE_TOPOLOGY_COMPONENT",
+    "ServiceResource",
+    "ServiceState",
+    "ConnectorCandidate",
+    "CandidateTopologyComponent",
+    "ServiceGraphDiagnostics",
+    "VehicleFeasibleServiceGraph",
+    "derive_vehicle_feasible_service_graph",
+    "vehicle_feasible_service_graph_to_dict",
+    "write_vehicle_feasible_service_graph",
+    "load_vehicle_feasible_service_graph",
     "COVERAGE_ORDER_SCHEMA",
     "AisleRejection",
     "AisleTraversal",
