@@ -666,6 +666,8 @@ class ReviewMapWorkbenchWindow(AgriculturalMapWorkbenchWindow):
                     self._vehicle_feasible_segment_plan is not None
                 )
             return
+        if self._vehicle_feasible_segment_preview is not None:
+            self._vehicle_feasible_segment_preview.set_visible(False)
         if layer == "aisle_geometric_envelope":
             if (
                 self._navigation_result is None
