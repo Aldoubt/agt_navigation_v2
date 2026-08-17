@@ -26,6 +26,10 @@ def test_experiment_runner_emits_stable_artifacts(tmp_path: Path):
     assert (out / "path.csv").exists()
     manifest = json.loads((out / "experiment_manifest.json").read_text())
     assert manifest["planner_id"] == "astar"
+    assert manifest["scenario_request"] == {
+        "start": {"x_m": 0.0, "y_m": 0.0, "yaw_rad": 0.0},
+        "goal": {"x_m": 1.0, "y_m": 0.0, "yaw_rad": 0.0},
+    }
 
 
 def test_experiment_runner_merges_offline_validation_metrics(tmp_path: Path):
