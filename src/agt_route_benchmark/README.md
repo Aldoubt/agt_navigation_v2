@@ -222,12 +222,13 @@ After the 23 valid cells have been run:
 ```bash
 ros2 run agt_route_benchmark route_benchmark_batch.py \
   --site greenhouse_01 \
+  --site-snapshot runtime/maps/greenhouse_01/benchmark/site_snapshot.json \
   --result-root runtime/results/paper1_route_benchmark \
   --output runtime/results/paper1_route_benchmark/summary \
   --formal
 ```
 
-Formal summary rejects a missing canonical cell, dependency-skipped cell, duplicate or unexpected cell.
+Formal summary rejects a missing canonical cell, dependency-skipped cell, duplicate or unexpected cell, and ignores development or old-site-revision runs that do not match the selected `site_snapshot_sha256`.
 
 ## 11. MKmini RPP tracking profile
 
@@ -270,7 +271,7 @@ accepted 2D map
   + curvature-limited Ackermann/bicycle integration
   -> executed.csv
   -> tracking_metrics.json
-  -> RViz reference path + executed path + RPP lookahead arc
+  -> RViz reference path + executed path + Humble RPP lookahead collision arc
 ```
 
 The simulator enforces `|curvature| <= 1/R_min` and refuses rotate-in-place commands. It is a controller/path feasibility layer, not a full tire/dynamics/Gazebo validation.
