@@ -20,6 +20,7 @@ from agt_route_benchmark.profile import load_platform_profile
 from agt_route_benchmark.renderer import render_route
 from agt_route_benchmark.scenario import load_scenario
 from agt_route_benchmark.site_snapshot import load_site_snapshot
+from agt_route_benchmark.validation import evaluate_normalized_path
 
 
 def _quat_to_yaw(q) -> float:
@@ -103,7 +104,7 @@ def main() -> int:
     parser.add_argument("--formal", action="store_true")
     parser.add_argument("--run-id", default="run_001")
     parser.add_argument("--site-snapshot", type=Path)
-    parser.add_argument("--map-yaml", type=Path, help="Optional Nav2 map YAML for deterministic route-background rendering")
+    parser.add_argument("--map-yaml", type=Path, help="Optional Nav2 map YAML for deterministic route-background rendering and path validation")
     parser.add_argument("--nav2-live", action="store_true")
     parser.add_argument("--graph", type=Path)
     parser.add_argument("--coverage-components-json", type=Path)
@@ -125,6 +126,11 @@ def main() -> int:
         raise SystemExit("formal mode requires --site-snapshot")
     if not profile.preview_planning_enabled:
         raise SystemExit("platform profile disables preview planning")
+
+    render_map_yaml = args.map_yaml
+    if render_map_yaml is None and snapshot is not None:
+        render_map_yaml = Path(snapshot["assets"]["map_yaml"]["path"])
+    nav_map = load_nav2_map(render_map_yaml) if render_map_yaml is not None else None
 
     spec = ExperimentSpec(
         site_id=args.site,
@@ -181,16 +187,20 @@ def main() -> int:
     else:
         raise SystemExit(f"unsupported planner {args.planner!r}")
 
+    path_evaluator = None
+    if nav_map is not None:
+        path_evaluator = lambda points: evaluate_normalized_path(points, nav_map, profile)
+
     try:
-        out = ExperimentRunner(args.result_root).run(spec, adapter)
+        out = ExperimentRunner(args.result_root).run(
+            spec,
+            adapter,
+            path_evaluator=path_evaluator,
+        )
         path_csv = out / "path.csv"
         if path_csv.exists():
             points = read_path_csv(path_csv)
-            render_map_yaml = args.map_yaml
-            if render_map_yaml is None and snapshot is not None:
-                render_map_yaml = Path(snapshot["assets"]["map_yaml"]["path"])
-            if render_map_yaml is not None:
-                nav_map = load_nav2_map(render_map_yaml)
+            if nav_map is not None:
                 render_route(
                     points,
                     out / "figure",
