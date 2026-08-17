@@ -1,0 +1,8 @@
+id: S03_headland_uturn
+level: p2p
+development_fixture: true
+description: Adjacent-row U-turn using the wide upper headland.
+start: {x: 6.5, y: 15, yaw: 1.570796326795}
+goal: {x: 10, y: 15, yaw: -1.570796326795}
+expected_constraints: [minimum_turning_radius, final_heading, footprint]
+synthetic_fixture: synthetic_greenhouse_v1
