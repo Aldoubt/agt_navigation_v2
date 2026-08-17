@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 
 from agt_route_benchmark.adapters.fields2cover import Fields2CoverAdapter
+from agt_route_benchmark.adapters.manual_waypoints import ManualWaypointAdapter
 from agt_route_benchmark.adapters.nav2_p2p import Nav2P2PAdapter
 from agt_route_benchmark.adapters.proposed import ProposedAdapter
 from agt_route_benchmark.adapters.v25_route_asset import V25RouteAssetAdapter
@@ -15,6 +16,7 @@ from agt_route_benchmark.contracts import ExperimentSpec, PathPoint
 from agt_route_benchmark.coverage_bridge import collect_coverage_components_live
 from agt_route_benchmark.experiment import ExperimentRunner
 from agt_route_benchmark.graph_io import load_agricultural_graph
+from agt_route_benchmark.manual_waypoint_io import load_manual_waypoint_plan
 from agt_route_benchmark.path_io import read_path_csv
 from agt_route_benchmark.map_io import load_nav2_map
 from agt_route_benchmark.profile import load_platform_profile
@@ -109,6 +111,7 @@ def main() -> int:
     parser.add_argument("--nav2-live", action="store_true")
     parser.add_argument("--graph", type=Path, help="Development-only sparse graph fixture for ours")
     parser.add_argument("--ours-route-csv", type=Path, help="Canonical V2.5 Route Asset CSV for the formal proposed method")
+    parser.add_argument("--manual-waypoints-yaml", type=Path, help="Auditable manual waypoint mission plan with frozen best-P2P planner")
     parser.add_argument("--coverage-components-json", type=Path)
     parser.add_argument("--coverage-live", action="store_true")
     parser.add_argument("--semantic-map", type=Path)
@@ -167,6 +170,25 @@ def main() -> int:
                     raise SystemExit("development ours requires --graph or scenario graph_fixture")
                 args.graph = args.scenario.parent / str(graph_ref)
             adapter = ProposedAdapter(load_agricultural_graph(args.graph))
+    elif args.planner == "manual_waypoints_best_p2p":
+        if scenario.level != "mission":
+            raise SystemExit("manual_waypoints_best_p2p is a mission-level baseline")
+        if args.manual_waypoints_yaml is None:
+            raise SystemExit("manual_waypoints_best_p2p requires --manual-waypoints-yaml")
+        waypoint_plan = load_manual_waypoint_plan(args.manual_waypoints_yaml)
+        unknown_targets = sorted(set(waypoint_plan.target_semantic_ids) - set(scenario.required_semantic_ids))
+        if unknown_targets:
+            raise SystemExit(f"manual waypoint plan targets non-required semantic IDs: {unknown_targets}")
+        if not args.nav2_live:
+            raise SystemExit("manual_waypoints_best_p2p requires --nav2-live so every authored segment uses the frozen P2P planner")
+        call, nav2_node, rclpy = _nav2_call()
+        cleanup = (nav2_node, rclpy)
+        p2p_adapter = Nav2P2PAdapter(waypoint_plan.p2p_planner, call)
+        adapter = ManualWaypointAdapter(
+            waypoint_plan.waypoints,
+            p2p_adapter,
+            visited_semantic_ids=waypoint_plan.target_semantic_ids,
+        )
     elif args.planner == "fields2cover":
         semantic_map = args.semantic_map
         if semantic_map is None and snapshot is not None:
