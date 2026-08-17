@@ -2,41 +2,39 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Convert the frozen A2 static service topology into one deterministic `agt_vehicle_feasible_motion_graph/v1` asset whose service actions and headland transitions carry local vehicle-motion evidence, without claiming START_POSE reachability, route readiness, or optimality.
+**Goal:** Convert the frozen A2 static service topology into one deterministic `agt_vehicle_feasible_motion_graph/v1` asset carrying local service-motion and headland-transition evidence, without claiming START_POSE reachability, route readiness, or optimality.
 
-**Architecture:** Keep A2 immutable. Add a focused A3 core model, a service-motion validator, a connector-motion orchestrator that adapts A2 candidates into the existing R5/R6A/R6B chain, and a strict IO module. Ordinary service actions revalidate A1-derived centerlines directionally; dead-end actions use exact forward-in/reverse-out retrace; connector actions reuse existing forward gate/audit/admission/reverse search. A diagnostic acceptance harness may write only `vehicle_feasible_motion_graph.yaml`.
+**Architecture:** Keep A2 immutable. Add a core A3 model, a directional service validator, a connector orchestrator that adapts A2 candidates into the existing forward gate/audit/R6A/R6B chain, and a strict IO module. Ordinary services revalidate stored A1/A2 centerlines directionally; dead-end actions use exact forward-in/reverse-out retrace; connector actions reuse existing planners and preserve all failed/unresolved candidates for audit.
 
-**Tech Stack:** Python 3.10, dataclasses, math, pathlib, PyYAML, NumPy, ROS 2 Humble, `ament_cmake_pytest`, existing `VehicleFeasibleServiceGraph`, `TurnZoneSet`, `NavigationGridEvidence`, `CanonicalVehicleProfile`, `SiteBoundary`, `ForwardConnectorNavigationPlan`, `ForwardConnectorCandidateAuditPlan`, `ReverseFallbackAdmissionPlan`, and `ReversePrimitiveConnectorPlan`.
+**Tech Stack:** Python 3.10, dataclasses, math, pathlib, NumPy, PyYAML, ROS 2 Humble, `ament_cmake_pytest`, existing `VehicleFeasibleServiceGraph`, `TurnZoneSet`, `NavigationGridEvidence`, `CanonicalVehicleProfile`, `SiteBoundary`, forward connector gate/audit, R6A admission, and R6B bounded reverse primitive search.
 
 ## Global Constraints
 
 - Work only on `feat/v25-12g-maximum-feasible-coverage` in the existing checkout; do not create another worktree.
 - Do not use `git reset --hard` or `git clean`.
 - Never touch or stage `tools/rosbag_sensor_trimmer` or `tools/map_tools/render_pcd_top_views.py`.
-- Frozen output filename: `vehicle_feasible_motion_graph.yaml`.
-- Frozen schema: `agt_vehicle_feasible_motion_graph/v1`.
-- Frozen top-level status: `MOTION_EVIDENCE_ONLY`.
-- A2 is immutable. A3 must not rewrite `vehicle_feasible_service_graph.yaml` or any A1/A2 upstream asset.
-- A3 may write only its own new sibling runtime asset.
-- A3 must produce exactly one service validation per A2 service state and exactly one transition validation per A2 connector candidate.
+- Output filename is exactly `vehicle_feasible_motion_graph.yaml`.
+- Schema is exactly `agt_vehicle_feasible_motion_graph/v1`.
+- Top-level status is exactly `MOTION_EVIDENCE_ONLY`.
+- A3 must not modify `vehicle_feasible_service_graph.yaml`, `vehicle_feasible_segments.yaml`, `turn_zones.yaml`, `navigation_map.yaml`, `navigation_map.pgm`, `site_boundary.yaml`, `derivation.yaml`, or `aisle_graph.yaml`.
+- A3 writes only its own sibling runtime asset.
+- Produce exactly one service validation for every A2 service state and one transition validation for every A2 connector candidate.
 - Result classes are exactly `EXECUTABLE`, `REJECTED`, and `UNRESOLVED`.
-- A bounded reverse-search failure is not global infeasibility; use `BOUNDED_SEARCH_NO_SOLUTION`.
-- Site Boundary touch/cross is a hard rejection and never enters reverse fallback.
-- UNKNOWN or insufficient grid coverage never becomes FREE and remains unresolved evidence unless a separate OCCUPIED hard conflict already proves rejection.
-- `operator_approved_mixed_connector_ids` is frozen to `()` for A3 v1.
-- Do not increase R6B `max_expansions`, `max_path_length_m`, `max_cusps`, or other default search budgets to improve connectivity.
-- Ordinary LOW->HIGH and HIGH->LOW services both use forward gear; HIGH->LOW changes yaw by pi and reverses point order.
-- `DEAD_END_FORWARD_IN_REVERSE_OUT` never calls R6B; it uses exact reverse retrace of the forward-in geometry.
-- Dead-end reverse samples keep the forward-in yaw; only `motion_direction` becomes `REVERSE`.
-- Dead-end cusp is one zero-distance marker at the terminal pose, then reverse resumes from the preceding geometric sample so travel length is not double-counted.
-- Pose cross-reference tolerance is `1e-6 m` for position and `1e-6 rad` for yaw.
-- Coverage reward is A2 useful segment length; actual travel distance is the 3D polyline arc length of the validated motion samples.
-- A physical segment contributes locally validated coverage once if at least one service action for its `coverage_segment_id` is `EXECUTABLE`.
-- A3 must never emit or serialize `route_ready`, `reachable_from_start`, `optimal`, or equivalent claims.
-- Semantic-identical inputs must produce byte-identical YAML.
-- Strict TDD is mandatory. No behavior implementation before the operator has shown the corresponding RED evidence.
-- Operator test gates are intentionally batched to reduce interruptions; implementation commits remain small between gates.
-- Never claim tests/build/real-data acceptance pass until operator-machine output proves it.
+- Site Boundary touch/cross is a hard conflict and must never enter reverse fallback.
+- UNKNOWN/out-of-grid evidence is not obstacle truth; absent a separate OCCUPIED conflict, classify it `UNRESOLVED`.
+- `operator_approved_mixed_connector_ids` is exactly `()` in A3 v1.
+- Do not increase R6B `max_expansions`, `max_path_length_m`, `max_cusps`, or other default search budgets.
+- LOW->HIGH and HIGH->LOW ordinary services both use forward gear. HIGH->LOW reverses point order and adds pi to yaw.
+- `DEAD_END_FORWARD_IN_REVERSE_OUT` never calls R6B. Reverse-out uses the exact forward geometry in reverse sample order with unchanged yaw.
+- Dead-end has one zero-distance cusp marker at the terminal pose. Reverse travel resumes from the previous geometric point so distance is not double counted.
+- Pose cross-reference tolerance is `1e-6 m` position and `1e-6 rad` yaw.
+- Coverage reward is A2 useful segment length. Travel distance is the actual 3D sample polyline length.
+- A physical `coverage_segment_id` contributes locally validated coverage at most once.
+- A3 must not serialize `route_ready`, `reachable_from_start`, `optimal`, or equivalent claims.
+- Semantic-identical inputs must serialize to byte-identical YAML.
+- Strict TDD is mandatory. No behavior implementation before the operator shows the corresponding RED evidence.
+- Operator test gates are batched to reduce interruption. Implementation commits remain small.
+- Never claim build/test/real-data success without fresh operator-machine output.
 
 ---
 
@@ -44,11 +42,11 @@
 
 ```text
 src/agt_offline_assets/agt_offline_assets/
-  vehicle_feasible_motion_graph.py          # A3 public dataclasses/constants + top-level derivation/diagnostics
-  vehicle_feasible_service_motion.py        # directional service samples, dead-end retrace, footprint classification
-  vehicle_feasible_transition_motion.py     # A2->ConnectorRequest adapter + R5/R6A/R6B orchestration
-  vehicle_feasible_motion_graph_io.py       # deterministic serializer + strict loader
-  forward_connector_candidate_audit.py      # optional Site Boundary-aware audit evidence, default behavior unchanged
+  vehicle_feasible_motion_graph.py
+  vehicle_feasible_service_motion.py
+  vehicle_feasible_transition_motion.py
+  vehicle_feasible_motion_graph_io.py
+  forward_connector_candidate_audit.py
   __init__.py
 
 src/agt_offline_assets/test/
@@ -57,24 +55,18 @@ src/agt_offline_assets/test/
 
 src/agt_offline_assets/CMakeLists.txt
 
-tools/
-  v25_12g_a3_acceptance.py
+tools/v25_12g_a3_acceptance.py
+tests/test_v25_12g_a3_contract.py
 
-tests/
-  test_v25_12g_a3_contract.py
-
-docs/v2.5/
-  V25_12G_A3_CURRENT_STATE.md
-  V25_12G_A3_REAL_DATA_2026-08-17.md
+docs/v2.5/V25_12G_A3_CURRENT_STATE.md
+docs/v2.5/V25_12G_A3_REAL_DATA_2026-08-17.md
 ```
 
-Do not modify A1/A2 derivation modules. Existing R5/R6A/R6B algorithms remain the planning backends; only the forward candidate audit receives optional structured Site Boundary evidence needed to stop boundary-conflicting candidates before R6A admission.
+`vehicle_feasible_motion_graph.py` owns public constants/dataclasses, top-level validation, graph assembly, and diagnostics. `vehicle_feasible_service_motion.py` owns service sample construction and footprint classification. `vehicle_feasible_transition_motion.py` owns A2 connector adaptation and R5/R6A/R6B orchestration. `vehicle_feasible_motion_graph_io.py` owns deterministic serializer/writer/strict loader.
 
 ---
 
 ## Frozen Public Contract
-
-### Core constants
 
 ```python
 VEHICLE_FEASIBLE_MOTION_GRAPH_SCHEMA = "agt_vehicle_feasible_motion_graph/v1"
@@ -97,25 +89,13 @@ FORWARD_DUBINS_NAVIGATION_GATE = "FORWARD_DUBINS_NAVIGATION_GATE"
 BOUNDED_REVERSE_PRIMITIVE_SEARCH = "BOUNDED_REVERSE_PRIMITIVE_SEARCH"
 ```
 
-### Configuration
-
 ```python
 @dataclass(frozen=True)
 class VehicleFeasibleMotionGraphConfig:
     preview_footprint_padding_m: float = 0.05
     pose_position_tolerance_m: float = 1.0e-6
     pose_yaw_tolerance_rad: float = 1.0e-6
-
-    def validate(self) -> None:
-        if self.preview_footprint_padding_m < 0.0:
-            raise ValueError("preview_footprint_padding_m must be >= 0")
-        if self.pose_position_tolerance_m <= 0.0:
-            raise ValueError("pose_position_tolerance_m must be > 0")
-        if self.pose_yaw_tolerance_rad <= 0.0:
-            raise ValueError("pose_yaw_tolerance_rad must be > 0")
 ```
-
-### Core dataclasses
 
 ```python
 @dataclass(frozen=True)
@@ -216,7 +196,7 @@ class VehicleFeasibleMotionGraph:
     status: str = MOTION_EVIDENCE_ONLY
 ```
 
-### Exact top-level signatures
+Exact top-level signatures:
 
 ```python
 def derive_vehicle_feasible_motion_graph(
@@ -228,8 +208,7 @@ def derive_vehicle_feasible_motion_graph(
     *,
     site_boundary: SiteBoundary | None = None,
     source: Mapping[str, Any] | None = None,
-) -> VehicleFeasibleMotionGraph:
-    """Validate every A2 service state and connector candidate into local motion evidence."""
+) -> VehicleFeasibleMotionGraph: ...
 
 
 def write_vehicle_feasible_motion_graph(
@@ -237,57 +216,288 @@ def write_vehicle_feasible_motion_graph(
     path: str | Path,
     *,
     overwrite: bool = False,
-) -> Path:
-    """Write only the A3 sibling asset, refusing overwrite by default."""
+) -> Path: ...
 
 
 def load_vehicle_feasible_motion_graph(
     path: str | Path,
-) -> VehicleFeasibleMotionGraph:
-    """Strict-load one v1 A3 graph and reject malformed motion evidence."""
+) -> VehicleFeasibleMotionGraph: ...
 ```
 
 ---
 
-## Batched TDD Execution Policy
+## Shared Focused-Test Fixtures
 
-The operator asked for fewer interruptions. Use three explicit operator gates only:
+Add these exact helpers at the top of `src/agt_offline_assets/test/test_vehicle_feasible_motion_graph.py` after imports. They make the RED/GREEN tests self-contained.
+
+```python
+import math
+import numpy as np
+import pytest
+
+from agt_offline_assets.navigation_grid import NavigationGridEvidence
+from agt_offline_assets.navigation_map_derivation import FREE, OCCUPIED, UNKNOWN
+from agt_offline_assets.site_boundary import SiteBoundary
+from agt_offline_assets.turn_zones import TurnZone, TurnZoneSet
+from agt_offline_assets.vehicle_profile import CanonicalVehicleProfile
+from agt_offline_assets.vehicle_feasible_service_graph import (
+    CANDIDATE_TOPOLOGY_COMPONENT,
+    DEAD_END_FORWARD_IN_REVERSE_OUT,
+    HEADLAND_TOPOLOGY_CANDIDATE,
+    REQUIRES_A3_CONNECTOR_VALIDATION,
+    REQUIRES_A3_REVERSE_SERVICE_VALIDATION,
+    SERVICE_HIGH_TO_LOW,
+    SERVICE_LOW_TO_HIGH,
+    TOPOLOGY_SERVICE_CANDIDATE,
+    CandidateTopologyComponent,
+    ConnectorCandidate,
+    ServiceGraphDiagnostics,
+    ServiceResource,
+    ServiceState,
+    VehicleFeasibleServiceGraph,
+)
+
+
+def _vehicle():
+    footprint = ((0.30, 0.20), (0.30, -0.20), (-0.30, -0.20), (-0.30, 0.20))
+    return CanonicalVehicleProfile(
+        profile_id="mk_mini",
+        profile_path="fixture.yaml",
+        profile_sha256="fixture-sha256",
+        kinematics="ackermann",
+        footprint_frame="base_link",
+        base_frame="base_link",
+        physical_length_m=0.60,
+        physical_width_m=0.40,
+        footprint_xy=footprint,
+        navigation_footprint_xy=footprint,
+        navigation_width_m=0.40,
+        navigation_length_m=0.60,
+        wheel_base_m=0.60,
+        track_width_m=0.40,
+        wheel_diameter_m=0.24,
+        ground_clearance_m=0.11,
+        minimum_turning_radius_m=1.00,
+        minimum_turning_radius_verified=True,
+        maximum_steering_angle_rad=0.54,
+        maximum_steering_angle_deg=31.0,
+        allow_in_place_rotation=False,
+        max_forward_velocity_mps=1.0,
+        max_reverse_velocity_mps=0.5,
+        max_angular_velocity_rps=1.0,
+        manufacturer_maximum_speed_mps=1.0,
+        route_acceptance_enabled=False,
+        preview_planning_enabled=True,
+        blocked_reason="",
+    )
+
+
+def _navigation(fill=FREE):
+    return NavigationGridEvidence(
+        resolution_m=0.25,
+        origin_x_m=-2.0,
+        origin_y_m=-4.0,
+        width=40,
+        height=32,
+        occupancy=np.full((32, 40), fill, dtype=np.uint8),
+        frame_id="map",
+        source={},
+    )
+
+
+def _boundary(x_max=8.0):
+    return SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((-1.5, -3.5), (x_max, -3.5), (x_max, 3.5), (-1.5, 3.5)),
+        source={},
+    )
+
+
+def _resource(segment_id="aisle_001.segment_001", y=0.0, low="LOW_U_HEADLAND", high="HIGH_U_HEADLAND"):
+    aisle_id = segment_id.split(".")[0]
+    return ServiceResource(
+        segment_id=segment_id,
+        aisle_id=aisle_id,
+        ordinal_in_aisle=1,
+        coverage_length_m=4.0,
+        coverage_fraction_of_aisle=1.0,
+        low_endpoint_type=low,
+        high_endpoint_type=high,
+        low_endpoint_pose=(0.0, y, 0.0, 0.0),
+        high_endpoint_pose=(4.0, y, 0.0, 0.0),
+        centerline_xyz=((0.0, y, 0.0), (2.0, y, 0.0), (4.0, y, 0.0)),
+    )
+
+
+def _ordinary_state(resource, service_type):
+    if service_type == SERVICE_LOW_TO_HIGH:
+        return ServiceState(
+            service_state_id=f"{resource.segment_id}.service_low_to_high",
+            segment_id=resource.segment_id,
+            aisle_id=resource.aisle_id,
+            service_type=SERVICE_LOW_TO_HIGH,
+            entry_endpoint_type=resource.low_endpoint_type,
+            exit_endpoint_type=resource.high_endpoint_type,
+            entry_pose=resource.low_endpoint_pose,
+            exit_pose=resource.high_endpoint_pose,
+            service_motion_direction="FORWARD",
+            forward_service_distance_m=resource.coverage_length_m,
+            reverse_service_distance_m=0.0,
+            coverage_segment_id=resource.segment_id,
+            coverage_reward_length_m=resource.coverage_length_m,
+            external_reachability_status=HEADLAND_TOPOLOGY_CANDIDATE,
+            validation_status=TOPOLOGY_SERVICE_CANDIDATE,
+        )
+    return ServiceState(
+        service_state_id=f"{resource.segment_id}.service_high_to_low",
+        segment_id=resource.segment_id,
+        aisle_id=resource.aisle_id,
+        service_type=SERVICE_HIGH_TO_LOW,
+        entry_endpoint_type=resource.high_endpoint_type,
+        exit_endpoint_type=resource.low_endpoint_type,
+        entry_pose=(resource.high_endpoint_pose[0], resource.high_endpoint_pose[1], resource.high_endpoint_pose[2], -math.pi),
+        exit_pose=(resource.low_endpoint_pose[0], resource.low_endpoint_pose[1], resource.low_endpoint_pose[2], -math.pi),
+        service_motion_direction="FORWARD",
+        forward_service_distance_m=resource.coverage_length_m,
+        reverse_service_distance_m=0.0,
+        coverage_segment_id=resource.segment_id,
+        coverage_reward_length_m=resource.coverage_length_m,
+        external_reachability_status=HEADLAND_TOPOLOGY_CANDIDATE,
+        validation_status=TOPOLOGY_SERVICE_CANDIDATE,
+    )
+
+
+def _dead_end_state(resource):
+    return ServiceState(
+        service_state_id=f"{resource.segment_id}.dead_end_forward_in_reverse_out",
+        segment_id=resource.segment_id,
+        aisle_id=resource.aisle_id,
+        service_type=DEAD_END_FORWARD_IN_REVERSE_OUT,
+        entry_endpoint_type=resource.low_endpoint_type,
+        exit_endpoint_type=resource.low_endpoint_type,
+        entry_pose=resource.low_endpoint_pose,
+        exit_pose=resource.low_endpoint_pose,
+        service_motion_direction="FORWARD",
+        forward_service_distance_m=resource.coverage_length_m,
+        reverse_service_distance_m=resource.coverage_length_m,
+        coverage_segment_id=resource.segment_id,
+        coverage_reward_length_m=resource.coverage_length_m,
+        external_reachability_status=HEADLAND_TOPOLOGY_CANDIDATE,
+        validation_status=REQUIRES_A3_REVERSE_SERVICE_VALIDATION,
+    )
+
+
+def _diagnostics(resources, states, connectors):
+    return ServiceGraphDiagnostics(
+        resource_count=len(resources),
+        ordinary_service_state_count=sum(s.service_type != DEAD_END_FORWARD_IN_REVERSE_OUT for s in states),
+        dead_end_candidate_count=sum(s.service_type == DEAD_END_FORWARD_IN_REVERSE_OUT for s in states),
+        total_service_state_count=len(states),
+        connector_candidate_count=len(connectors),
+        low_u_connector_candidate_count=sum(c.side == "LOW_U" for c in connectors),
+        high_u_connector_candidate_count=sum(c.side == "HIGH_U" for c in connectors),
+        candidate_component_count=0,
+        isolated_component_count=0,
+        externally_unproven_state_count=0,
+        unique_coverage_length_m=sum(r.coverage_length_m for r in resources),
+        distinct_aisle_count=len({r.aisle_id for r in resources}),
+    )
+
+
+def _graph(resources, states, connectors=()):
+    resources = tuple(resources)
+    states = tuple(states)
+    connectors = tuple(connectors)
+    return VehicleFeasibleServiceGraph(
+        frame_id="map",
+        platform_id="mk_mini",
+        platform_profile_sha256="fixture-sha256",
+        row_direction_xy=(1.0, 0.0),
+        service_resources=resources,
+        service_states=states,
+        connector_candidates=connectors,
+        candidate_components=(),
+        diagnostics=_diagnostics(resources, states, connectors),
+        source={},
+    )
+
+
+def _zones():
+    return TurnZoneSet(
+        frame_id="map",
+        row_direction_xy=(1.0, 0.0),
+        zones=(
+            TurnZone(
+                zone_id="turn_high_u",
+                side="HIGH_U",
+                polygon_xy=((3.0, -2.5), (6.0, -2.5), (6.0, 2.5), (3.0, 2.5)),
+                supported_aisle_ids=("aisle_001", "aisle_002"),
+                endpoint_count=2,
+                free_fraction=1.0,
+                allow_turn=True,
+            ),
+        ),
+        source={},
+    )
+
+
+def _two_resource_connector_graph():
+    a = _resource("aisle_001.segment_001", y=0.0)
+    b = _resource("aisle_002.segment_001", y=2.0)
+    a_state = _ordinary_state(a, SERVICE_LOW_TO_HIGH)
+    b_state = _ordinary_state(b, SERVICE_HIGH_TO_LOW)
+    connector = ConnectorCandidate(
+        connector_candidate_id="headland.turn_high_u.a_to_b",
+        from_service_state_id=a_state.service_state_id,
+        to_service_state_id=b_state.service_state_id,
+        from_segment_id=a.segment_id,
+        to_segment_id=b.segment_id,
+        side="HIGH_U",
+        turn_zone_id="turn_high_u",
+        start_pose=a_state.exit_pose,
+        goal_pose=b_state.entry_pose,
+        validation_status=REQUIRES_A3_CONNECTOR_VALIDATION,
+    )
+    return _graph((a, b), (a_state, b_state), (connector,))
+```
+
+---
+
+## Batched TDD Policy
+
+Use only three operator gates:
 
 ```text
-Gate R0  -> prove the new A3 module is absent before any A3 production file exists
-Gate R1  -> after skeleton-only import surface exists, run the complete behavior/contract suite and capture specific RED failures
-Gate G1  -> after Tasks 3-7 implementation, run all focused/package/contract tests in one GREEN batch
+R0: prove the public A3 module is absent
+R1: after import-only skeleton exists, run all detailed A3 behavior/contract tests and prove specific RED failures
+G1: after implementation, run all focused + package + root contract tests in one GREEN batch
 ```
 
-No behavior implementation is allowed between R0 and R1. After R1 has shown specific behavior failures, Tasks 3-7 may be implemented and committed without another operator interruption until G1.
+Between R1 and G1, commit implementation tasks without asking the operator to test again unless a contradiction or unrelated upstream defect blocks progress.
 
 ---
 
-### Task 1: R0 module-absence test and import skeleton
+### Task 1: R0 module absence, then public import skeleton
 
 **Files:**
-- Create test-only first: `src/agt_offline_assets/test/test_vehicle_feasible_motion_graph.py`
-- Then, only after operator RED: create `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_motion_graph.py`
+- Create test first: `src/agt_offline_assets/test/test_vehicle_feasible_motion_graph.py`
+- After RED only: create `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_motion_graph.py`
 
-**Interfaces:** This task produces only the importable public constants/config/dataclass names above; no derivation logic and no serializer.
+**Interfaces:** public constants, config, and dataclass names only. No derivation behavior in the skeleton.
 
-- [ ] **Step 1: Add the first failing test without creating the production module**
+- [ ] **Step 1: Write failing module-contract test**
 
 ```python
 import importlib
 
 
 def test_a3_public_module_exists_with_frozen_schema():
-    module = importlib.import_module(
-        "agt_offline_assets.vehicle_feasible_motion_graph"
-    )
-    assert module.VEHICLE_FEASIBLE_MOTION_GRAPH_SCHEMA == (
-        "agt_vehicle_feasible_motion_graph/v1"
-    )
+    module = importlib.import_module("agt_offline_assets.vehicle_feasible_motion_graph")
+    assert module.VEHICLE_FEASIBLE_MOTION_GRAPH_SCHEMA == "agt_vehicle_feasible_motion_graph/v1"
     assert module.MOTION_EVIDENCE_ONLY == "MOTION_EVIDENCE_ONLY"
 ```
 
-- [ ] **Step 2: Commit the test only**
+- [ ] **Step 2: Commit test only**
 
 ```bash
 git add src/agt_offline_assets/test/test_vehicle_feasible_motion_graph.py
@@ -305,11 +515,11 @@ python3 -m pytest -q \
   src/agt_offline_assets/test/test_vehicle_feasible_motion_graph.py::test_a3_public_module_exists_with_frozen_schema
 ```
 
-Expected RED: `ModuleNotFoundError: No module named 'agt_offline_assets.vehicle_feasible_motion_graph'`.
+Expected RED: `ModuleNotFoundError` for `agt_offline_assets.vehicle_feasible_motion_graph`.
 
-- [ ] **Step 4: After R0 evidence, add import skeleton only**
+- [ ] **Step 4: After R0, add import skeleton only**
 
-The new module must contain the frozen constants, `VehicleFeasibleMotionGraphConfig`, and dataclass declarations from the public contract. The only callable body at this point is `VehicleFeasibleMotionGraphConfig.validate()`; do not add derivation or validation behavior yet.
+Create the constants/config/dataclasses from the Frozen Public Contract. `VehicleFeasibleMotionGraphConfig.validate()` may validate non-negative padding and positive tolerances. Do not create service/transition derivation functions yet.
 
 - [ ] **Step 5: Commit skeleton**
 
@@ -318,155 +528,109 @@ git add src/agt_offline_assets/agt_offline_assets/vehicle_feasible_motion_graph.
 git commit -m "feat(v25-12g): define A3 motion graph contract"
 ```
 
-Do not ask the operator to run GREEN here. Move directly to Task 2 and prepare the complete behavior RED batch.
+Proceed immediately to Task 2 without requesting GREEN.
 
 ---
 
-### Task 2: Write the complete A3 behavior and acceptance tests, then Gate R1
+### Task 2: Write the complete behavior RED batch
 
 **Files:**
 - Modify: `src/agt_offline_assets/test/test_vehicle_feasible_motion_graph.py`
 - Modify: `src/agt_offline_assets/test/test_forward_connector_candidate_audit.py`
 - Create: `tests/test_v25_12g_a3_contract.py`
 
-**Interfaces:** Tests freeze `validate_service_actions()`, `adapt_connector_candidates()`, `validate_transition_candidates()`, top-level derivation, deterministic IO, acceptance harness CLI, and the Site Boundary-aware audit extension before any of those behaviors are implemented.
-
-- [ ] **Step 1: Add focused fixtures**
-
-Use small A2 fixtures built directly from the existing dataclasses so tests do not depend on real runtime files:
+**Interfaces frozen by tests:**
 
 ```python
-import math
-import pytest
-import numpy as np
-
-from agt_offline_assets.forward_connector_navigation_gate import GridPathEvidence
-from agt_offline_assets.navigation_grid import NavigationGridEvidence
-from agt_offline_assets.turn_zones import TurnZone, TurnZoneSet
-from agt_offline_assets.vehicle_feasible_service_graph import (
-    DEAD_END_FORWARD_IN_REVERSE_OUT,
-    SERVICE_HIGH_TO_LOW,
-    SERVICE_LOW_TO_HIGH,
-    ConnectorCandidate,
-    ServiceGraphDiagnostics,
-    ServiceResource,
-    ServiceState,
-    VehicleFeasibleServiceGraph,
-)
-
-
-def _resource(
-    segment_id="aisle_001.segment_001",
-    *,
-    y=0.0,
-    low_type="LOW_U_HEADLAND",
-    high_type="HIGH_U_HEADLAND",
-):
-    return ServiceResource(
-        segment_id=segment_id,
-        aisle_id=segment_id.split(".")[0],
-        ordinal_in_aisle=1,
-        coverage_length_m=4.0,
-        coverage_fraction_of_aisle=1.0,
-        low_endpoint_type=low_type,
-        high_endpoint_type=high_type,
-        low_endpoint_pose=(0.0, y, 0.0, 0.0),
-        high_endpoint_pose=(4.0, y, 0.0, 0.0),
-        centerline_xyz=((0.0, y, 0.0), (2.0, y, 0.0), (4.0, y, 0.0)),
-    )
+def validate_service_actions(service_graph, navigation, vehicle, config, *, site_boundary=None): ...
+def adapt_connector_candidates(service_graph, turn_zones, config): ...
+def validate_transition_candidates(service_graph, turn_zones, navigation, vehicle, config, *, site_boundary=None): ...
+def derive_vehicle_feasible_motion_graph(service_graph, turn_zones, navigation, vehicle, config=None, *, site_boundary=None, source=None): ...
+def vehicle_feasible_motion_graph_to_dict(graph): ...
+def write_vehicle_feasible_motion_graph(graph, path, *, overwrite=False): ...
+def load_vehicle_feasible_motion_graph(path): ...
 ```
 
-Add helper constructors for ordinary LOW->HIGH, ordinary HIGH->LOW, one-headland dead-end states, a two-resource connector graph, a FREE navigation grid, an UNKNOWN navigation grid, an OCCUPIED-cell grid, and a simple rectangular `SiteBoundary` using the exact existing constructor signature from `site_boundary.py`.
-
-- [ ] **Step 2: Freeze ordinary directional service behavior**
+- [ ] **Step 1: Add ordinary service tests**
 
 ```python
-def test_low_to_high_service_is_forward_and_uses_actual_polyline_length():
-    action = _validate_single_service(_graph_with_low_to_high(), _free_navigation())
+def test_low_to_high_is_forward_and_uses_polyline_length():
+    r = _resource()
+    g = _graph((r,), (_ordinary_state(r, SERVICE_LOW_TO_HIGH),))
+    action = validate_service_actions(g, _navigation(), _vehicle(), VehicleFeasibleMotionGraphConfig())[0]
     assert action.status == EXECUTABLE
-    assert [sample.motion_direction for sample in action.samples] == ["FORWARD"] * 3
-    assert [sample.x for sample in action.samples] == [0.0, 2.0, 4.0]
-    assert all(sample.yaw == pytest.approx(0.0) for sample in action.samples)
+    assert [s.x for s in action.samples] == [0.0, 2.0, 4.0]
+    assert all(s.motion_direction == "FORWARD" for s in action.samples)
     assert action.path_length_m == pytest.approx(4.0)
     assert action.forward_distance_m == pytest.approx(4.0)
     assert action.reverse_distance_m == pytest.approx(0.0)
     assert action.cusp_count == 0
 
 
-def test_high_to_low_service_reverses_points_but_stays_forward_gear():
-    action = _validate_single_service(_graph_with_high_to_low(), _free_navigation())
-    assert action.status == EXECUTABLE
-    assert [sample.x for sample in action.samples] == [4.0, 2.0, 0.0]
-    assert all(sample.motion_direction == "FORWARD" for sample in action.samples)
-    assert all(abs(abs(sample.yaw) - math.pi) <= 1.0e-9 for sample in action.samples)
+def test_high_to_low_reverses_points_but_stays_forward_gear():
+    r = _resource()
+    g = _graph((r,), (_ordinary_state(r, SERVICE_HIGH_TO_LOW),))
+    action = validate_service_actions(g, _navigation(), _vehicle(), VehicleFeasibleMotionGraphConfig())[0]
+    assert [s.x for s in action.samples] == [4.0, 2.0, 0.0]
+    assert all(s.motion_direction == "FORWARD" for s in action.samples)
+    assert all(abs(abs(s.yaw) - math.pi) <= 1.0e-9 for s in action.samples)
 ```
 
-- [ ] **Step 3: Freeze service evidence classification**
+- [ ] **Step 2: Add service evidence tests**
 
 ```python
-def test_service_occupied_footprint_is_rejected():
-    action = _validate_single_service(_graph_with_low_to_high(), _occupied_navigation())
-    assert action.status == REJECTED
-    assert action.proof_scope == PROVEN_HARD_CONSTRAINT_REJECTION
+def test_service_occupied_is_rejected_unknown_is_unresolved_and_boundary_is_hard():
+    r = _resource()
+    g = _graph((r,), (_ordinary_state(r, SERVICE_LOW_TO_HIGH),))
+    cfg = VehicleFeasibleMotionGraphConfig()
 
+    occupied = validate_service_actions(g, _navigation(OCCUPIED), _vehicle(), cfg)[0]
+    assert occupied.status == REJECTED
+    assert occupied.proof_scope == PROVEN_HARD_CONSTRAINT_REJECTION
 
-def test_service_unknown_footprint_is_unresolved():
-    action = _validate_single_service(_graph_with_low_to_high(), _unknown_navigation())
-    assert action.status == UNRESOLVED
-    assert action.proof_scope == MAP_EVIDENCE_INSUFFICIENT
+    unknown = validate_service_actions(g, _navigation(UNKNOWN), _vehicle(), cfg)[0]
+    assert unknown.status == UNRESOLVED
+    assert unknown.proof_scope == MAP_EVIDENCE_INSUFFICIENT
 
-
-def test_service_site_boundary_conflict_is_hard_rejection():
-    action = _validate_single_service(
-        _graph_with_low_to_high(),
-        _free_navigation(),
-        site_boundary=_boundary_that_clips_high_endpoint(),
-    )
-    assert action.status == REJECTED
-    assert action.backend_status == "SITE_BOUNDARY_CONFLICT"
+    clipped = validate_service_actions(
+        g, _navigation(), _vehicle(), cfg, site_boundary=_boundary(x_max=3.9)
+    )[0]
+    assert clipped.status == REJECTED
+    assert clipped.backend_status == "SITE_BOUNDARY_CONFLICT"
 ```
 
-- [ ] **Step 4: Freeze exact dead-end retrace semantics**
+- [ ] **Step 3: Add exact dead-end retrace test**
 
 ```python
-def test_dead_end_is_forward_in_then_exact_reverse_retrace_with_one_cusp():
-    action = _validate_single_service(_graph_with_dead_end(), _free_navigation())
+def test_dead_end_exact_retrace_has_one_cusp_and_single_coverage_reward():
+    r = _resource(high="INTERIOR_BLOCKED_END")
+    g = _graph((r,), (_dead_end_state(r),))
+    action = validate_service_actions(g, _navigation(), _vehicle(), VehicleFeasibleMotionGraphConfig())[0]
     assert action.backend == A1_CENTERLINE_EXACT_REVERSE_RETRACE
-    assert action.cusp_count == 1
     assert action.coverage_reward_length_m == pytest.approx(4.0)
+    assert action.path_length_m == pytest.approx(8.0)
     assert action.forward_distance_m == pytest.approx(4.0)
     assert action.reverse_distance_m == pytest.approx(4.0)
-    assert action.path_length_m == pytest.approx(8.0)
-
-    cusp_indices = [i for i, sample in enumerate(action.samples) if sample.is_cusp]
-    assert len(cusp_indices) == 1
-    cusp = cusp_indices[0]
+    assert action.cusp_count == 1
+    cusp = next(i for i, sample in enumerate(action.samples) if sample.is_cusp)
     assert action.samples[cusp - 1].x == pytest.approx(4.0)
     assert action.samples[cusp].x == pytest.approx(4.0)
     assert action.samples[cusp].motion_direction == "REVERSE"
     assert action.samples[cusp].yaw == pytest.approx(action.samples[cusp - 1].yaw)
-
     forward_xyz = [(s.x, s.y, s.z) for s in action.samples[:cusp]]
-    reverse_xyz = [(s.x, s.y, s.z) for s in action.samples[cusp + 1 :]]
+    reverse_xyz = [(s.x, s.y, s.z) for s in action.samples[cusp + 1:]]
     assert reverse_xyz == list(reversed(forward_xyz[:-1]))
 ```
 
-Also add the HIGH_U-headland symmetric test and a test proving `validate_service_actions()` never imports/calls `derive_reverse_primitive_connector_plan` for dead-end actions.
+Add a second explicit HIGH_U dead-end fixture by creating a resource with `low="INTERIOR_BLOCKED_END", high="HIGH_U_HEADLAND"` and asserting the forward-in sequence is `[4.0, 2.0, 0.0]`, reverse samples preserve that forward-in yaw, and `cusp_count == 1`.
 
-- [ ] **Step 5: Freeze pose cross-reference failures**
+- [ ] **Step 4: Add fail-closed service identity tests**
 
-```python
-def test_service_entry_pose_mismatch_fails_closed():
-    graph = _graph_with_low_to_high(entry_x=0.01)
-    with pytest.raises(ValueError, match="entry pose"):
-        validate_service_actions(graph, _free_navigation(), _vehicle())
-```
+Create a LOW->HIGH state, replace its `entry_pose` x coordinate with `0.01` using `dataclasses.replace`, and assert `validate_service_actions()` raises `ValueError` matching `entry pose`. Add equivalent explicit tests for exit pose mismatch, missing resource ID, non-finite centerline coordinate, duplicate state ID, frame mismatch, platform mismatch, and vehicle profile hash mismatch.
 
-Add equivalent exit-pose, missing-resource, non-finite-centerline, duplicate-state-ID, platform/profile-hash, frame, and row-direction contract tests.
+- [ ] **Step 5: Add Site Boundary-aware forward audit tests**
 
-- [ ] **Step 6: Extend forward audit tests for Site Boundary-aware classification**
-
-The new optional argument is:
+Extend `derive_forward_connector_candidate_audit` with this frozen keyword-only signature:
 
 ```python
 def derive_forward_connector_candidate_audit(
@@ -481,166 +645,115 @@ def derive_forward_connector_candidate_audit(
 ): ...
 ```
 
-Freeze two behaviors:
+Add:
 
 ```python
-def test_candidate_audit_default_without_boundary_is_backward_compatible():
-    baseline = derive_forward_connector_candidate_audit(
-        requests, zones, navigation, vehicle
-    )
-    explicit_none = derive_forward_connector_candidate_audit(
+def test_candidate_audit_explicit_none_boundary_matches_default():
+    default = derive_forward_connector_candidate_audit(requests, zones, navigation, vehicle)
+    explicit = derive_forward_connector_candidate_audit(
         requests, zones, navigation, vehicle, site_boundary=None
     )
-    assert baseline == explicit_none
-
-
-def test_candidate_audit_reports_local_site_boundary_conflict_before_r6a():
-    plan = derive_forward_connector_candidate_audit(
-        requests,
-        zones,
-        navigation,
-        vehicle,
-        site_boundary=boundary,
-    )
-    assert plan.connectors[0].status == "LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT"
+    assert default == explicit
 ```
 
-- [ ] **Step 7: Freeze A2 connector adapter invariants**
+and one fixture where every locally relevant forward candidate crosses the permitted boundary:
 
 ```python
-def test_a2_connector_candidate_maps_one_to_one_to_connector_request():
-    requests, bindings = adapt_connector_candidates(_two_resource_graph(), _zones())
+assert plan.connectors[0].status == "LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT"
+```
+
+- [ ] **Step 6: Add adapter tests**
+
+```python
+def test_connector_adapter_is_one_to_one_and_checks_exit_entry_identity():
+    graph = _two_resource_connector_graph()
+    requests, bindings = adapt_connector_candidates(
+        graph, _zones(), VehicleFeasibleMotionGraphConfig()
+    )
     assert len(requests) == 1
     request = requests[0]
     binding = bindings[request.connector_id]
-    assert request.connector_id == binding.connector_candidate_id
-    assert request.start_pose == binding.start_pose
-    assert request.goal_pose == binding.goal_pose
-
-
-def test_connector_start_not_equal_source_exit_fails_closed():
-    graph = _two_resource_graph(connector_start_x=0.1)
-    with pytest.raises(ValueError, match="start pose"):
-        adapt_connector_candidates(graph, _zones())
+    assert request.connector_id == "headland.turn_high_u.a_to_b"
+    assert request.start_pose == graph.connector_candidates[0].start_pose
+    assert request.goal_pose == graph.connector_candidates[0].goal_pose
+    assert binding.from_service_state_id == graph.connector_candidates[0].from_service_state_id
 ```
 
-Also cover missing source/target state, wrong side, missing Turn Zone, and duplicate connector IDs.
+Use `dataclasses.replace` to change connector `start_pose` by 0.01 m and assert `ValueError` matching `start pose`. Add explicit wrong-side, missing Turn Zone, missing source state, missing target state, and duplicate connector ID tests.
 
-- [ ] **Step 8: Freeze connector evidence funnel with monkeypatched backend plans**
+- [ ] **Step 7: Add transition orchestration tests using monkeypatch**
 
-Use monkeypatches at the A3 orchestration boundary so these unit tests do not depend on the numerical Dubins/R6B search:
-
-```python
-def test_forward_preview_free_transition_becomes_executable(monkeypatch):
-    _patch_forward_gate(monkeypatch, status="PREVIEW_FOOTPRINT_FREE")
-    transitions = validate_transition_candidates(
-        _two_resource_graph(), _zones(), _free_navigation(), _vehicle()
-    )
-    assert transitions[0].status == EXECUTABLE
-    assert transitions[0].backend == FORWARD_DUBINS_NAVIGATION_GATE
-    assert transitions[0].reverse_distance_m == pytest.approx(0.0)
-
-
-def test_map_insufficient_transition_is_unresolved_without_r6b(monkeypatch):
-    _patch_forward_gate(monkeypatch, status="NO_FORWARD_PREVIEW_FREE_CANDIDATE")
-    _patch_audit(monkeypatch, status="LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT")
-    called = {"r6b": False}
-    _patch_r6b_counter(monkeypatch, called)
-    result = validate_transition_candidates(
-        _two_resource_graph(), _zones(), _free_navigation(), _vehicle()
-    )[0]
-    assert result.status == UNRESOLVED
-    assert result.proof_scope == MAP_EVIDENCE_INSUFFICIENT
-    assert called["r6b"] is False
-
-
-def test_occupancy_blocked_transition_calls_r6b_and_preserves_metrics(monkeypatch):
-    _patch_forward_gate(monkeypatch, status="NO_FORWARD_PREVIEW_FREE_CANDIDATE")
-    _patch_audit(monkeypatch, status="LOCAL_FORWARD_OCCUPANCY_BLOCKED")
-    _patch_r6b_solution(
-        monkeypatch,
-        status="REVERSE_PRIMITIVE_PREVIEW_FREE",
-        path_length_m=5.5,
-        forward_distance_m=3.0,
-        reverse_distance_m=2.5,
-        cusp_count=2,
-        search_expansions=321,
-    )
-    result = validate_transition_candidates(
-        _two_resource_graph(), _zones(), _free_navigation(), _vehicle()
-    )[0]
-    assert result.status == EXECUTABLE
-    assert result.backend == BOUNDED_REVERSE_PRIMITIVE_SEARCH
-    assert result.path_length_m == pytest.approx(5.5)
-    assert result.reverse_distance_m == pytest.approx(2.5)
-    assert result.cusp_count == 2
-    assert result.search_expansions == 321
-```
-
-Also freeze: hard Site Boundary audit -> REJECTED without R6A/R6B; mixed evidence -> UNRESOLVED; `NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION` -> REJECTED + `BOUNDED_SEARCH_NO_SOLUTION`; R6B start footprint with OCCUPIED evidence -> REJECTED; R6B start footprint with UNKNOWN/out-of-grid evidence -> UNRESOLVED.
-
-- [ ] **Step 9: Freeze top-level counts, coverage dedup, forbidden semantics, and deterministic IO**
-
-```python
-def test_graph_preserves_all_a2_records_and_deduplicates_coverage():
-    graph = derive_vehicle_feasible_motion_graph(
-        _graph_with_two_directions_same_resource(),
-        _zones(),
-        _free_navigation(),
-        _vehicle(),
-    )
-    assert graph.diagnostics.a2_service_state_count == 2
-    assert graph.diagnostics.service_validation_count == 2
-    assert graph.diagnostics.locally_validated_segment_count == 1
-    assert graph.diagnostics.locally_validated_unique_coverage_length_m == pytest.approx(4.0)
-
-
-def test_serializer_contains_no_route_ready_reachable_or_optimal_keys(tmp_path):
-    path = tmp_path / "vehicle_feasible_motion_graph.yaml"
-    write_vehicle_feasible_motion_graph(_motion_graph_fixture(), path)
-    text = path.read_text()
-    assert "route_ready" not in text
-    assert "reachable_from_start" not in text
-    assert "optimal" not in text
-
-
-def test_load_write_round_trip_is_byte_identical(tmp_path):
-    first = tmp_path / "first.yaml"
-    second = tmp_path / "second.yaml"
-    write_vehicle_feasible_motion_graph(_motion_graph_fixture(), first)
-    loaded = load_vehicle_feasible_motion_graph(first)
-    write_vehicle_feasible_motion_graph(loaded, second)
-    assert first.read_bytes() == second.read_bytes()
-```
-
-Strict loader tests must reject duplicate IDs, missing cross-references, invalid status/proof scopes, non-finite metrics, inconsistent executable ID lists, inconsistent diagnostic counts, and malformed samples.
-
-- [ ] **Step 10: Freeze root acceptance harness CLI contract**
-
-`tests/test_v25_12g_a3_contract.py` loads `tools/v25_12g_a3_acceptance.py` using `importlib.util.spec_from_file_location` and asserts:
-
-```python
-REPORT_SCHEMA == "agt_v25_12g_a3_acceptance_report/v1"
-VALIDATION_SCOPE == "A3_LOCAL_MOTION_EVIDENCE_DIAGNOSTIC_NOT_ROUTE_READY"
-MOTION_GRAPH_ASSET == "vehicle_feasible_motion_graph.yaml"
-```
-
-Parser defaults:
+Patch functions inside `vehicle_feasible_transition_motion`, not the original backend modules. Freeze these cases with explicit assertions:
 
 ```text
---service-graph vehicle_feasible_service_graph.yaml
---turn-zones turn_zones.yaml
---navigation-map navigation_map.yaml
---site-boundary site_boundary.yaml
+PREVIEW_FOOTPRINT_FREE -> EXECUTABLE, backend FORWARD_DUBINS_NAVIGATION_GATE, reverse_distance=0
+LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT -> REJECTED, no R6A/R6B call
+LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT -> UNRESOLVED, no R6B call
+LOCAL_FORWARD_MIXED_EVIDENCE -> UNRESOLVED, no R6B call
+LOCAL_FORWARD_OCCUPANCY_BLOCKED + REVERSE_PRIMITIVE_PREVIEW_FREE -> EXECUTABLE with R6B metrics preserved
+LOCAL_FORWARD_OCCUPANCY_BLOCKED + NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION -> REJECTED + BOUNDED_SEARCH_NO_SOLUTION
+R6B_START_FOOTPRINT_NOT_FREE + OCCUPIED start evidence -> REJECTED
+R6B_START_FOOTPRINT_NOT_FREE + UNKNOWN/out-of-grid start evidence -> UNRESOLVED
+```
+
+For the reverse-success test assert exactly:
+
+```python
+assert result.path_length_m == pytest.approx(5.5)
+assert result.forward_distance_m == pytest.approx(3.0)
+assert result.reverse_distance_m == pytest.approx(2.5)
+assert result.cusp_count == 2
+assert result.search_expansions == 321
+```
+
+- [ ] **Step 8: Add top-level graph/IO tests**
+
+Freeze cardinality preservation, physical coverage dedup, deterministic ordering, overwrite refusal, strict loader cross-reference checks, and byte-stable roundtrip.
+
+```python
+def test_graph_deduplicates_two_executable_directions_to_one_physical_coverage():
+    r = _resource()
+    g = _graph((r,), (
+        _ordinary_state(r, SERVICE_LOW_TO_HIGH),
+        _ordinary_state(r, SERVICE_HIGH_TO_LOW),
+    ))
+    motion = derive_vehicle_feasible_motion_graph(
+        g, _zones(), _navigation(), _vehicle()
+    )
+    assert motion.diagnostics.service_validation_count == 2
+    assert motion.diagnostics.locally_validated_segment_count == 1
+    assert motion.diagnostics.locally_validated_unique_coverage_length_m == pytest.approx(4.0)
+```
+
+Serializer test must recursively reject/omit exact forbidden keys `route_ready`, `reachable_from_start`, and `optimal`.
+
+- [ ] **Step 9: Add root A3 harness contract tests**
+
+Create `tests/test_v25_12g_a3_contract.py` using `importlib.util.spec_from_file_location` against `tools/v25_12g_a3_acceptance.py`. Freeze:
+
+```python
+REPORT_SCHEMA = "agt_v25_12g_a3_acceptance_report/v1"
+VALIDATION_SCOPE = "A3_LOCAL_MOTION_EVIDENCE_DIAGNOSTIC_NOT_ROUTE_READY"
+MOTION_GRAPH_ASSET = "vehicle_feasible_motion_graph.yaml"
+```
+
+Parser contract:
+
+```text
+--run-dir required
+--vehicle-profile required
+--service-graph default vehicle_feasible_service_graph.yaml
+--turn-zones default turn_zones.yaml
+--navigation-map default navigation_map.yaml
+--site-boundary default site_boundary.yaml
 --write-motion-graph false
 --overwrite-motion-graph false
 --pretty false
---vehicle-profile required
 ```
 
-The fixture contract must prove default read-only mode writes nothing, `--write-motion-graph` creates only the A3 sibling, overwrite is refused by default, upstream sentinels are preserved byte-for-byte, and the report recursively contains none of `route_ready`, `reachable_from_start`, or `optimal`.
+Fixture contract: read-only mode writes nothing; write mode creates only `vehicle_feasible_motion_graph.yaml`; existing output refuses overwrite by default; service graph/Turn Zones/navigation/site boundary sentinel bytes remain unchanged.
 
-- [ ] **Step 11: Commit the entire behavior test batch only**
+- [ ] **Step 10: Commit tests only**
 
 ```bash
 git add \
@@ -650,12 +763,11 @@ git add \
 git commit -m "test(v25-12g): batch A3 motion feasibility contracts"
 ```
 
-- [ ] **Step 12: Operator Gate R1**
-
-After the operator fast-forwards to the test commit, run:
+- [ ] **Step 11: Operator Gate R1**
 
 ```bash
 cd ~/agt_navigation_v2
+git pull --ff-only
 source /opt/ros/humble/setup.bash
 source install/setup.bash 2>/dev/null || true
 
@@ -665,11 +777,11 @@ python3 -m pytest -q \
   tests/test_v25_12g_a3_contract.py
 ```
 
-Expected RED is a collection of specific failures caused by missing `vehicle_feasible_service_motion`, `vehicle_feasible_transition_motion`, motion graph IO/derivation, Site Boundary-aware audit support, and missing A3 acceptance harness. Once this RED batch is shown, do not interrupt the operator again until Gate G1 unless a failure reveals a contradictory spec or an upstream defect.
+Expected RED: specific failures for missing service validator, connector adapter/orchestrator, Site Boundary-aware audit behavior, graph derivation/IO, and missing acceptance harness. After these specific RED failures are shown, implement Tasks 3-7 without another operator checkpoint.
 
 ---
 
-### Task 3: Implement directional service validation and exact dead-end retrace
+### Task 3: Implement directional service motion and exact dead-end retrace
 
 **Files:**
 - Create: `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_service_motion.py`
@@ -688,89 +800,46 @@ def validate_service_actions(
 ) -> tuple[ServiceActionValidation, ...]: ...
 ```
 
-- [ ] **Step 1: Validate A2/service resource identity before producing any result**
+- [ ] **Step 1: Implement unique indexes and input validation**
 
-Implement unique indexes for service resources and states. Validate finite centerline points, finite entry/exit poses, service-state `segment_id` references, platform/profile/frame consistency, and the `1e-6` entry/exit pose contract.
-
-Use wrapped yaw difference:
+Reject duplicate service/resource IDs, missing resource references, non-finite centerlines/poses, frame/platform/profile mismatch, invalid service type, and entry/exit mismatch using the frozen tolerances.
 
 ```python
-def _angle_error(a: float, b: float) -> float:
+def _angle_error(a, b):
     return abs((float(a) - float(b) + math.pi) % (2.0 * math.pi) - math.pi)
 ```
 
-- [ ] **Step 2: Build ordinary directional samples**
+- [ ] **Step 2: Build ordinary samples**
+
+LOW->HIGH uses stored point order and row yaw. HIGH->LOW uses reversed point order and normalized `row_yaw + pi`. Every sample is `motion_direction="FORWARD"`, `segment_index=0`, `is_cusp=False`.
+
+- [ ] **Step 3: Build exact dead-end samples**
+
+Orient the forward-in sequence from the actual headland endpoint toward the interior endpoint. Append one terminal cusp marker with identical XYZ/yaw, `motion_direction="REVERSE"`, `segment_index=1`, `is_cusp=True`. Then append `reversed(forward_samples[:-1])` as REVERSE samples with unchanged yaw and `is_cusp=False`.
+
+- [ ] **Step 4: Compute path metrics from geometry**
 
 ```python
-def _ordinary_samples(resource, state, row_yaw):
-    if state.service_type == SERVICE_LOW_TO_HIGH:
-        points = resource.centerline_xyz
-        yaw = row_yaw
-    elif state.service_type == SERVICE_HIGH_TO_LOW:
-        points = tuple(reversed(resource.centerline_xyz))
-        yaw = _wrap_pi(row_yaw + math.pi)
-    else:
-        raise ValueError(f"not an ordinary service type: {state.service_type}")
-
-    return tuple(
-        MotionSample(
-            x=float(x), y=float(y), z=float(z), yaw=float(yaw),
-            motion_direction="FORWARD", segment_index=0, is_cusp=False,
-        )
-        for x, y, z in points
-    )
-```
-
-- [ ] **Step 3: Build exact dead-end samples without R6B**
-
-Orient the forward-in points from the headland endpoint toward the interior. Build the forward samples, then append exactly one zero-distance cusp marker at the terminal pose with `motion_direction="REVERSE"`, `segment_index=1`, `is_cusp=True`, followed by `reversed(forward_samples[:-1])` converted to `REVERSE` with unchanged yaw.
-
-- [ ] **Step 4: Compute actual path metrics from geometric movement only**
-
-```python
-def _distance(a: MotionSample, b: MotionSample) -> float:
+def _step_distance(a, b):
     return math.sqrt((b.x-a.x)**2 + (b.y-a.y)**2 + (b.z-a.z)**2)
-
-
-def _motion_metrics(samples):
-    forward = reverse = 0.0
-    for previous, current in zip(samples[:-1], samples[1:]):
-        d = _distance(previous, current)
-        if current.motion_direction == "REVERSE":
-            reverse += d
-        else:
-            forward += d
-    return forward + reverse, forward, reverse, sum(s.is_cusp for s in samples)
 ```
 
-The cusp marker contributes zero distance because it repeats the terminal pose.
+Assign each non-zero step to forward or reverse distance according to the destination sample's `motion_direction`; cusp count is the number of `is_cusp=True` samples.
 
-- [ ] **Step 5: Reuse existing footprint primitives for service evidence**
+- [ ] **Step 5: Reuse the existing footprint evaluator**
 
-Convert `MotionSample` to `ForwardConnectorSample`, then call existing `_evaluate_candidate()` with `_preview_local_footprint(vehicle, config.preview_footprint_padding_m)`. Check Site Boundary with existing `_candidate_inside_site_boundary()`.
+Convert `MotionSample` to `ForwardConnectorSample`, call `_evaluate_candidate()` with `_preview_local_footprint(vehicle, config.preview_footprint_padding_m)`, and call `_candidate_inside_site_boundary()` when a boundary exists.
 
-Classification order is hard boundary first, then OCCUPIED, then UNKNOWN/out-of-grid, then FREE:
+Classification order:
 
-```python
-if not boundary_free:
-    status = REJECTED
-    proof_scope = PROVEN_HARD_CONSTRAINT_REJECTION
-    backend_status = "SITE_BOUNDARY_CONFLICT"
-elif footprint.occupied_count > 0:
-    status = REJECTED
-    proof_scope = PROVEN_HARD_CONSTRAINT_REJECTION
-    backend_status = "OCCUPIED_FOOTPRINT_CONFLICT"
-elif footprint.grid_coverage_fraction < 1.0 or footprint.unknown_count > 0:
-    status = UNRESOLVED
-    proof_scope = MAP_EVIDENCE_INSUFFICIENT
-    backend_status = "MAP_EVIDENCE_INSUFFICIENT"
-else:
-    status = EXECUTABLE
-    proof_scope = LOCAL_MOTION_EXECUTABLE
-    backend_status = "PREVIEW_FOOTPRINT_FREE"
+```text
+boundary conflict -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION / SITE_BOUNDARY_CONFLICT
+OCCUPIED footprint cells -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION / OCCUPIED_FOOTPRINT_CONFLICT
+UNKNOWN or grid_coverage<1 -> UNRESOLVED / MAP_EVIDENCE_INSUFFICIENT
+otherwise -> EXECUTABLE / LOCAL_MOTION_EXECUTABLE / PREVIEW_FOOTPRINT_FREE
 ```
 
-- [ ] **Step 6: Commit service implementation**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add \
@@ -779,61 +848,28 @@ git add \
 git commit -m "feat(v25-12g): validate A3 directional service motion"
 ```
 
-Do not ask for operator tests yet; R1 already covers these behaviors.
-
 ---
 
-### Task 4: Make forward candidate audit Site Boundary-aware without changing default behavior
+### Task 4: Extend forward candidate audit with optional Site Boundary evidence
 
 **Files:**
 - Modify: `src/agt_offline_assets/agt_offline_assets/forward_connector_candidate_audit.py`
 
-**Interfaces:** Extend only the keyword-only API:
+**Interfaces:** add `site_boundary: SiteBoundary | None = None` as a keyword-only parameter; all calls with no boundary remain byte/behavior compatible.
 
-```python
-def derive_forward_connector_candidate_audit(
-    connector_requests,
-    zones,
-    navigation,
-    vehicle,
-    config=None,
-    *,
-    site_boundary: SiteBoundary | None = None,
-    source=None,
-) -> ForwardConnectorCandidateAuditPlan: ...
-```
+- [ ] **Step 1: Evaluate boundary per sampled forward candidate**
 
-- [ ] **Step 1: Add structured boundary evidence per raw forward candidate**
+Import `_candidate_inside_site_boundary`. A candidate is preview-free only if both its existing grid predicate and boundary predicate are true.
 
-Import `_candidate_inside_site_boundary` from `forward_connector_navigation_gate` and evaluate each sampled Dubins candidate with the same preview footprint. Do not alter behavior when `site_boundary is None`.
+- [ ] **Step 2: Prevent raster-free boundary-crossing candidates from influencing R6A**
 
-- [ ] **Step 2: Include boundary in preview-free classification**
+When a boundary is supplied, classify occupancy/map evidence using only locally relevant candidates whose preview footprints are boundary-safe. If every locally relevant candidate crosses/touches the boundary, emit `LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT`.
 
-A candidate is `preview_footprint_free` only when both the existing grid predicate and `boundary_free` are true.
+- [ ] **Step 3: Preserve deterministic source metadata**
 
-- [ ] **Step 3: Classify hard local boundary conflict before occupancy/map-insufficient classes**
+Add only `"site_boundary_enforced": site_boundary is not None`.
 
-If every locally relevant candidate conflicts the supplied Site Boundary, emit:
-
-```text
-LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT
-```
-
-with a reason explicitly stating this is a hard vehicle-permitted-boundary conflict and must not enter reverse fallback.
-
-If at least one locally relevant candidate is boundary-safe, classify only those boundary-safe candidates through the existing occupancy/map-insufficient logic. A boundary-conflicting raster-free candidate must never force `FORWARD_PREVIEW_FREE` or `KEEP_FORWARD`.
-
-- [ ] **Step 4: Preserve source determinism**
-
-Add only:
-
-```python
-"site_boundary_enforced": site_boundary is not None
-```
-
-Do not add timestamps or machine paths.
-
-- [ ] **Step 5: Commit audit extension**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/agt_offline_assets/agt_offline_assets/forward_connector_candidate_audit.py
@@ -842,7 +878,7 @@ git commit -m "feat(v25-12g): gate forward audit by site boundary"
 
 ---
 
-### Task 5: Implement A2 connector adapter and R5/R6A/R6B transition orchestration
+### Task 5: Implement A2 connector adaptation and transition orchestration
 
 **Files:**
 - Create: `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_transition_motion.py`
@@ -864,101 +900,69 @@ class ConnectorBinding:
     goal_pose: tuple[float, float, float, float]
 
 
-def adapt_connector_candidates(
-    service_graph: VehicleFeasibleServiceGraph,
-    turn_zones: TurnZoneSet,
-    config: VehicleFeasibleMotionGraphConfig,
-) -> tuple[tuple[ConnectorRequest, ...], Mapping[str, ConnectorBinding]]: ...
-
-
-def validate_transition_candidates(
-    service_graph: VehicleFeasibleServiceGraph,
-    turn_zones: TurnZoneSet,
-    navigation: NavigationGridEvidence,
-    vehicle: CanonicalVehicleProfile,
-    config: VehicleFeasibleMotionGraphConfig,
-    *,
-    site_boundary: SiteBoundary | None = None,
-) -> tuple[TransitionValidation, ...]: ...
+def adapt_connector_candidates(service_graph, turn_zones, config): ...
+def validate_transition_candidates(service_graph, turn_zones, navigation, vehicle, config, *, site_boundary=None): ...
 ```
 
 - [ ] **Step 1: Implement fail-closed one-to-one adapter**
 
-Index A2 states and zones. Validate unique IDs, candidate source/target references, segment references, side, Turn Zone membership, and `start_pose == source.exit_pose`, `goal_pose == target.entry_pose` using the frozen tolerances. Return requests sorted by connector ID and a deterministic binding map.
+Check unique IDs, source/target state existence, source/target segment identity, Turn Zone existence/side/support, and exact `exit -> entry` pose binding. Produce `ConnectorRequest` sorted by candidate ID and a binding map keyed by the same ID.
 
-- [ ] **Step 2: Run forward Navigation gate for every request**
+- [ ] **Step 2: Run forward Navigation gate on every request**
 
-Construct `ForwardConnectorNavigationGateConfig` using only the A3 padding override while retaining all existing strict defaults:
+Use:
 
 ```python
-forward_gate_cfg = ForwardConnectorNavigationGateConfig(
+ForwardConnectorNavigationGateConfig(
     preview_footprint_padding_m=config.preview_footprint_padding_m,
 )
 ```
 
-Call `derive_forward_connector_navigation_gate(..., site_boundary=site_boundary)`.
+with `site_boundary=site_boundary`. `PREVIEW_FOOTPRINT_FREE` maps directly to `EXECUTABLE`, backend `FORWARD_DUBINS_NAVIGATION_GATE`, with gate path length/samples and zero reverse/cusps.
 
-Any `PREVIEW_FOOTPRINT_FREE` result becomes `EXECUTABLE` with backend `FORWARD_DUBINS_NAVIGATION_GATE`, actual gate samples converted to `MotionSample`, `reverse_distance_m=0`, `cusp_count=0`, and the gate length as forward/path length.
+- [ ] **Step 3: Run Site Boundary-aware audit for unresolved forward cases**
 
-- [ ] **Step 3: For remaining candidates run the Site Boundary-aware audit**
+Use `ForwardConnectorCandidateAuditConfig(preview_footprint_padding_m=config.preview_footprint_padding_m)` and pass the same Site Boundary.
 
-Use `ForwardConnectorCandidateAuditConfig(preview_footprint_padding_m=config.preview_footprint_padding_m)` and pass `site_boundary`.
-
-Map audit status before R6A:
+Map:
 
 ```text
-LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT       -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
-LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT    -> UNRESOLVED / MAP_EVIDENCE_INSUFFICIENT
-LOCAL_FORWARD_MIXED_EVIDENCE               -> UNRESOLVED / MIXED_EVIDENCE_REQUIRES_REVIEW
-NO_FORWARD_DUBINS_CANDIDATE                -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
-TURN_ZONE_METADATA_INVALID                 -> impossible after adapter; raise ValueError if observed
-LOCAL_FORWARD_OCCUPANCY_BLOCKED            -> pass to R6A
+LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
+LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT -> UNRESOLVED / MAP_EVIDENCE_INSUFFICIENT
+LOCAL_FORWARD_MIXED_EVIDENCE -> UNRESOLVED / MIXED_EVIDENCE_REQUIRES_REVIEW
+NO_FORWARD_DUBINS_CANDIDATE -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
+TURN_ZONE_METADATA_INVALID -> ValueError because adapter already validated metadata
+LOCAL_FORWARD_OCCUPANCY_BLOCKED -> R6A
 ```
 
-Do not call R6A/R6B for the first four result classes.
-
-- [ ] **Step 4: Run R6A with no manual approvals**
+- [ ] **Step 4: Run R6A with no manual approval**
 
 ```python
-admission = derive_reverse_fallback_admission(
-    audit_plan,
-    ReverseFallbackAdmissionConfig(
-        operator_approved_mixed_connector_ids=(),
-    ),
-    source={"acceptance_stage": "v25_12g_a3"},
-)
+ReverseFallbackAdmissionConfig(operator_approved_mixed_connector_ids=())
 ```
 
-Only `ELIGIBLE_REVERSE_FALLBACK` IDs may proceed.
+Only admitted IDs proceed.
 
-- [ ] **Step 5: Run R6B only for R6A-admitted IDs with frozen budgets**
+- [ ] **Step 5: Run R6B with frozen budgets**
 
-Instantiate `ReversePrimitiveConnectorConfig` without changing any search limit, overriding only the shared footprint padding:
+Use `ReversePrimitiveConnectorConfig(preview_footprint_padding_m=config.preview_footprint_padding_m)` and do not set any other field. Pass the same Site Boundary.
 
-```python
-reverse_cfg = ReversePrimitiveConnectorConfig(
-    preview_footprint_padding_m=config.preview_footprint_padding_m,
-)
-```
-
-Call `derive_reverse_primitive_connector_plan(..., site_boundary=site_boundary)`.
-
-Map results:
+Map:
 
 ```text
 REVERSE_PRIMITIVE_PREVIEW_FREE -> EXECUTABLE / LOCAL_MOTION_EXECUTABLE
 FORWARD_PRIMITIVE_PREVIEW_FREE -> EXECUTABLE / LOCAL_MOTION_EXECUTABLE
-SITE_BOUNDARY_CONFLICT          -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
+SITE_BOUNDARY_CONFLICT -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
 NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION -> REJECTED / BOUNDED_SEARCH_NO_SOLUTION
 ```
 
-For `R6B_START_FOOTPRINT_NOT_FREE`, independently evaluate the start pose with `_evaluate_candidate` and the same footprint. If OCCUPIED cells are present, reject; if only UNKNOWN/out-of-grid evidence prevents FREE, classify unresolved.
+For `R6B_START_FOOTPRINT_NOT_FREE`, re-evaluate one start-pose footprint with the shared evaluator. OCCUPIED => `REJECTED`; UNKNOWN/out-of-grid without OCCUPIED => `UNRESOLVED`.
 
-- [ ] **Step 6: Preserve all backend evidence without inventing route semantics**
+- [ ] **Step 6: Convert R5/R6B samples to unified MotionSample and preserve metrics**
 
-`forward_evidence` stores deterministic summaries from the gate/audit; `reverse_admission_evidence` stores the R6A decision/status/reason. Do not serialize Python object reprs or temporary paths.
+Do not infer or recompute R6B `forward_distance_m`, `reverse_distance_m`, `cusp_count`, or `search_expansions`; copy the backend values into the transition validation.
 
-- [ ] **Step 7: Commit transition orchestration**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add \
@@ -969,7 +973,7 @@ git commit -m "feat(v25-12g): validate A3 headland transitions"
 
 ---
 
-### Task 6: Assemble diagnostics and deterministic strict YAML IO
+### Task 6: Assemble diagnostics and deterministic strict IO
 
 **Files:**
 - Modify: `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_motion_graph.py`
@@ -977,88 +981,38 @@ git commit -m "feat(v25-12g): validate A3 headland transitions"
 - Modify: `src/agt_offline_assets/agt_offline_assets/__init__.py`
 - Modify: `src/agt_offline_assets/CMakeLists.txt`
 
-**Interfaces:** top-level `derive_vehicle_feasible_motion_graph`, `vehicle_feasible_motion_graph_to_dict`, `write_vehicle_feasible_motion_graph`, `load_vehicle_feasible_motion_graph`.
+- [ ] **Step 1: Implement top-level input checks and derivation**
 
-- [ ] **Step 1: Add top-level input validation and derivation**
+Validate A2 schema/status, frames, platform ID, profile hash, row-direction finiteness/orientation, optional Site Boundary frame, then call service and transition validators. Raise if output cardinalities differ from A2 input cardinalities.
 
-Validate service graph schema/status, frame, platform ID, profile hash, row direction, Navigation Grid frame, Turn Zone frame, and optional Site Boundary frame before service or transition validation.
+- [ ] **Step 2: Build executable ID lists and diagnostics**
 
-Call:
+Sort executable service IDs and transition IDs lexically. Deduplicate locally validated coverage by `coverage_segment_id`, looking up length and aisle in A2 service resources.
 
-```python
-service_actions = validate_service_actions(...)
-transition_validations = validate_transition_candidates(...)
-```
+- [ ] **Step 3: Implement deterministic serializer**
 
-Then enforce:
+Serialize service actions sorted by `service_state_id`, transitions by `connector_candidate_id`, executable ID lists lexically, fixed dictionary key order, and `yaml.safe_dump(sort_keys=False, allow_unicode=True)`.
 
-```python
-if len(service_actions) != len(service_graph.service_states):
-    raise RuntimeError("A3 service validation cardinality mismatch")
-if len(transition_validations) != len(service_graph.connector_candidates):
-    raise RuntimeError("A3 transition validation cardinality mismatch")
-```
+- [ ] **Step 4: Implement strict loader**
 
-- [ ] **Step 2: Compute deterministic executable ID lists and diagnostics**
-
-Coverage dedup uses physical `coverage_segment_id` only. Build the resource length/aisle lookup from A2 `service_resources`; count each executable physical segment once.
-
-- [ ] **Step 3: Serialize stable top-level key order and record order**
-
-Sort service actions by `service_state_id` and transitions by `connector_candidate_id` before serialization. Use `yaml.safe_dump(..., sort_keys=False, allow_unicode=True)` after constructing dictionaries in frozen key order.
-
-- [ ] **Step 4: Strict loader validates semantics, not only shape**
-
-Reject:
-
-```text
-wrong schema/status
-unknown status/proof_scope/backend enum
-non-finite pose/sample/metric
-negative distances or search_expansions
-cusp count inconsistent with sample markers
-EXECUTABLE ID list referencing non-executable record
-missing or extra executable IDs
-duplicate service or connector IDs
-transition references unknown service IDs
-service coverage_segment_id mismatch
-summary/count mismatch
-locally validated coverage mismatch
-```
-
-Also recursively reject forbidden keys `route_ready`, `reachable_from_start`, and `optimal`.
+Reject wrong schema/status, invalid enums, non-finite poses/samples/metrics, negative travel/search values, duplicate IDs, bad cross references, invalid motion directions, cusp count mismatch, inconsistent executable ID lists, inconsistent diagnostics, and forbidden keys `route_ready`, `reachable_from_start`, `optimal` anywhere recursively.
 
 - [ ] **Step 5: Writer refuses overwrite by default**
 
 ```python
-def write_vehicle_feasible_motion_graph(graph, path, *, overwrite=False):
-    output = Path(path)
-    if output.exists() and not overwrite:
-        raise FileExistsError(str(output))
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(
-        yaml.safe_dump(
-            vehicle_feasible_motion_graph_to_dict(graph),
-            sort_keys=False,
-            allow_unicode=True,
-        ),
-        encoding="utf-8",
-    )
-    return output
+if output.exists() and not overwrite:
+    raise FileExistsError(str(output))
 ```
 
-- [ ] **Step 6: Export the public A3 API and register pytest**
+- [ ] **Step 6: Export API and register test**
 
-In `__init__.py`, export the schema/status/constants, dataclasses, derive/load/write functions. In CMake add:
+Add A3 public constants/dataclasses/derive/load/write to `__init__.py`. Add to CMake:
 
 ```cmake
-ament_add_pytest_test(
-  test_vehicle_feasible_motion_graph
-  test/test_vehicle_feasible_motion_graph.py
-)
+ament_add_pytest_test(test_vehicle_feasible_motion_graph test/test_vehicle_feasible_motion_graph.py)
 ```
 
-- [ ] **Step 7: Commit graph assembly and IO**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add \
@@ -1071,26 +1025,22 @@ git commit -m "feat(v25-12g): serialize A3 motion evidence graph"
 
 ---
 
-### Task 7: Acceptance harness and root contract
+### Task 7: Implement the A3 acceptance harness
 
 **Files:**
 - Create: `tools/v25_12g_a3_acceptance.py`
-- Test already created in Task 2: `tests/test_v25_12g_a3_contract.py`
 
-**Interfaces:** CLI reads frozen A2/runtime inputs, derives one A3 report, writes only the A3 sibling when explicitly requested.
-
-- [ ] **Step 1: Implement frozen parser**
+**Frozen CLI:**
 
 ```python
 REPORT_SCHEMA = "agt_v25_12g_a3_acceptance_report/v1"
 VALIDATION_SCOPE = "A3_LOCAL_MOTION_EVIDENCE_DIAGNOSTIC_NOT_ROUTE_READY"
 MOTION_GRAPH_ASSET = "vehicle_feasible_motion_graph.yaml"
+```
 
-
+```python
 def build_parser():
-    parser = argparse.ArgumentParser(
-        description="Validate V25-12G-A3 local vehicle motion evidence"
-    )
+    parser = argparse.ArgumentParser(description="Validate V25-12G-A3 local vehicle motion evidence")
     parser.add_argument("--run-dir", required=True)
     parser.add_argument("--vehicle-profile", required=True)
     parser.add_argument("--service-graph", default="vehicle_feasible_service_graph.yaml")
@@ -1103,27 +1053,17 @@ def build_parser():
     return parser
 ```
 
-- [ ] **Step 2: Preflight all required inputs before parsing heavy assets**
+- [ ] **Step 1: Preflight required files before heavy parsing**
 
-Require service graph, Turn Zones, Navigation Grid YAML, Site Boundary, and explicit vehicle profile. If write mode is requested and the output exists without overwrite, raise `FileExistsError` before loading assets.
+Require service graph, Turn Zones, navigation map YAML, Site Boundary, and explicit vehicle profile. If write mode is requested and output exists without overwrite, raise before loading assets.
 
-- [ ] **Step 3: Load frozen inputs and derive one motion graph**
+- [ ] **Step 2: Strict-load frozen inputs and derive graph**
 
-Use existing strict loaders:
+Use `load_vehicle_feasible_service_graph`, `load_turn_zones`, `load_navigation_grid`, `load_site_boundary`, `load_canonical_vehicle_profile`, then call `derive_vehicle_feasible_motion_graph(..., site_boundary=boundary)`.
 
-```python
-service_graph = load_vehicle_feasible_service_graph(service_graph_path)
-turn_zones = load_turn_zones(turn_zone_path)
-navigation = load_navigation_grid(navigation_path)
-boundary = load_site_boundary(boundary_path)
-vehicle = load_canonical_vehicle_profile(vehicle_profile_path)
-```
+- [ ] **Step 3: Emit deterministic report**
 
-Then call `derive_vehicle_feasible_motion_graph(..., site_boundary=boundary, source={...})`.
-
-- [ ] **Step 4: Emit deterministic diagnostic report**
-
-Top-level report keys:
+Top-level keys in order:
 
 ```text
 schema
@@ -1140,37 +1080,23 @@ transitions
 summary
 ```
 
-`summary` includes every A3 diagnostic field plus the two cardinality checks:
+`summary` includes every A3 diagnostic field plus:
 
 ```text
 all_a2_service_states_preserved
 all_a2_connector_candidates_preserved
-```
-
-and these invariant counters:
-
-```text
 dead_end_non_retrace_count
 site_boundary_reverse_bypass_count
 forbidden_semantic_key_count
 ```
 
-All three must be zero or the harness raises `ValueError`.
+Raise if any of the final three counts is nonzero.
 
-- [ ] **Step 5: Write only the A3 sibling when requested**
+- [ ] **Step 4: Write only A3 sibling when explicitly requested**
 
-```python
-if args.write_motion_graph:
-    write_vehicle_feasible_motion_graph(
-        graph,
-        output_path,
-        overwrite=args.overwrite_motion_graph,
-    )
-```
+Call `write_vehicle_feasible_motion_graph(..., overwrite=args.overwrite_motion_graph)` and never write upstream assets.
 
-Never write upstream assets.
-
-- [ ] **Step 6: Commit acceptance harness**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add tools/v25_12g_a3_acceptance.py
@@ -1179,22 +1105,19 @@ git commit -m "feat(v25-12g): add A3 motion acceptance harness"
 
 ---
 
-### Task 8: Operator Gate G1 — focused, package, and contract GREEN batch
+### Task 8: Operator Gate G1 — batched focused/package verification
 
-**Files:** no production edits unless failures reveal a defect covered by existing R1 tests.
-
-- [ ] **Step 1: Operator fast-forwards and builds package**
+- [ ] **Step 1: Build**
 
 ```bash
 cd ~/agt_navigation_v2
 git pull --ff-only
-
 source /opt/ros/humble/setup.bash
 colcon build --packages-select agt_offline_assets --symlink-install
 source install/setup.bash
 ```
 
-- [ ] **Step 2: Run the A3 and modified-backend focused suite**
+- [ ] **Step 2: Focused regression suite**
 
 ```bash
 python3 -m pytest -q \
@@ -1206,48 +1129,36 @@ python3 -m pytest -q \
   tests/test_v25_12g_a3_contract.py
 ```
 
-Expected: all selected tests PASS. Do not state the pass count until operator output supplies it.
+Expected: all selected tests PASS. Do not state a pass count until operator output supplies it.
 
-- [ ] **Step 3: Run package registration suite**
+- [ ] **Step 3: Registered package tests**
 
 ```bash
-colcon test \
-  --packages-select agt_offline_assets \
-  --event-handlers console_direct+
-
-colcon test-result \
-  --test-result-base build/agt_offline_assets \
-  --verbose
+colcon test --packages-select agt_offline_assets --event-handlers console_direct+
+colcon test-result --test-result-base build/agt_offline_assets --verbose
 ```
 
-Expected: package tests report zero failures. If unrelated legacy failures appear, isolate them before changing A3.
-
-- [ ] **Step 4: If a failure occurs, stop and use systematic debugging**
-
-Do not patch by intuition. Identify whether the failing layer is A3 contract, service validation, audit boundary extension, connector orchestration, IO, harness, or unrelated package regression. If production behavior needs to change and no existing test specifically captures it, add and verify a new RED test before the fix.
+If anything fails, stop and invoke systematic debugging. Do not patch by intuition. If the existing R1 tests do not specifically capture the defect, add and verify a new RED test before changing production behavior.
 
 ---
 
 ### Task 9: Frozen real-greenhouse A3 checkpoint
 
-**Files:**
-- Create after evidence: `docs/v2.5/V25_12G_A3_REAL_DATA_2026-08-17.md`
-- Create/update after evidence: `docs/v2.5/V25_12G_A3_CURRENT_STATE.md`
-
-**Interfaces:** real-data run produces diagnostic evidence only; it does not create A4 route output.
+**Files after evidence only:**
+- Create: `docs/v2.5/V25_12G_A3_REAL_DATA_2026-08-17.md`
+- Create/update: `docs/v2.5/V25_12G_A3_CURRENT_STATE.md`
 
 - [ ] **Step 1: Preflight frozen runtime inputs**
 
 ```bash
 RUN=/home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run
-
 for f in \
   vehicle_feasible_service_graph.yaml \
+  vehicle_feasible_segments.yaml \
   turn_zones.yaml \
   navigation_map.yaml \
   navigation_map.pgm \
   site_boundary.yaml \
-  vehicle_feasible_segments.yaml \
   derivation.yaml \
   aisle_graph.yaml
 do
@@ -1255,9 +1166,9 @@ do
 done
 ```
 
-Resolve the same canonical `mk_mini` vehicle profile path used for the A1 experiment and pass it explicitly as `PROFILE=...`; do not guess a new profile file.
+Resolve the same canonical `mk_mini` profile used for A1 and set `PROFILE` to that exact path. Do not substitute a new profile.
 
-- [ ] **Step 2: Freeze upstream hashes before A3 write**
+- [ ] **Step 2: Freeze upstream hashes**
 
 ```bash
 sha256sum \
@@ -1272,7 +1183,7 @@ sha256sum \
   | tee /tmp/v25_12g_a3_pre.sha256
 ```
 
-- [ ] **Step 3: Run read-only A3 acceptance first**
+- [ ] **Step 3: Run read-only acceptance first**
 
 ```bash
 python3 tools/v25_12g_a3_acceptance.py \
@@ -1282,7 +1193,7 @@ python3 tools/v25_12g_a3_acceptance.py \
   > /tmp/v25_12g_a3_readonly.json
 ```
 
-Required structural gates:
+Required structural facts:
 
 ```text
 schema = agt_v25_12g_a3_acceptance_report/v1
@@ -1298,45 +1209,27 @@ site_boundary_reverse_bypass_count = 0
 forbidden_semantic_key_count = 0
 ```
 
-Do not hardcode or pre-approve executable/rejected/unresolved totals.
+Do not hardcode executable/rejected/unresolved totals.
 
-- [ ] **Step 4: Inspect the real evidence funnel**
+- [ ] **Step 4: Inspect real evidence funnel**
 
-Report at least:
+Record actual service executable/rejected/unresolved counts; ordinary/dead-end counts; locally validated segment count/unique length/distinct aisles; forward-executable/reverse-executable/rejected/unresolved transition counts; map-insufficient, mixed-evidence, boundary-conflict, and bounded-search-no-solution counts.
 
-```text
-service: executable / rejected / unresolved
-ordinary service count
-dead-end service count and executable dead-end count
-locally validated physical segments / unique coverage / distinct aisles
-transition: forward executable / reverse executable / rejected / unresolved
-forward occupancy-blocked count
-R6A reverse-admitted count
-R6B reverse-solved count
-map-insufficient count
-mixed-evidence count
-hard Site Boundary conflict count
-bounded-search-no-solution count
-```
-
-Sanity controls:
+Require explicit records for:
 
 ```text
 aisle_020.segment_001.service_low_to_high
 aisle_020.segment_001.service_high_to_low
 ```
 
-must both have explicit validation records, but their status is observed rather than hardcoded.
+but do not predeclare their status.
 
-The four known dead-end states from A2 must each have an explicit validation record and, regardless of EXECUTABLE/REJECTED/UNRESOLVED status, their geometry contract must show exact retrace with one cusp and single-count coverage reward.
+Require one dead-end validation record for each A2 dead-end state and verify exact-retrace structure, one cusp, equal forward/reverse geometric distance, and single-count coverage reward regardless of top-level result class.
 
-- [ ] **Step 5: Narrow-write only after read-only semantics are accepted**
-
-If `vehicle_feasible_motion_graph.yaml` already exists, stop and inspect it; do not silently overwrite.
+- [ ] **Step 5: Narrow-write only when no existing A3 asset exists**
 
 ```bash
 test ! -e "$RUN/vehicle_feasible_motion_graph.yaml" || exit 2
-
 python3 tools/v25_12g_a3_acceptance.py \
   --run-dir "$RUN" \
   --vehicle-profile "$PROFILE" \
@@ -1345,7 +1238,7 @@ python3 tools/v25_12g_a3_acceptance.py \
   > /tmp/v25_12g_a3_write.json
 ```
 
-- [ ] **Step 6: Prove upstream assets are unchanged**
+- [ ] **Step 6: Prove upstream hashes unchanged**
 
 ```bash
 sha256sum \
@@ -1362,9 +1255,9 @@ sha256sum \
 diff -u /tmp/v25_12g_a3_pre.sha256 /tmp/v25_12g_a3_post.sha256
 ```
 
-Expected diff: empty.
+Expected diff is empty.
 
-- [ ] **Step 7: Strict-load and byte-stability gate**
+- [ ] **Step 7: Strict-load and byte-stable rewrite**
 
 ```bash
 python3 - <<'PY'
@@ -1375,30 +1268,23 @@ from agt_offline_assets.vehicle_feasible_motion_graph import (
     write_vehicle_feasible_motion_graph,
 )
 
-src = Path(
-    "/home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run/"
-    "vehicle_feasible_motion_graph.yaml"
-)
+src = Path("/home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run/vehicle_feasible_motion_graph.yaml")
 graph = load_vehicle_feasible_motion_graph(src)
 assert graph.schema == "agt_vehicle_feasible_motion_graph/v1"
 assert graph.status == "MOTION_EVIDENCE_ONLY"
 assert graph.diagnostics.service_validation_count == 32
 assert graph.diagnostics.transition_validation_count == 40
-
 with TemporaryDirectory() as tmp:
     dst = Path(tmp) / src.name
     write_vehicle_feasible_motion_graph(graph, dst)
     assert src.read_bytes() == dst.read_bytes()
-
 print("A3 strict-load and byte-stable rewrite: PASS")
 PY
 ```
 
 - [ ] **Step 8: Record evidence without overstating readiness**
 
-`docs/v2.5/V25_12G_A3_REAL_DATA_2026-08-17.md` records actual observed counts, the connector funnel, service classifications, dead-end evidence, unchanged upstream hashes, byte-stability result, and remaining caveats.
-
-The strongest allowed classification is:
+Strongest allowed classification:
 
 ```text
 A3 LOCAL VEHICLE-MOTION EVIDENCE SUPPORTED
@@ -1408,15 +1294,15 @@ NOT START-REACHABILITY VALIDATED
 NOT ROUTE-READY
 ```
 
-If the evidence shows material map/footprint caveats, append `WITH MAP / FOOTPRINT CAVEATS` rather than weakening safety gates.
+If real evidence exposes meaningful map/footprint limitations, add `WITH MAP / FOOTPRINT CAVEATS`.
 
-`V25_12G_A3_CURRENT_STATE.md` must name the next phase only as:
+`V25_12G_A3_CURRENT_STATE.md` names the next phase exactly:
 
 ```text
 V25-12G-A4 START_POSE-Aware Maximum Feasible Coverage Optimizer
 ```
 
-- [ ] **Step 9: Commit evidence docs only**
+- [ ] **Step 9: Commit docs only**
 
 ```bash
 git add \
@@ -1425,26 +1311,46 @@ git add \
 git commit -m "docs(v25-12g): record A3 real-data motion checkpoint"
 ```
 
-Do not add runtime YAML assets to git unless repository policy is explicitly changed.
+Do not add runtime YAML assets to git.
 
 ---
 
-## Final Verification Before A3 Completion Claim
+## Self-Review Checklist
 
-Before saying A3 is complete, invoke `superpowers:verification-before-completion` and require fresh operator evidence for:
+Before execution, verify this plan against the approved spec:
+
+- A2 remains immutable.
+- Every A2 service state and connector candidate has one A3 record.
+- Ordinary direction semantics are explicit.
+- Dead-end exact retrace semantics and cusp representation are explicit.
+- Coverage reward and travel metrics are separate.
+- Site Boundary is hard and cannot be bypassed by R6A/R6B.
+- UNKNOWN stays unresolved.
+- Mixed evidence has no automatic operator approval.
+- R6B budgets stay frozen.
+- Bounded search failure is not global infeasibility.
+- Strict deterministic IO and byte-stability are covered.
+- START_POSE/reachability/optimality are excluded.
+- Real-data gates preserve the frozen 32 service / 40 transition cardinalities.
+
+No implementation task may weaken these constraints to improve apparent coverage.
+
+## Final Verification Before Completion Claim
+
+Before claiming A3 complete, invoke `superpowers:verification-before-completion` and require fresh operator evidence for:
 
 ```text
 focused A3/backend tests: zero failures
 agt_offline_assets package tests: zero A3-related failures
-A3 contract tests: zero failures
+root A3 contract tests: zero failures
 real-data service_validation_count = 32
 real-data transition_validation_count = 40
 all A2 IDs preserved
-no dead-end non-retrace result
+no dead-end non-retrace record
 no Site Boundary reverse bypass
 upstream hash diff empty
 strict loader PASS
 byte-stable rewrite PASS
 ```
 
-Only after those gates may the branch be handed to the finishing workflow and A4 design begin.
+Only then enter the branch-finishing workflow and begin A4 design.
