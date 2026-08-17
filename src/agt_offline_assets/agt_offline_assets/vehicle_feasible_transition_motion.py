@@ -27,6 +27,9 @@ from .reverse_primitive_connector import (
     ReversePrimitiveConnectorConfig,
     derive_reverse_primitive_connector_plan,
 )
+from .reverse_primitive_diagnostics import (
+    reverse_primitive_search_diagnostics_to_dict,
+)
 from .site_boundary import SiteBoundary
 from .turn_zones import TurnZoneSet
 from .vehicle_profile import CanonicalVehicleProfile
@@ -62,6 +65,13 @@ class ConnectorBinding:
 
 def _angle_error(a: float, b: float) -> float:
     return abs((float(a) - float(b) + math.pi) % (2.0 * math.pi) - math.pi)
+
+
+def _reverse_diagnostics(reverse) -> dict[str, Any]:
+    diagnostics = getattr(reverse, "diagnostics", None)
+    if diagnostics is None:
+        return {}
+    return reverse_primitive_search_diagnostics_to_dict(diagnostics)
 
 
 def _pose_matches(actual, expected, config: VehicleFeasibleMotionGraphConfig) -> bool:
@@ -224,6 +234,7 @@ def _base_result(
     samples=(),
     forward_evidence=None,
     reverse_admission_evidence=None,
+    reverse_backend_diagnostics=None,
 ):
     return TransitionValidation(
         connector_candidate_id=binding.connector_candidate_id,
@@ -248,6 +259,7 @@ def _base_result(
         samples=tuple(samples),
         forward_evidence=dict(forward_evidence or {}),
         reverse_admission_evidence=dict(reverse_admission_evidence or {}),
+        reverse_backend_diagnostics=dict(reverse_backend_diagnostics or {}),
     )
 
 
@@ -547,6 +559,7 @@ def validate_transition_candidates(
                             samples=_motion_samples(reverse.samples),
                             forward_evidence=forward_evidence,
                             reverse_admission_evidence=admission_evidence,
+                            reverse_backend_diagnostics=_reverse_diagnostics(reverse),
                         )
                     elif reverse.status == "SITE_BOUNDARY_CONFLICT":
                         results[connector_id] = _base_result(
@@ -560,6 +573,7 @@ def validate_transition_candidates(
                             search_expansions=int(reverse.search_expansions),
                             forward_evidence=forward_evidence,
                             reverse_admission_evidence=admission_evidence,
+                            reverse_backend_diagnostics=_reverse_diagnostics(reverse),
                         )
                     elif reverse.status == "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION":
                         reason = str(reverse.reason).replace(
@@ -576,6 +590,7 @@ def validate_transition_candidates(
                             search_expansions=int(reverse.search_expansions),
                             forward_evidence=forward_evidence,
                             reverse_admission_evidence=admission_evidence,
+                            reverse_backend_diagnostics=_reverse_diagnostics(reverse),
                         )
                     elif reverse.status == "R6B_START_FOOTPRINT_NOT_FREE":
                         request = request_by_id[connector_id]
@@ -613,6 +628,7 @@ def validate_transition_candidates(
                             search_expansions=int(reverse.search_expansions),
                             forward_evidence=forward_evidence,
                             reverse_admission_evidence=admission_evidence,
+                            reverse_backend_diagnostics=_reverse_diagnostics(reverse),
                         )
                     else:
                         results[connector_id] = _base_result(
@@ -626,6 +642,7 @@ def validate_transition_candidates(
                             search_expansions=int(reverse.search_expansions),
                             forward_evidence=forward_evidence,
                             reverse_admission_evidence=admission_evidence,
+                            reverse_backend_diagnostics=_reverse_diagnostics(reverse),
                         )
 
     missing_results = sorted(set(request_by_id) - set(results))

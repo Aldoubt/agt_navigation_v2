@@ -112,6 +112,7 @@ class TransitionValidation:
     samples: tuple[MotionSample, ...]
     forward_evidence: Mapping[str, Any]
     reverse_admission_evidence: Mapping[str, Any]
+    reverse_backend_diagnostics: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

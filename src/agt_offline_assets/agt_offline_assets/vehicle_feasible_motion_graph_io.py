@@ -31,6 +31,10 @@ from .vehicle_feasible_motion_graph import (
     VEHICLE_FEASIBLE_MOTION_GRAPH_SCHEMA,
     VehicleFeasibleMotionGraph,
 )
+from .reverse_primitive_diagnostics import (
+    reverse_primitive_search_diagnostics_from_dict,
+    reverse_primitive_search_diagnostics_to_dict,
+)
 
 
 _FORBIDDEN_KEYS = {"route_ready", "reachable_from_start", "optimal"}
@@ -154,6 +158,7 @@ def _transition_to_dict(item: TransitionValidation) -> dict[str, Any]:
         "samples": [_sample_to_dict(sample) for sample in item.samples],
         "forward_evidence": _plain(item.forward_evidence),
         "reverse_admission_evidence": _plain(item.reverse_admission_evidence),
+        "reverse_backend_diagnostics": _plain(item.reverse_backend_diagnostics),
     }
 
 
@@ -364,6 +369,14 @@ def _load_transition(raw: Any, seen: set[str]) -> TransitionValidation:
     search_expansions = int(data.get("search_expansions", 0))
     if search_expansions < 0:
         raise ValueError("search_expansions must be >= 0")
+    raw_reverse_diagnostics = data.get("reverse_backend_diagnostics", {})
+    reverse_diagnostics = {}
+    if raw_reverse_diagnostics:
+        reverse_diagnostics = reverse_primitive_search_diagnostics_to_dict(
+            reverse_primitive_search_diagnostics_from_dict(
+                _mapping(raw_reverse_diagnostics, "reverse_backend_diagnostics")
+            )
+        )
     return TransitionValidation(
         connector_candidate_id=connector_id,
         from_service_state_id=str(data.get("from_service_state_id", "")),
@@ -387,6 +400,7 @@ def _load_transition(raw: Any, seen: set[str]) -> TransitionValidation:
         samples=samples,
         forward_evidence=dict(_mapping(data.get("forward_evidence", {}), "forward_evidence")),
         reverse_admission_evidence=dict(_mapping(data.get("reverse_admission_evidence", {}), "reverse_admission_evidence")),
+        reverse_backend_diagnostics=reverse_diagnostics,
     )
 
 
