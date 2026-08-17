@@ -4,36 +4,36 @@
 
 **Goal:** Correct A3 connector evidence so an endpoint-safe forward Dubins Site-Boundary failure may enter the existing R6A/R6B reverse-aware fallback chain, while endpoint footprint conflicts remain hard rejections.
 
-**Architecture:** Split the existing broad forward-audit Site-Boundary status into endpoint conflict versus forward-path conflict. Preserve the existing Site Boundary as a strict full-footprint invariant and keep every R6B search budget unchanged. Carry the new evidence through R6A, A3 `TransitionValidation`, and the real-data acceptance harness without changing the A3 motion-graph schema.
+**Architecture:** Split the current broad forward-audit Site-Boundary status into endpoint conflict versus forward-path conflict. Preserve Site Boundary as a strict full-footprint invariant, keep all R6B budgets unchanged, and carry the amended evidence through R6A, A3 `TransitionValidation`, and the acceptance harness without changing the A3 motion-graph schema.
 
-**Tech Stack:** Python 3.10, ROS 2 Humble, pytest/ament_cmake_pytest, NumPy, Shapely-backed `SiteBoundary`, existing R5/R6A/R6B connector modules, deterministic YAML.
+**Tech Stack:** Python 3.10, ROS 2 Humble, pytest/ament_cmake_pytest, NumPy, Shapely-backed `SiteBoundary`, existing R5/R6A/R6B modules, deterministic YAML.
 
 ## Global Constraints
 
-- Branch remains `feat/v25-12g-maximum-feasible-coverage`; use the original repo, no extra worktree.
-- Never touch/reset/clean the unrelated local `tools/rosbag_sensor_trimmer` modification or `tools/map_tools/render_pcd_top_views.py` untracked file.
-- Strict TDD: production behavior changes only after the amendment RED tests are observed failing.
-- Operator gates are batched: one amendment RED gate, then one final GREEN gate; no per-function user test interruptions unless blocked.
+- Branch: `feat/v25-12g-maximum-feasible-coverage`; use the original repo, no extra worktree.
+- Never touch/reset/clean unrelated local `tools/rosbag_sensor_trimmer` or untracked `tools/map_tools/render_pcd_top_views.py`.
+- Strict TDD: no production behavior change before the amendment RED batch is observed failing.
+- Operator gates are batched: one RED gate, one final GREEN gate; no tiny user test interruptions unless blocked.
 - Site Boundary remains `VEHICLE_PERMITTED_INNER_BOUNDARY`; touching/crossing is a conflict.
 - `preview_footprint_padding_m = 0.05` remains frozen.
-- R6B defaults remain unchanged, especially `max_expansions = 30000`, `max_path_length_m = 18.0`, `max_cusps = 2`, `primitive_length_m = 0.30`, `state_xy_resolution_m = 0.15`, and `state_yaw_resolution_deg = 15.0`.
+- R6B defaults remain unchanged, especially `primitive_length_m=0.30`, `state_xy_resolution_m=0.15`, `state_yaw_resolution_deg=15.0`, `max_cusps=2`, `max_expansions=30000`, `max_path_length_m=18.0`.
 - A1/A2, Turn Zones, Navigation Grid, Site Boundary geometry, vehicle profile, and service-motion semantics are immutable in this amendment.
-- No A4 optimizer, R7, analytic Reeds-Shepp planner, budget tuning, map editing, footprint tuning, or START_POSE reachability work.
-- A3 schema remains `agt_vehicle_feasible_motion_graph/v1` with top status `MOTION_EVIDENCE_ONLY`.
+- No A4, R7, analytic Reeds-Shepp, budget tuning, map/boundary editing, footprint tuning, or START_POSE reachability work.
+- A3 schema remains `agt_vehicle_feasible_motion_graph/v1`, status `MOTION_EVIDENCE_ONLY`.
 - Real-data rerun must not hard-code an executable-transition count.
 
 ---
 
 ## File Structure
 
-**Modify:**
-- `src/agt_offline_assets/agt_offline_assets/forward_connector_candidate_audit.py` — endpoint-vs-path Site-Boundary evidence and deterministic serialization.
-- `src/agt_offline_assets/agt_offline_assets/route_diagnostic_io.py` — backward-compatible loading of new forward-audit endpoint evidence.
-- `src/agt_offline_assets/agt_offline_assets/reverse_fallback_admission.py` — R6A decisions for endpoint hard conflict and endpoint-safe forward-path boundary conflict.
-- `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_transition_motion.py` — A3 transition orchestration using amended audit/R6A evidence.
-- `tools/v25_12g_a3_acceptance.py` — amended boundary-admission funnel/invariant diagnostics.
+**Modify production:**
+- `src/agt_offline_assets/agt_offline_assets/forward_connector_candidate_audit.py`
+- `src/agt_offline_assets/agt_offline_assets/route_diagnostic_io.py`
+- `src/agt_offline_assets/agt_offline_assets/reverse_fallback_admission.py`
+- `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_transition_motion.py`
+- `tools/v25_12g_a3_acceptance.py`
 
-**Test:**
+**Modify tests:**
 - `src/agt_offline_assets/test/test_forward_connector_candidate_audit.py`
 - `src/agt_offline_assets/test/test_reverse_fallback_admission.py`
 - `src/agt_offline_assets/test/test_vehicle_feasible_motion_graph.py`
@@ -43,27 +43,22 @@ No new production module is needed.
 
 ---
 
-### Task 1: Freeze the Amendment RED Contract
+### Task 1: Freeze the Complete Amendment RED Contract
 
-**Files:**
-- Modify: `src/agt_offline_assets/test/test_forward_connector_candidate_audit.py`
-- Modify: `src/agt_offline_assets/test/test_reverse_fallback_admission.py`
-- Modify: `src/agt_offline_assets/test/test_vehicle_feasible_motion_graph.py`
-- Modify: `tests/test_v25_12g_a3_contract.py`
+**Files:** all four test files above.
 
-**Interfaces:**
-- Consumes existing `derive_forward_connector_candidate_audit(...)`, `derive_reverse_fallback_admission(...)`, and `validate_transition_candidates(...)` signatures unchanged.
-- Freezes new forward-audit statuses:
-  - `CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT`
-  - `LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT`
-- Freezes new R6A decision:
-  - `REJECT_HARD_CONSTRAINT`
-- Freezes new harness invariant:
-  - `endpoint_boundary_conflict_reverse_admission_count == 0`
+**Interfaces frozen by tests:**
 
-- [ ] **Step 1: Replace the old broad forward-audit boundary test with endpoint/path split RED tests**
+```text
+CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT
+LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT
+REJECT_HARD_CONSTRAINT
+endpoint_boundary_conflict_reverse_admission_count == 0
+```
 
-Add tests equivalent to:
+- [ ] **Step 1: Replace the old broad forward-audit boundary test with endpoint/path split tests**
+
+Add:
 
 ```python
 def test_candidate_audit_endpoint_boundary_conflict_is_connector_level_hard_evidence():
@@ -74,18 +69,15 @@ def test_candidate_audit_endpoint_boundary_conflict_is_connector_level_hard_evid
     assert result.status == "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT"
     assert result.start_endpoint_site_boundary_free is False
     assert result.goal_endpoint_site_boundary_free is False
+    assert result.candidate_count == 0
 
 
 def test_candidate_audit_endpoint_safe_forward_path_boundary_conflict_is_distinct(monkeypatch):
     import agt_offline_assets.forward_connector_candidate_audit as audit_api
 
-    original = audit_api._candidate_inside_site_boundary
-
     def endpoint_safe_path_blocked(samples, footprint, boundary):
         samples = tuple(samples)
-        if len(samples) == 1:
-            return True
-        return False
+        return len(samples) == 1
 
     monkeypatch.setattr(
         audit_api,
@@ -93,26 +85,36 @@ def test_candidate_audit_endpoint_safe_forward_path_boundary_conflict_is_distinc
         endpoint_safe_path_blocked,
     )
     plan = derive_forward_connector_candidate_audit(
-        (_request(),), _zones(), _grid(FREE), _vehicle(), site_boundary=_boundary(-2.0, 2.0)
+        (_request(),), _zones(), _grid(FREE), _vehicle(),
+        site_boundary=_boundary(-2.0, 2.0),
     )
     result = plan.connectors[0]
     assert result.status == "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT"
     assert result.start_endpoint_site_boundary_free is True
     assert result.goal_endpoint_site_boundary_free is True
     assert result.local_candidate_count >= 1
-    assert all(not item.site_boundary_free for item in result.candidates if item.local_headland_candidate)
+    assert all(
+        not item.site_boundary_free
+        for item in result.candidates
+        if item.local_headland_candidate
+    )
 ```
 
-Also extend serialization/round-trip assertions so the result-level booleans survive write/load:
+Extend serialization assertions so both result-level and candidate-level boundary evidence survive YAML:
 
 ```python
-assert item["start_endpoint_site_boundary_free"] is True
-assert item["goal_endpoint_site_boundary_free"] is True
+payload = forward_connector_candidate_audit_to_dict(plan)
+connector = payload["connectors"][0]
+assert connector["start_endpoint_site_boundary_free"] is True
+assert connector["goal_endpoint_site_boundary_free"] is True
+assert "site_boundary_free" in connector["candidates"][0]
 ```
+
+Extend the existing write/load round-trip test to assert the loaded `ForwardCandidateAuditItem.site_boundary_free` and endpoint booleans equal the original values.
 
 - [ ] **Step 2: Add R6A RED tests for the two new evidence classes**
 
-Extend `_audit()` or add focused fixtures and assert:
+Add focused audit fixtures and assert:
 
 ```python
 def test_admission_rejects_endpoint_boundary_conflict_without_reverse():
@@ -125,8 +127,7 @@ def test_admission_rejects_endpoint_boundary_conflict_without_reverse():
         ),
     )
     plan = derive_reverse_fallback_admission(audit)
-    item = plan.items[0]
-    assert item.decision == "REJECT_HARD_CONSTRAINT"
+    assert plan.items[0].decision == "REJECT_HARD_CONSTRAINT"
     assert plan.eligible_connector_ids == ()
 
 
@@ -144,39 +145,58 @@ def test_admission_allows_endpoint_safe_forward_path_boundary_conflict():
     assert plan.eligible_connector_ids == ("connector_005",)
 ```
 
-Update the frozen source-policy assertion to the exact amended value:
+Update the source policy assertion to exactly:
 
 ```python
 assert payload["source"]["admission_policy"] == (
     "AUTO_LOCAL_OCCUPANCY_OR_ENDPOINT_SAFE_FORWARD_PATH_BOUNDARY"
 )
+assert payload["source"]["endpoint_boundary_conflict_never_reverse_admitted"] is True
 ```
 
-- [ ] **Step 3: Add A3 transition RED tests proving endpoint conflict never reaches R6B and path conflict may reach R6B**
+Keep occupancy/map/mixed/forward-free regression expectations unchanged.
 
-Replace the old `LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT` parameter case with explicit tests:
+- [ ] **Step 3: Update A3 transition test helper evidence**
+
+Change `_audit_plan(...)` to provide endpoint booleans so all existing monkeypatched audit results match the amended result contract:
+
+```python
+def _audit_plan(status, *, start_boundary_free=True, goal_boundary_free=True):
+    result = SimpleNamespace(
+        connector_id="headland.turn_high_u.a_to_b",
+        status=status,
+        reason=status,
+        start_endpoint_site_boundary_free=start_boundary_free,
+        goal_endpoint_site_boundary_free=goal_boundary_free,
+    )
+    return SimpleNamespace(connectors=(result,))
+```
+
+- [ ] **Step 4: Add A3 transition RED tests**
+
+Endpoint hard conflict:
 
 ```python
 def test_transition_endpoint_boundary_conflict_is_hard_rejected_without_r6b(monkeypatch):
     api = _transition_api()
     monkeypatch.setattr(
-        api,
-        "derive_forward_connector_navigation_gate",
+        api, "derive_forward_connector_navigation_gate",
         lambda *a, **k: _forward_gate_plan("NO_FORWARD_PREVIEW_FREE_CANDIDATE"),
     )
     monkeypatch.setattr(
-        api,
-        "derive_forward_connector_candidate_audit",
-        lambda *a, **k: _audit_plan("CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT"),
+        api, "derive_forward_connector_candidate_audit",
+        lambda *a, **k: _audit_plan(
+            "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT",
+            start_boundary_free=False,
+            goal_boundary_free=True,
+        ),
     )
     monkeypatch.setattr(
-        api,
-        "derive_reverse_fallback_admission",
+        api, "derive_reverse_fallback_admission",
         lambda *a, **k: _admission("REJECT_HARD_CONSTRAINT"),
     )
     monkeypatch.setattr(
-        api,
-        "derive_reverse_primitive_connector_plan",
+        api, "derive_reverse_primitive_connector_plan",
         lambda *a, **k: pytest.fail("endpoint conflict must not reach R6B"),
     )
     result = api.validate_transition_candidates(
@@ -186,24 +206,24 @@ def test_transition_endpoint_boundary_conflict_is_hard_rejected_without_r6b(monk
     assert result.status == REJECTED
     assert result.proof_scope == PROVEN_HARD_CONSTRAINT_REJECTION
     assert result.reverse_admission_evidence["decision"] == "REJECT_HARD_CONSTRAINT"
+```
 
+Endpoint-safe path conflict + R6B success:
 
+```python
 def test_transition_forward_path_boundary_conflict_can_be_executable_via_r6b(monkeypatch):
     api = _transition_api()
     monkeypatch.setattr(
-        api,
-        "derive_forward_connector_navigation_gate",
+        api, "derive_forward_connector_navigation_gate",
         lambda *a, **k: _forward_gate_plan("NO_FORWARD_PREVIEW_FREE_CANDIDATE"),
     )
     monkeypatch.setattr(
-        api,
-        "derive_forward_connector_candidate_audit",
+        api, "derive_forward_connector_candidate_audit",
         lambda *a, **k: _audit_plan("LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT"),
     )
     monkeypatch.setattr(api, "derive_reverse_fallback_admission", lambda *a, **k: _admission())
     monkeypatch.setattr(
-        api,
-        "derive_reverse_primitive_connector_plan",
+        api, "derive_reverse_primitive_connector_plan",
         lambda *a, **k: _reverse_plan("REVERSE_PRIMITIVE_PREVIEW_FREE"),
     )
     result = api.validate_transition_candidates(
@@ -213,14 +233,24 @@ def test_transition_forward_path_boundary_conflict_can_be_executable_via_r6b(mon
     assert result.status == EXECUTABLE
     assert result.backend == BOUNDED_REVERSE_PRIMITIVE_SEARCH
     assert result.forward_evidence["audit_status"] == "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT"
+    assert result.forward_evidence["start_endpoint_site_boundary_free"] is True
+    assert result.forward_evidence["goal_endpoint_site_boundary_free"] is True
     assert result.reverse_admission_evidence["decision"] == "ELIGIBLE_REVERSE_FALLBACK"
 ```
 
-Add the bounded-no-solution sibling and preserve the existing occupancy/map/mixed/forward-free tests.
+Add the bounded-no-solution sibling:
 
-- [ ] **Step 4: Add harness RED tests for the corrected safety invariant and funnel counters**
+```python
+assert result.status == REJECTED
+assert result.proof_scope == BOUNDED_SEARCH_NO_SOLUTION
+assert result.backend_status == "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION"
+```
 
-Extend fake transition fixtures so `_summary()` can be tested directly. Freeze these keys:
+Preserve existing occupancy/map/mixed/forward-free tests. `NO_FORWARD_DUBINS_CANDIDATE` remains a direct A3 `REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION`; `TURN_ZONE_METADATA_INVALID` remains `ValueError`.
+
+- [ ] **Step 5: Add acceptance-harness RED tests**
+
+Freeze summary keys:
 
 ```python
 assert summary["endpoint_boundary_conflict_count"] == 1
@@ -231,9 +261,11 @@ assert summary["forward_path_boundary_reverse_bounded_no_solution_count"] == 1
 assert summary["endpoint_boundary_conflict_reverse_admission_count"] == 0
 ```
 
-Add a negative case where an endpoint-conflict record carries `ELIGIBLE_REVERSE_FALLBACK`; `_summary()` must raise `ValueError`.
+Remove the old contract assertion for `site_boundary_reverse_bypass_count` and replace it with `endpoint_boundary_conflict_reverse_admission_count`.
 
-- [ ] **Step 5: Commit the complete RED test batch**
+Add a negative `_summary()` case where endpoint-conflict evidence carries `ELIGIBLE_REVERSE_FALLBACK`; assert `ValueError`.
+
+- [ ] **Step 6: Commit all amendment tests before production changes**
 
 ```bash
 git add \
@@ -244,7 +276,7 @@ git add \
 git commit -m "test(v25-12g): freeze A3 boundary admission amendment"
 ```
 
-- [ ] **Step 6: Operator RED gate — run once and verify failures are amendment-specific**
+- [ ] **Step 7: Operator RED gate**
 
 ```bash
 cd ~/agt_navigation_v2
@@ -260,54 +292,54 @@ python3 -m pytest -q \
 ```
 
 Expected RED categories:
-- old broad status returned instead of endpoint/path split;
-- result-level endpoint evidence fields absent;
-- R6A does not know `REJECT_HARD_CONSTRAINT` or path-boundary admission;
-- A3 still rejects broad boundary evidence before R6B;
-- harness still reports the old broad bypass diagnostic.
+- old broad boundary status instead of endpoint/path split;
+- endpoint evidence fields absent;
+- candidate `site_boundary_free` not preserved by YAML round-trip;
+- R6A lacks new decision/admission mappings;
+- A3 rejects path-boundary evidence before R6B;
+- harness still uses the old broad bypass diagnostic.
 
-Do not implement production changes unless this RED gate is observed.
+Do not modify production code until this RED is observed.
 
 ---
 
-### Task 2: Split Forward-Audit Endpoint and Path Boundary Evidence
+### Task 2: Split Forward-Audit Endpoint and Path Evidence
 
 **Files:**
-- Modify: `src/agt_offline_assets/agt_offline_assets/forward_connector_candidate_audit.py`
-- Modify: `src/agt_offline_assets/agt_offline_assets/route_diagnostic_io.py`
-- Test already frozen in Task 1.
+- `src/agt_offline_assets/agt_offline_assets/forward_connector_candidate_audit.py`
+- `src/agt_offline_assets/agt_offline_assets/route_diagnostic_io.py`
 
-**Interfaces:**
-- `derive_forward_connector_candidate_audit(...)` signature remains unchanged.
-- Extend `ForwardConnectorCandidateAuditResult` with backward-compatible fields:
+**Public signature:** `derive_forward_connector_candidate_audit(...)` unchanged.
+
+**Result contract extension:** append after `reason`:
 
 ```python
 start_endpoint_site_boundary_free: bool = True
 goal_endpoint_site_boundary_free: bool = True
 ```
 
-- Existing `ForwardCandidateAuditItem.site_boundary_free` remains path-candidate evidence.
-- Forward-audit schema string remains `agt_forward_connector_candidate_audit/v1`; loader treats missing endpoint booleans in historical v1 assets as `True`.
+`ForwardCandidateAuditItem.site_boundary_free` remains the per-path evidence field.
 
-- [ ] **Step 1: Add a single-pose full-footprint boundary helper**
+- [ ] **Step 1: Add single-pose full-footprint endpoint checking**
 
-Inside `forward_connector_candidate_audit.py`:
+Import `ForwardConnectorSample` and add:
 
 ```python
 def _endpoint_inside_site_boundary(pose, local_footprint, site_boundary):
     if site_boundary is None:
         return True
     sample = ForwardConnectorSample(
-        x=float(pose[0]), y=float(pose[1]), z=float(pose[2]), yaw=float(pose[3])
+        x=float(pose[0]),
+        y=float(pose[1]),
+        z=float(pose[2]),
+        yaw=float(pose[3]),
     )
     return _candidate_inside_site_boundary((sample,), local_footprint, site_boundary)
 ```
 
-Import `ForwardConnectorSample` from `.forward_connector` without changing any planner behavior.
+- [ ] **Step 2: Classify endpoints before enumerating forward Dubins families**
 
-- [ ] **Step 2: Classify endpoints before forward path families**
-
-For each request, after Turn Zone metadata validation and before `_dubins_candidates(...)`:
+After Turn Zone validation and before `_dubins_candidates(...)`:
 
 ```python
 start_boundary_free = _endpoint_inside_site_boundary(
@@ -319,8 +351,13 @@ goal_boundary_free = _endpoint_inside_site_boundary(
 if site_boundary is not None and not (start_boundary_free and goal_boundary_free):
     results.append(
         ForwardConnectorCandidateAuditResult(
-            ...,
+            connector_id=request.connector_id,
+            from_aisle_id=request.from_aisle_id,
+            to_aisle_id=request.to_aisle_id,
+            turn_zone_id=request.turn_zone_id,
             status="CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT",
+            minimum_zone_extension_m=0.0,
+            local_zone_extension_limit_m=0.0,
             candidate_count=0,
             local_candidate_count=0,
             local_known_occupied_count=0,
@@ -334,40 +371,48 @@ if site_boundary is not None and not (start_boundary_free and goal_boundary_free
     continue
 ```
 
-Every other result records the two booleans as `True` when Site Boundary is absent or both endpoints passed.
+All non-endpoint-conflict results store the actual endpoint booleans; with no Site Boundary they are both `True`.
 
-- [ ] **Step 3: Rename only the path-family boundary classification**
+- [ ] **Step 3: Rename only the forward-path family status**
 
-Keep candidate enumeration and `local_safe` filtering intact. Change:
+Change the old broad status to:
 
-```python
-LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT
-```
-
-to:
-
-```python
+```text
 LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT
 ```
 
-with reason:
+only when both endpoints are legal, `local` is non-empty, and `local_safe` is empty.
 
-```text
-all locally relevant forward candidates touch or cross the hard Site Boundary while connector endpoints remain legal
-```
+Reason must state that endpoints are legal and the locally relevant forward family crosses/touches Site Boundary.
 
-Do not allow boundary-conflicting candidates into occupancy/map evidence counts.
+Boundary-conflicting candidates remain excluded from occupancy/map evidence counts.
 
-- [ ] **Step 4: Serialize and backward-compatibly load endpoint evidence**
+- [ ] **Step 4: Serialize all boundary evidence deterministically**
 
-Add to every serialized connector result:
+For every connector result add:
 
 ```python
 "start_endpoint_site_boundary_free": result.start_endpoint_site_boundary_free,
 "goal_endpoint_site_boundary_free": result.goal_endpoint_site_boundary_free,
 ```
 
-In `route_diagnostic_io.load_forward_connector_candidate_audit(...)` pass:
+For every candidate add:
+
+```python
+"site_boundary_free": item.site_boundary_free,
+```
+
+Do not change `agt_forward_connector_candidate_audit/v1`.
+
+- [ ] **Step 5: Backward-compatibly load historical v1 audit assets**
+
+In `route_diagnostic_io.load_forward_connector_candidate_audit(...)`:
+
+```python
+site_boundary_free=bool(candidate.get("site_boundary_free", True)),
+```
+
+and for each result:
 
 ```python
 start_endpoint_site_boundary_free=bool(
@@ -378,9 +423,9 @@ goal_endpoint_site_boundary_free=bool(
 ),
 ```
 
-No other route-diagnostic schema behavior changes.
+Missing new fields in historical v1 assets therefore preserve old behavior rather than failing load.
 
-- [ ] **Step 5: Commit forward-audit implementation**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add \
@@ -391,26 +436,15 @@ git commit -m "feat(v25-12g): split A3 boundary endpoint and path evidence"
 
 ---
 
-### Task 3: Amend R6A Without Weakening the Hard Boundary
+### Task 3: Amend R6A Admission Policy
 
-**Files:**
-- Modify: `src/agt_offline_assets/agt_offline_assets/reverse_fallback_admission.py`
-- Test already frozen in Task 1.
+**File:** `src/agt_offline_assets/agt_offline_assets/reverse_fallback_admission.py`
 
-**Interfaces:**
-- `derive_reverse_fallback_admission(...)` signature remains unchanged.
-- New automatic mappings:
+**Signature:** unchanged.
 
-```text
-LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT -> ELIGIBLE_REVERSE_FALLBACK
-CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT -> REJECT_HARD_CONSTRAINT
-```
+- [ ] **Step 1: Add exact new decision mappings**
 
-- Existing occupancy/map/mixed/forward-free decisions remain unchanged.
-
-- [ ] **Step 1: Add explicit amended decision branches**
-
-Immediately after occupancy-blocked handling:
+After occupancy-blocked handling:
 
 ```python
 elif status == "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT":
@@ -427,25 +461,29 @@ elif status == "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT":
     )
 ```
 
-Do not add endpoint-conflict IDs to `eligible_connector_ids`.
+Existing mappings remain:
 
-- [ ] **Step 2: Update deterministic source policy metadata**
+```text
+LOCAL_FORWARD_OCCUPANCY_BLOCKED -> ELIGIBLE_REVERSE_FALLBACK
+LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT -> HOLD_MAP_REVIEW
+LOCAL_FORWARD_MIXED_EVIDENCE -> HOLD_MIXED_EVIDENCE unless explicitly approved
+FORWARD_PREVIEW_FREE -> KEEP_FORWARD
+other -> HOLD_POLICY_REVIEW
+```
 
-Freeze:
+- [ ] **Step 2: Freeze amended source metadata**
 
 ```python
 "admission_policy": "AUTO_LOCAL_OCCUPANCY_OR_ENDPOINT_SAFE_FORWARD_PATH_BOUNDARY",
 "endpoint_boundary_conflict_never_reverse_admitted": True,
+"mixed_evidence_requires_operator_approval": True,
 "map_insufficient_never_auto_admitted": True,
+"validation_scope": "R6B_INPUT_SELECTION_NOT_ROUTE_READY",
 ```
 
-Keep `mixed_evidence_requires_operator_approval=True`.
+No R6A schema bump.
 
-- [ ] **Step 3: Keep serialization deterministic and backward readable**
-
-No schema bump is needed for R6A; `decision` is already a string field. Ensure the new source keys serialize in deterministic insertion order.
-
-- [ ] **Step 4: Commit R6A amendment**
+- [ ] **Step 3: Commit**
 
 ```bash
 git add src/agt_offline_assets/agt_offline_assets/reverse_fallback_admission.py
@@ -454,16 +492,13 @@ git commit -m "feat(v25-12g): admit endpoint-safe boundary fallback"
 
 ---
 
-### Task 4: Route Amended Boundary Evidence Through A3 Transition Validation
+### Task 4: Route Amended Evidence Through A3 Transition Validation
 
-**Files:**
-- Modify: `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_transition_motion.py`
-- Test already frozen in Task 1.
+**File:** `src/agt_offline_assets/agt_offline_assets/vehicle_feasible_transition_motion.py`
 
-**Interfaces:**
-- `validate_transition_candidates(...)` signature remains unchanged.
-- Preserve one `TransitionValidation` per A2 `ConnectorCandidate`.
-- `forward_evidence` for audited transitions must include:
+**Signature:** `validate_transition_candidates(...)` unchanged.
+
+**Forward evidence for every audited transition:**
 
 ```python
 {
@@ -474,17 +509,9 @@ git commit -m "feat(v25-12g): admit endpoint-safe boundary fallback"
 }
 ```
 
-- `reverse_admission_evidence` retains `decision` and `reason`.
+- [ ] **Step 1: Audit all forward-gate failures, then derive one R6A plan for that audited set**
 
-- [ ] **Step 1: Stop direct A3 rejection of forward-path boundary evidence**
-
-Remove the old direct mapping for `LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT`.
-
-The amended endpoint status maps to hard rejection only after R6A supplies `REJECT_HARD_CONSTRAINT`.
-
-- [ ] **Step 2: Derive one R6A plan for the audited unresolved connector set**
-
-After the candidate audit, call:
+After `derive_forward_connector_candidate_audit(...)`:
 
 ```python
 admission = derive_reverse_fallback_admission(
@@ -492,28 +519,46 @@ admission = derive_reverse_fallback_admission(
     ReverseFallbackAdmissionConfig(operator_approved_mixed_connector_ids=()),
     source={"acceptance_stage": "v25_12g_a3"},
 )
-admission_by_id = {item.connector_id: item for item in admission.items}
+admission_by_id = {str(item.connector_id): item for item in admission.items}
 ```
 
-Fail closed if any audited connector is missing an admission item.
+Fail closed if any audited connector has no R6A item.
 
-- [ ] **Step 3: Normalize non-R6B decisions from R6A**
+- [ ] **Step 2: Preserve exact non-R6B A3 mappings**
 
-Use exact decision mapping:
+For each audited connector:
 
 ```text
-REJECT_HARD_CONSTRAINT -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
-HOLD_MAP_REVIEW        -> UNRESOLVED / MAP_EVIDENCE_INSUFFICIENT
-HOLD_MIXED_EVIDENCE    -> UNRESOLVED / MIXED_EVIDENCE_REQUIRES_REVIEW
-HOLD_POLICY_REVIEW     -> UNRESOLVED / POLICY_REVIEW_REQUIRED
-KEEP_FORWARD           -> fail closed as gate/audit disagreement in this unresolved path
+CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT + REJECT_HARD_CONSTRAINT
+    -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
+
+LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT + HOLD_MAP_REVIEW
+    -> UNRESOLVED / MAP_EVIDENCE_INSUFFICIENT
+
+LOCAL_FORWARD_MIXED_EVIDENCE + HOLD_MIXED_EVIDENCE
+    -> UNRESOLVED / MIXED_EVIDENCE_REQUIRES_REVIEW
+
+LOCAL_FORWARD_POLICY_REVIEW + HOLD_POLICY_REVIEW
+    -> UNRESOLVED / POLICY_REVIEW_REQUIRED
+
+NO_FORWARD_DUBINS_CANDIDATE
+    -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
+    -> never R6B
+
+TURN_ZONE_METADATA_INVALID
+    -> ValueError
+
+FORWARD_PREVIEW_FREE appearing in this unresolved path
+    -> ValueError gate/audit disagreement
 ```
 
-Preserve the original explicit `NO_FORWARD_DUBINS_CANDIDATE` handling if required by the frozen A3 contract; do not silently broaden this amendment into a different planner policy.
+Always retain the R6A `decision` and `reason` in `reverse_admission_evidence` when an admission item exists.
 
-- [ ] **Step 4: Send every R6A-eligible connector to R6B regardless of whether admission came from occupancy or path-boundary evidence**
+- [ ] **Step 3: Send exactly R6A-eligible connectors to R6B**
 
-Build `reverse_requests` strictly from `admission.eligible_connector_ids`. Invoke the existing `derive_reverse_primitive_connector_plan(...)` with:
+Build requests from `admission.eligible_connector_ids`; this includes occupancy-blocked and endpoint-safe forward-path boundary conflicts only.
+
+Invoke unchanged:
 
 ```python
 ReversePrimitiveConnectorConfig(
@@ -521,11 +566,9 @@ ReversePrimitiveConnectorConfig(
 )
 ```
 
-Do not pass any altered search budget.
+Do not alter any other R6B field.
 
-- [ ] **Step 5: Preserve R6B result normalization**
-
-Keep:
+- [ ] **Step 4: Preserve existing R6B normalization**
 
 ```text
 REVERSE_PRIMITIVE_PREVIEW_FREE / FORWARD_PRIMITIVE_PREVIEW_FREE
@@ -537,16 +580,16 @@ SITE_BOUNDARY_CONFLICT
 NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION
     -> REJECTED / BOUNDED_SEARCH_NO_SOLUTION
 
-R6B_START_FOOTPRINT_NOT_FREE + OCCUPIED evidence
+R6B_START_FOOTPRINT_NOT_FREE + OCCUPIED
     -> REJECTED / PROVEN_HARD_CONSTRAINT_REJECTION
 
-R6B_START_FOOTPRINT_NOT_FREE + UNKNOWN/out-of-grid evidence
+R6B_START_FOOTPRINT_NOT_FREE + UNKNOWN/out-of-grid
     -> UNRESOLVED / MAP_EVIDENCE_INSUFFICIENT
 ```
 
-The accepted R6B path remains independently Site-Boundary checked by R6B itself.
+No accepted R6B path bypasses Site Boundary; R6B independently checks start, primitives, cusps, and goal shot.
 
-- [ ] **Step 6: Commit transition orchestration**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add src/agt_offline_assets/agt_offline_assets/vehicle_feasible_transition_motion.py
@@ -555,37 +598,42 @@ git commit -m "feat(v25-12g): route boundary path conflicts through R6B"
 
 ---
 
-### Task 5: Amend the A3 Acceptance Harness and Final Verification
+### Task 5: Amend Acceptance Harness Diagnostics
 
-**Files:**
-- Modify: `tools/v25_12g_a3_acceptance.py`
-- Test already frozen in Task 1.
+**File:** `tools/v25_12g_a3_acceptance.py`
 
-**Interfaces:**
-- Report schema remains `agt_v25_12g_a3_acceptance_report/v1`.
-- Validation scope remains `A3_LOCAL_MOTION_EVIDENCE_DIAGNOSTIC_NOT_ROUTE_READY`.
-- Replace the old broad bypass invariant with actual endpoint safety.
+**Report schema/scope unchanged:**
 
-- [ ] **Step 1: Replace the obsolete bypass diagnostic**
+```text
+agt_v25_12g_a3_acceptance_report/v1
+A3_LOCAL_MOTION_EVIDENCE_DIAGNOSTIC_NOT_ROUTE_READY
+```
 
-In `_summary(...)`, compute:
+- [ ] **Step 1: Replace old broad bypass logic with exact endpoint-admission safety**
+
+Compute from transition records:
 
 ```python
-endpoint_conflict = "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT"
-path_conflict = "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT"
+endpoint_status = "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT"
+path_status = "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT"
+eligible = "ELIGIBLE_REVERSE_FALLBACK"
 
 endpoint_boundary_conflict_count = sum(
-    t.get("forward_evidence", {}).get("audit_status") == endpoint_conflict
+    t.get("forward_evidence", {}).get("audit_status") == endpoint_status
     for t in transition_records
 )
 forward_path_boundary_conflict_count = sum(
-    t.get("forward_evidence", {}).get("audit_status") == path_conflict
+    t.get("forward_evidence", {}).get("audit_status") == path_status
     for t in transition_records
 )
 endpoint_boundary_conflict_reverse_admission_count = sum(
-    t.get("forward_evidence", {}).get("audit_status") == endpoint_conflict
-    and t.get("reverse_admission_evidence", {}).get("decision")
-        == "ELIGIBLE_REVERSE_FALLBACK"
+    t.get("forward_evidence", {}).get("audit_status") == endpoint_status
+    and t.get("reverse_admission_evidence", {}).get("decision") == eligible
+    for t in transition_records
+)
+forward_path_boundary_reverse_admitted_count = sum(
+    t.get("forward_evidence", {}).get("audit_status") == path_status
+    and t.get("reverse_admission_evidence", {}).get("decision") == eligible
     for t in transition_records
 )
 ```
@@ -593,14 +641,21 @@ endpoint_boundary_conflict_reverse_admission_count = sum(
 Also compute:
 
 ```python
-forward_path_boundary_reverse_admitted_count
-forward_path_boundary_reverse_executable_count
-forward_path_boundary_reverse_bounded_no_solution_count
+forward_path_boundary_reverse_executable_count = sum(
+    t.get("forward_evidence", {}).get("audit_status") == path_status
+    and t["status"] == "EXECUTABLE"
+    and t["backend"] == "BOUNDED_REVERSE_PRIMITIVE_SEARCH"
+    for t in transition_records
+)
+forward_path_boundary_reverse_bounded_no_solution_count = sum(
+    t.get("forward_evidence", {}).get("audit_status") == path_status
+    and t["status"] == "REJECTED"
+    and t["proof_scope"] == "BOUNDED_SEARCH_NO_SOLUTION"
+    for t in transition_records
+)
 ```
 
-using `audit_status`, R6A decision, final status, backend, and proof scope.
-
-- [ ] **Step 2: Fail closed only on the actual forbidden endpoint admission**
+- [ ] **Step 2: Fail only on the actual forbidden endpoint admission**
 
 ```python
 if endpoint_boundary_conflict_reverse_admission_count:
@@ -609,9 +664,9 @@ if endpoint_boundary_conflict_reverse_admission_count:
     )
 ```
 
-Remove the old logic that treated every forward-path boundary conflict followed by R6B as a bypass.
+Remove `site_boundary_reverse_bypass_count` from the summary; it encoded the superseded broad interpretation.
 
-- [ ] **Step 3: Preserve all existing structural invariants**
+- [ ] **Step 3: Preserve existing structural invariants**
 
 Continue enforcing:
 
@@ -622,16 +677,20 @@ dead_end_non_retrace_count == 0
 forbidden_semantic_key_count == 0
 ```
 
-Keep read-only default, sibling-only write, overwrite refusal, and all input-file immutability behavior unchanged.
+Read-only remains default; write remains sibling-only and overwrite-false.
 
-- [ ] **Step 4: Commit the harness amendment**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add tools/v25_12g_a3_acceptance.py
 git commit -m "feat(v25-12g): report amended A3 boundary funnel"
 ```
 
-- [ ] **Step 5: Final GREEN gate — focused and package tests**
+---
+
+### Task 6: Final GREEN Gate
+
+- [ ] **Step 1: Build and run focused regression batch**
 
 ```bash
 cd ~/agt_navigation_v2
@@ -648,31 +707,26 @@ python3 -m pytest -q \
   src/agt_offline_assets/test/test_forward_connector_navigation_gate.py \
   src/agt_offline_assets/test/test_reverse_primitive_connector.py \
   tests/test_v25_12g_a3_contract.py
+```
 
+- [ ] **Step 2: Run package suite**
+
+```bash
 colcon test --packages-select agt_offline_assets --event-handlers console_direct+
 colcon test-result --test-result-base build/agt_offline_assets --verbose
 ```
 
-Do not claim GREEN until the operator provides fresh output with zero failures.
+Do not claim GREEN until fresh operator output shows zero failures.
 
 ---
 
-### Task 6: Rerun the Frozen Greenhouse A3 Checkpoint
+### Task 7: Rerun the Frozen Greenhouse A3 Checkpoint
 
-**Files:**
-- Runtime inputs only; do not commit generated runtime assets.
-- Later documentation after evidence:
-  - Create or update: `docs/v2.5/V25_12G_A3_REAL_DATA_2026-08-17.md`
-  - Create or update: `docs/v2.5/V25_12G_A3_CURRENT_STATE.md`
+**Runtime directory:** `/home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run`
 
-**Interfaces:**
-- Run directory: `/home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run`
-- Vehicle profile: `profiles/platforms/mk_mini.yaml`
-- Read-only harness first.
+**Vehicle profile:** `profiles/platforms/mk_mini.yaml`
 
-- [ ] **Step 1: Freeze hashes of protected upstream assets**
-
-Hash at least:
+**Protected upstream assets:**
 
 ```text
 vehicle_feasible_service_graph.yaml
@@ -685,7 +739,11 @@ derivation.yaml
 aisle_graph.yaml
 ```
 
-- [ ] **Step 2: Run read-only A3 acceptance with resource timing**
+- [ ] **Step 1: Freeze protected-input hashes**
+
+Record `sha256sum` for all protected assets before any write.
+
+- [ ] **Step 2: Run read-only amended A3 acceptance with timing**
 
 ```bash
 /usr/bin/time -v \
@@ -696,7 +754,7 @@ aisle_graph.yaml
     >/tmp/v25_12g_a3_amended_readonly.json
 ```
 
-Required structural facts remain:
+Required structural facts:
 
 ```text
 service_validation_count == 32
@@ -708,11 +766,11 @@ endpoint_boundary_conflict_reverse_admission_count == 0
 forbidden_semantic_key_count == 0
 ```
 
-Do not assert any expected executable-transition count.
+No expected executable-transition count is frozen.
 
-- [ ] **Step 3: Report amended LOW_U/HIGH_U funnel**
+- [ ] **Step 3: Report amended funnel by side**
 
-For each side, report:
+For LOW_U and HIGH_U separately report:
 
 ```text
 endpoint hard conflicts
@@ -722,21 +780,28 @@ R6B executable connectors
 R6B bounded no-solution connectors
 ```
 
-Also retain service coverage facts and the four exact-retrace dead-end records.
+Also retain service coverage and four exact-retrace dead-end facts.
 
-- [ ] **Step 4: Only after read-only evidence is internally consistent, write the A3 sibling once**
+- [ ] **Step 4: Write the A3 sibling only after read-only evidence is internally consistent**
 
-Use `--write-motion-graph` only if `vehicle_feasible_motion_graph.yaml` does not already exist. Never overwrite automatically.
+Use `--write-motion-graph` only if `vehicle_feasible_motion_graph.yaml` is absent. Never auto-overwrite.
 
-- [ ] **Step 5: Prove upstream hashes unchanged, strict-load the A3 graph, and verify byte-stable rewrite**
+- [ ] **Step 5: Prove protected inputs unchanged and A3 YAML deterministic**
 
-Use `load_vehicle_feasible_motion_graph(...)` followed by a temporary `write_vehicle_feasible_motion_graph(...)`; bytes must match exactly.
+Re-hash protected inputs; hashes must match. Strict-load `vehicle_feasible_motion_graph.yaml`, write to a temporary path, and assert byte-identical output.
 
-- [ ] **Step 6: Freeze documentation only from observed evidence**
+- [ ] **Step 6: Freeze evidence docs only from observed results**
 
-Strongest allowed classification is bounded by the actual rerun. Do not claim START reachability, route readiness, or optimality. If local transitions become executable, describe them as `LOCAL_MOTION_EXECUTABLE` only.
+Create/update:
 
-- [ ] **Step 7: Commit only docs, never runtime assets**
+```text
+docs/v2.5/V25_12G_A3_REAL_DATA_2026-08-17.md
+docs/v2.5/V25_12G_A3_CURRENT_STATE.md
+```
+
+Strongest allowed wording remains local motion evidence only. Do not claim START reachability, route readiness, final coverage, or optimality.
+
+- [ ] **Step 7: Commit docs only, never runtime assets**
 
 ```bash
 git add \
