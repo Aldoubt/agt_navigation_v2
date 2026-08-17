@@ -26,11 +26,13 @@ from .forward_connector_diagnostics import _candidate_expansion
 from .forward_connector_navigation_gate import (
     ForwardConnectorNavigationGateConfig,
     GridPathEvidence,
+    _candidate_inside_site_boundary,
     _candidate_is_preview_free,
     _evaluate_candidate,
     _preview_local_footprint,
 )
 from .navigation_grid import NavigationGridEvidence
+from .site_boundary import SiteBoundary
 from .turn_zones import TurnZoneSet
 from .vehicle_profile import CanonicalVehicleProfile
 
@@ -72,6 +74,7 @@ class ForwardCandidateAuditItem:
     footprint_evidence: GridPathEvidence
     preview_footprint_free: bool
     local_headland_candidate: bool
+    site_boundary_free: bool = True
 
 
 @dataclass(frozen=True)
@@ -132,6 +135,7 @@ def derive_forward_connector_candidate_audit(
     vehicle: CanonicalVehicleProfile,
     config: ForwardConnectorCandidateAuditConfig | None = None,
     *,
+    site_boundary: SiteBoundary | None = None,
     source: Mapping[str, Any] | None = None,
 ) -> ForwardConnectorCandidateAuditPlan:
     """Expose all forward candidates and classify the locally relevant set."""
@@ -142,6 +146,8 @@ def derive_forward_connector_candidate_audit(
         raise ValueError("forward candidate audit currently requires Ackermann kinematics")
     if not vehicle.planning_preview_ready:
         raise ValueError(f"vehicle profile {vehicle.profile_id} is not ready for planning preview")
+    if site_boundary is not None:
+        site_boundary.validate(expected_frame_id=zones.frame_id)
     radius = float(vehicle.minimum_turning_radius_m)
     if not vehicle.minimum_turning_radius_verified or radius <= 0.0:
         raise ValueError("forward candidate audit requires verified minimum turning radius")
@@ -196,6 +202,11 @@ def derive_forward_connector_candidate_audit(
                 forward_cfg.sample_step_m,
             )
             centerline, footprint = _evaluate_candidate(samples, navigation, local_footprint)
+            boundary_free = _candidate_inside_site_boundary(
+                samples,
+                local_footprint,
+                site_boundary,
+            )
             outward, inward, low_v, high_v, maximum = _candidate_expansion(
                 samples, zone, direction, perpendicular
             )
@@ -210,7 +221,8 @@ def derive_forward_connector_candidate_audit(
                     float(high_v),
                     centerline,
                     footprint,
-                    _candidate_is_preview_free(footprint, gate_cfg),
+                    _candidate_is_preview_free(footprint, gate_cfg) and boundary_free,
+                    boundary_free,
                 )
             )
 
@@ -249,6 +261,7 @@ def derive_forward_connector_candidate_audit(
             centerline,
             footprint,
             preview_free,
+            boundary_free,
         ) in raw_items:
             items.append(
                 ForwardCandidateAuditItem(
@@ -263,30 +276,37 @@ def derive_forward_connector_candidate_audit(
                     footprint_evidence=footprint,
                     preview_footprint_free=preview_free,
                     local_headland_candidate=maximum <= local_limit + 1.0e-12,
+                    site_boundary_free=boundary_free,
                 )
             )
 
         local = [item for item in items if item.local_headland_candidate]
-        local_known = [item for item in local if _known_map(item.footprint_evidence, cfg)]
+        local_safe = [item for item in local if item.site_boundary_free]
+        local_known = [item for item in local_safe if _known_map(item.footprint_evidence, cfg)]
         local_known_occupied = [
             item for item in local_known if item.footprint_evidence.occupied_fraction > 0.0
         ]
         local_map_insufficient = [
-            item for item in local if not _known_map(item.footprint_evidence, cfg)
+            item for item in local_safe if not _known_map(item.footprint_evidence, cfg)
         ]
 
         if any(item.preview_footprint_free for item in items):
             status = "FORWARD_PREVIEW_FREE"
             reason = "at least one forward Dubins candidate is preview-footprint free"
-        elif local and len(local_known_occupied) == len(local):
+        elif site_boundary is not None and local and not local_safe:
+            status = "LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT"
+            reason = (
+                "all locally relevant forward candidates touch or cross the hard Site Boundary"
+            )
+        elif local_safe and len(local_known_occupied) == len(local_safe):
             status = "LOCAL_FORWARD_OCCUPANCY_BLOCKED"
             reason = (
-                "all locally relevant forward candidates are sufficiently mapped and intersect OCCUPIED cells"
+                "all boundary-safe locally relevant forward candidates are sufficiently mapped and intersect OCCUPIED cells"
             )
         elif local_known_occupied and local_map_insufficient:
             status = "LOCAL_FORWARD_MIXED_EVIDENCE"
             reason = (
-                "locally relevant candidates include known OCCUPIED conflicts and insufficient-map alternatives"
+                "boundary-safe locally relevant candidates include known OCCUPIED conflicts and insufficient-map alternatives"
             )
         elif local_map_insufficient:
             status = "LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT"
@@ -322,6 +342,7 @@ def derive_forward_connector_candidate_audit(
             "validation_scope": "PREVIEW_ONLY_NOT_R8_VEHICLE_READY",
             "minimum_turning_radius_m": radius,
             "local_zone_extension_slack_m": cfg.local_zone_extension_slack_m,
+            "site_boundary_enforced": site_boundary is not None,
         }
     )
     return ForwardConnectorCandidateAuditPlan(
@@ -384,6 +405,7 @@ def forward_connector_candidate_audit_to_dict(
                         "length_m": item.length_m,
                         "local_headland_candidate": item.local_headland_candidate,
                         "preview_footprint_free": item.preview_footprint_free,
+                        "site_boundary_free": item.site_boundary_free,
                         "required_zone_extension": {
                             "outward_m": item.required_outward_extension_m,
                             "inward_m": item.required_inward_extension_m,
