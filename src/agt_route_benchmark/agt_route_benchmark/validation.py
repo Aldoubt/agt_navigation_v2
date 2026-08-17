@@ -8,6 +8,15 @@ from .map_io import Nav2Map, nav2_map_occupancy_data
 from .semantic_path_validation import evaluate_semantic_path
 
 
+def _pose2d(Pose2D, point):
+    try:
+        return Pose2D(float(point.x_m), float(point.y_m), float(point.yaw_rad), point.direction)
+    except TypeError:
+        # Preserve compatibility with injected/test validators using the
+        # pre-diagnostics three-field Pose2D contract.
+        return Pose2D(float(point.x_m), float(point.y_m), float(point.yaw_rad))
+
+
 def evaluate_normalized_path(
     points: Sequence[PathPoint],
     nav_map: Nav2Map,
@@ -34,10 +43,7 @@ def evaluate_normalized_path(
         data=nav2_map_occupancy_data(nav_map),
         frame_id="map",
     )
-    poses = tuple(
-        Pose2D(float(point.x_m), float(point.y_m), float(point.yaw_rad))
-        for point in points
-    )
+    poses = tuple(_pose2d(Pose2D, point) for point in points)
     result = validate_path(
         poses,
         "map",
@@ -70,11 +76,20 @@ def evaluate_normalized_path(
         "footprint_collision_count": int(report.collision_pose_count),
         "min_clearance_m": float(report.minimum_clearance),
         "validated_max_abs_curvature_1pm": validated_curvature,
+        "max_abs_curvature_1pm": validated_curvature,
         "required_max_curvature_1pm": curvature_limit,
         "curvature_excess_1pm": max(0.0, validated_curvature - curvature_limit),
         "in_place_rotation_count": int(report.in_place_rotation_count),
         "validation_sample_count": int(report.sample_count),
         "validation_error_codes": list(error_codes),
+        "worst_curvature_segment_index": getattr(report, "worst_curvature_segment_index", None),
+        "worst_curvature_x_m": getattr(report, "worst_curvature_x", None),
+        "worst_curvature_y_m": getattr(report, "worst_curvature_y", None),
+        "worst_curvature_direction": getattr(report, "worst_curvature_direction", "UNKNOWN"),
+        "worst_curvature_delta_yaw_rad": getattr(report, "worst_curvature_delta_yaw", 0.0),
+        "worst_curvature_chord_m": getattr(report, "worst_curvature_chord", 0.0),
+        "worst_curvature_ratio_to_limit": getattr(report, "worst_curvature_ratio_to_limit", None),
+        "worst_curvature_is_direction_transition": getattr(report, "worst_curvature_is_direction_transition", False),
     }
     if semantic_map_path is not None:
         semantic_metrics = evaluate_semantic_path(

@@ -111,6 +111,18 @@ def test_claims_distinguish_geometric_success_from_kinematic_infeasibility(tmp_p
     assert "always slower" not in claims
 
 
+def test_bundle_can_select_one_run_revision(tmp_path: Path):
+    results = tmp_path / "results"
+    _write_run(results, scenario="S02_90deg_entry", planner="astar")
+    selected = _write_run(results, scenario="S02_90deg_entry", planner="hybrid_astar")
+    manifest = json.loads((selected / "experiment_manifest.json").read_text())
+    manifest["run_id"] = "curvfix_001"
+    (selected / "experiment_manifest.json").write_text(json.dumps(manifest))
+    bundle = build_paper_bundle(results, tmp_path / "paper", run_id_contains="curvfix_001")
+    assert len(bundle.comparison_rows) == 1
+    assert bundle.comparison_rows[0]["run_id"] == "curvfix_001"
+
+
 def test_claims_refuse_planner_conclusion_for_invalid_scenario(tmp_path: Path):
     results = tmp_path / "results"
     _write_run(

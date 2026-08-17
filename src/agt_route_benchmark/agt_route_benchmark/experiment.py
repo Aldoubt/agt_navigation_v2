@@ -114,6 +114,7 @@ class ExperimentRunner:
             metrics.update(
                 compute_path_metrics(
                     result.path,
+                    curvature_limit_1pm=validation_metrics.get("required_max_curvature_1pm"),
                     min_clearance_m=validation_metrics.get("min_clearance_m"),
                     footprint_collision_count=validation_metrics.get("footprint_collision_count"),
                     semantic_violation_count=validation_metrics.get("semantic_violation_count"),

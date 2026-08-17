@@ -3,6 +3,21 @@ from agt_route_benchmark.contracts import PathPoint
 from agt_route_benchmark.metrics import compute_path_metrics, compute_mission_metrics
 
 
+def _circular_arc(radius, step_deg, count, direction="F"):
+    step = math.radians(step_deg)
+    return [
+        PathPoint(
+            radius * math.sin(i * step),
+            radius * (1.0 - math.cos(i * step)),
+            i * step,
+            direction,
+            "TURN",
+            "",
+        )
+        for i in range(count + 1)
+    ]
+
+
 def test_length_reverse_and_curvature_metrics():
     pts = [
         PathPoint(0.0, 0.0, 0.0, "F", "P2P", ""),
@@ -13,7 +28,55 @@ def test_length_reverse_and_curvature_metrics():
     assert abs(m["path_length_m"] - 2.0) < 1e-9
     assert m["reverse_segment_count"] == 1
     assert abs(m["reverse_distance_m"] - 1.0) < 1e-9
-    assert abs(m["max_abs_curvature_1pm"] - math.pi / 4) < 1e-9
+    assert abs(m["max_abs_curvature_1pm"] - 2.0 * math.sin(math.pi / 8.0)) < 1e-9
+
+
+def test_circular_arc_curvature_uses_chord_invariant_relation():
+    for step_deg in (5, 10):
+        metrics = compute_path_metrics(_circular_arc(1.5, step_deg, 1), curvature_limit_1pm=1.0 / 1.5)
+        assert metrics["max_abs_curvature_1pm"] <= 1.0 / 1.5
+    metrics = compute_path_metrics(_circular_arc(1.5, 20, 1), curvature_limit_1pm=1.0 / 1.5)
+    assert abs(metrics["max_abs_curvature_1pm"] - 1.0 / 1.5) < 1e-12
+
+
+def test_curvature_diagnostics_identify_worst_segment():
+    metrics = compute_path_metrics(_circular_arc(1.5, 10, 2), curvature_limit_1pm=1.0 / 1.5)
+    assert metrics["worst_curvature_segment_index"] == 0
+    assert metrics["worst_curvature_direction"] == "F"
+    assert abs(metrics["worst_curvature_delta_yaw_rad"] - math.radians(10)) < 1e-12
+    assert metrics["worst_curvature_chord_m"] > 0.0
+    assert metrics["worst_curvature_ratio_to_limit"] == 1.0
+
+
+def test_small_radius_and_sharp_corner_fail_the_frozen_limit():
+    assert compute_path_metrics(_circular_arc(1.4, 10, 1))["max_abs_curvature_1pm"] > 1.0 / 1.5
+    corner = [
+        PathPoint(0.0, 0.0, 0.0, "F", "TURN", ""),
+        PathPoint(0.1, 0.0, math.pi / 2.0, "F", "TURN", ""),
+    ]
+    assert compute_path_metrics(corner)["max_abs_curvature_1pm"] > 1.0 / 1.5
+
+
+def test_reverse_arc_and_forward_reverse_cusp_do_not_add_artificial_curvature():
+    reverse = compute_path_metrics(_circular_arc(1.5, 10, 2, direction="R"), curvature_limit_1pm=1.0 / 1.5)
+    assert reverse["max_abs_curvature_1pm"] <= 1.0 / 1.5
+    cusp = compute_path_metrics([
+        PathPoint(0.0, 0.0, 0.0, "F", "TURN", ""),
+        PathPoint(1.0, 0.0, 0.0, "F", "TURN", ""),
+        PathPoint(1.0, 0.0, 0.0, "R", "TURN", ""),
+        PathPoint(0.0, 0.0, 0.0, "R", "TURN", ""),
+    ])
+    assert cusp["max_abs_curvature_1pm"] == 0.0
+    assert cusp["worst_curvature_direction"] == "F"
+
+
+def test_true_rotate_in_place_is_diagnosed_as_curvature_failure():
+    metrics = compute_path_metrics([
+        PathPoint(0.0, 0.0, 0.0, "F", "TURN", ""),
+        PathPoint(0.0, 0.0, math.pi / 2.0, "F", "TURN", ""),
+    ])
+    assert metrics["max_abs_curvature_1pm"] == math.inf
+    assert metrics["worst_curvature_chord_m"] == 0.0
 
 
 def test_reverse_segment_count_means_contiguous_reverse_maneuvers():

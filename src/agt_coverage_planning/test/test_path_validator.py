@@ -24,6 +24,19 @@ from agt_coverage_planning.path_validator import (  # noqa: E402
 SMALL_FOOTPRINT = ((-0.4, -0.2), (0.4, -0.2), (0.4, 0.2), (-0.4, 0.2))
 
 
+def _circular_arc(radius, step_deg, count, direction_yaw_offset=0.0, direction="F"):
+    step = math.radians(step_deg)
+    return [
+        Pose2D(
+            radius * math.sin(i * step) + 4.0,
+            radius * (1.0 - math.cos(i * step)) + 4.0,
+            i * step + direction_yaw_offset,
+            direction,
+        )
+        for i in range(count + 1)
+    ]
+
+
 def _grid(width=120, height=60, resolution=0.1, fill=0, cells=None, yaw=0.0):
     data = [fill] * (width * height)
     for column, row, cost in cells or []:
@@ -167,6 +180,69 @@ def test_positive_turning_radius_rejects_tight_curve_and_in_place_rotation():
     assert "minimum_turning_radius_violation" in curved.report.error_codes
     assert not rotation.report.valid
     assert rotation.report.in_place_rotation_count > 0
+
+
+@pytest.mark.parametrize("step_deg", [5.0, 10.0])
+def test_ideal_radius_arc_passes_at_fine_and_10_degree_sampling(step_deg):
+    result = validate_path(
+        _circular_arc(1.5, step_deg, 1), "map", _grid(), SMALL_FOOTPRINT, 1.5
+    )
+    assert result.report.valid
+    assert result.report.maximum_curvature <= 1.0 / 1.5 + 1e-12
+
+
+def test_ideal_radius_arc_at_20_degrees_estimates_true_curvature():
+    result = validate_path(
+        _circular_arc(1.5, 20.0, 1), "map", _grid(), SMALL_FOOTPRINT, 1.5
+    )
+    assert result.report.valid
+    assert abs(result.report.maximum_curvature - 1.0 / 1.5) < 1e-12
+
+
+def test_small_radius_and_sharp_corner_fail():
+    small = validate_path(
+        _circular_arc(1.4, 10.0, 1), "map", _grid(), SMALL_FOOTPRINT, 1.5
+    )
+    corner = validate_path(
+        [Pose2D(4.0, 4.0, 0.0), Pose2D(4.1, 4.0, math.pi / 2.0)],
+        "map", _grid(), SMALL_FOOTPRINT, 1.5,
+    )
+    assert not small.report.valid
+    assert not corner.report.valid
+    assert "minimum_turning_radius_violation" in small.report.error_codes
+    assert "minimum_turning_radius_violation" in corner.report.error_codes
+
+
+def test_reverse_arc_and_forward_reverse_cusp_are_not_false_curvature_failures():
+    reverse = validate_path(
+        _circular_arc(1.5, 10.0, 2, math.pi, "R"), "map", _grid(), SMALL_FOOTPRINT, 1.5
+    )
+    cusp = validate_path(
+        [Pose2D(4.0, 4.0, 0.0), Pose2D(5.0, 4.0, 0.0), Pose2D(5.0, 4.0, 0.0), Pose2D(4.0, 4.0, 0.0)],
+        "map", _grid(), SMALL_FOOTPRINT, 1.5,
+    )
+    assert reverse.report.valid
+    assert cusp.report.valid
+
+
+def test_true_rotate_in_place_still_fails():
+    result = validate_path(
+        [Pose2D(4.0, 4.0, 0.0), Pose2D(4.0, 4.0, math.pi / 2.0)],
+        "map", _grid(), SMALL_FOOTPRINT, 1.5,
+    )
+    assert not result.report.valid
+    assert result.report.in_place_rotation_count > 0
+
+
+def test_curvature_report_contains_worst_segment_diagnostics():
+    result = validate_path(
+        _circular_arc(1.5, 10.0, 2), "map", _grid(), SMALL_FOOTPRINT, 1.5
+    )
+    report = result.report.to_dict()
+    assert report["worst_curvature_segment_index"] == 0
+    assert report["worst_curvature_direction"] == "F"
+    assert report["worst_curvature_chord_m"] > 0.0
+    assert report["worst_curvature_ratio_to_limit"] == 1.0
 
 
 def test_runtime_footprint_shape_matches_profile_independent_of_pose():

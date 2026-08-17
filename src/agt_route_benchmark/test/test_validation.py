@@ -88,3 +88,6 @@ def test_validation_bridge_reuses_map_profile_and_validator_contract(tmp_path: P
     assert metrics["min_clearance_m"] == 0.08
     assert metrics["required_max_curvature_1pm"] == 1.0 / 1.5
     assert metrics["curvature_excess_1pm"] > 0.0
+    assert metrics["max_abs_curvature_1pm"] == metrics["validated_max_abs_curvature_1pm"]
+    assert "worst_curvature_segment_index" in metrics
+    assert "worst_curvature_ratio_to_limit" in metrics

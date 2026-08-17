@@ -15,6 +15,11 @@ def test_benchmark_launch_exposes_and_forwards_semantic_map():
     assert 'run_args.extend(["--semantic-map"' in text
 
 
+def test_benchmark_runner_waits_for_lifecycle_managed_planner_startup():
+    text = LAUNCH_PATH.read_text(encoding="utf-8")
+    assert "TimerAction(period=5.0, actions=[runner])" in text
+
+
 def test_ros2_run_scripts_are_executable():
     """CMake install(PROGRAMS) must preserve executable entry points."""
     scripts = sorted(SCRIPT_DIR.glob("*.py"))

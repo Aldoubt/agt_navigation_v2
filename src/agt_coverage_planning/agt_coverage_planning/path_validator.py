@@ -24,6 +24,7 @@ class Pose2D:
     x: float
     y: float
     yaw: float
+    direction: str = "UNKNOWN"
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,14 @@ class ValidationReport:
     maximum_cost: int = -1
     minimum_clearance: float = 0.0
     maximum_curvature: float = 0.0
+    worst_curvature_segment_index: int | None = None
+    worst_curvature_x: float | None = None
+    worst_curvature_y: float | None = None
+    worst_curvature_direction: str = "UNKNOWN"
+    worst_curvature_delta_yaw: float = 0.0
+    worst_curvature_chord: float = 0.0
+    worst_curvature_ratio_to_limit: float | None = None
+    worst_curvature_is_direction_transition: bool = False
     required_min_turning_radius: float = 0.0
     sample_count: int = 0
     in_place_rotation_count: int = 0
@@ -124,6 +133,14 @@ class ValidationReport:
             "maximum_cost": self.maximum_cost,
             "minimum_clearance": self.minimum_clearance,
             "maximum_curvature": self.maximum_curvature,
+            "worst_curvature_segment_index": self.worst_curvature_segment_index,
+            "worst_curvature_x_m": self.worst_curvature_x,
+            "worst_curvature_y_m": self.worst_curvature_y,
+            "worst_curvature_direction": self.worst_curvature_direction,
+            "worst_curvature_delta_yaw_rad": self.worst_curvature_delta_yaw,
+            "worst_curvature_chord_m": self.worst_curvature_chord,
+            "worst_curvature_ratio_to_limit": self.worst_curvature_ratio_to_limit,
+            "worst_curvature_is_direction_transition": self.worst_curvature_is_direction_transition,
             "required_min_turning_radius": self.required_min_turning_radius,
             "sample_count": self.sample_count,
             "in_place_rotation_count": self.in_place_rotation_count,
@@ -210,31 +227,56 @@ def validate_path(
             error_codes.add("footprint_collision")
 
     maximum_curvature = 0.0
+    worst_curvature = None
     in_place_rotations = 0
     curvature_limit = math.inf if required_radius <= EPSILON else 1.0 / required_radius
-    for previous, current in zip(samples, samples[1:]):
+    # Curvature uses supplied pose pairs. Interpolated collision samples are
+    # straight-chord geometry and would bias finite-angle circular arcs.
+    for segment_index, (previous, current) in enumerate(zip(path_poses, path_poses[1:])):
         distance = math.hypot(
-            current.pose.x - previous.pose.x,
-            current.pose.y - previous.pose.y,
+            current.x - previous.x,
+            current.y - previous.y,
         )
-        angle = abs(_angle_difference(current.pose.yaw, previous.pose.yaw))
+        angle = abs(_angle_difference(current.yaw, previous.yaw))
+        curvature = _chord_curvature(angle, distance)
+        maximum_curvature = max(maximum_curvature, curvature)
+        direction = _direction_label(previous.direction, current.direction)
+        if worst_curvature is None or curvature > worst_curvature["curvature"]:
+            worst_curvature = {
+                "segment_index": segment_index,
+                "x": current.x,
+                "y": current.y,
+                "direction": direction,
+                "delta_yaw": _angle_difference(current.yaw, previous.yaw),
+                "chord": distance,
+                "curvature": curvature,
+                "transition": previous.direction != current.direction,
+            }
         if distance <= EPSILON:
             if angle > EPSILON:
                 in_place_rotations += 1
                 if required_radius > EPSILON:
-                    invalid_segments.add(current.segment_index)
-                    invalid_samples.append(current)
+                    invalid_segments.add(segment_index)
+                    invalid_samples.append(SampledPose(current, segment_index))
                     error_codes.add("minimum_turning_radius_violation")
             continue
-        curvature = angle / distance
-        maximum_curvature = max(maximum_curvature, curvature)
         if curvature > curvature_limit + 1e-6:
-            invalid_segments.add(current.segment_index)
-            invalid_samples.append(current)
+            invalid_segments.add(segment_index)
+            invalid_samples.append(SampledPose(current, segment_index))
             error_codes.add("minimum_turning_radius_violation")
 
     if not math.isfinite(minimum_clearance):
         minimum_clearance = 0.0
+    if worst_curvature is None:
+        worst_curvature = {
+            "segment_index": None, "x": None, "y": None, "direction": "UNKNOWN",
+            "delta_yaw": 0.0, "chord": 0.0, "curvature": 0.0, "transition": False,
+        }
+    ratio = (
+        float(worst_curvature["curvature"]) / curvature_limit
+        if math.isfinite(curvature_limit) and curvature_limit > 0.0
+        else None
+    )
     report = ValidationReport(
         valid=not invalid_segments,
         collision_pose_count=len(collision_samples),
@@ -242,6 +284,14 @@ def validate_path(
         maximum_cost=int(maximum_cost),
         minimum_clearance=_stable_float(minimum_clearance),
         maximum_curvature=_stable_float(maximum_curvature),
+        worst_curvature_segment_index=worst_curvature["segment_index"],
+        worst_curvature_x=(_stable_float(worst_curvature["x"]) if worst_curvature["x"] is not None else None),
+        worst_curvature_y=(_stable_float(worst_curvature["y"]) if worst_curvature["y"] is not None else None),
+        worst_curvature_direction=str(worst_curvature["direction"]),
+        worst_curvature_delta_yaw=_stable_float(worst_curvature["delta_yaw"]),
+        worst_curvature_chord=_stable_float(worst_curvature["chord"]),
+        worst_curvature_ratio_to_limit=(_stable_float(ratio) if ratio is not None else None),
+        worst_curvature_is_direction_transition=bool(worst_curvature["transition"]),
         required_min_turning_radius=_stable_float(required_radius),
         sample_count=len(samples),
         in_place_rotation_count=in_place_rotations,
@@ -287,6 +337,7 @@ def interpolate_path(poses, linear_step, angular_step, maximum_sample_count=2000
                         x=start.x + (end.x - start.x) * ratio,
                         y=start.y + (end.y - start.y) * ratio,
                         yaw=_normalize_angle(start.yaw + yaw_delta * ratio),
+                        direction=(end.direction if index == count else start.direction),
                     ),
                     segment_index,
                 )
@@ -482,6 +533,20 @@ def _normalize_angle(value):
 
 def _angle_difference(first, second):
     return _normalize_angle(first - second)
+
+
+def _chord_curvature(delta_yaw, chord_m):
+    if chord_m <= EPSILON:
+        return math.inf if abs(delta_yaw) > EPSILON else 0.0
+    return 2.0 * math.sin(abs(delta_yaw) / 2.0) / chord_m
+
+
+def _direction_label(first, second):
+    if first == second:
+        return first
+    if {first, second} == {"F", "R"}:
+        return f"{first}/{second}"
+    return second if second != "UNKNOWN" else first
 
 
 def _deduplicate_samples(samples):

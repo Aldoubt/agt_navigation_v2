@@ -1,0 +1,8 @@
+id: S01_straight_row
+level: p2p
+development_fixture: true
+description: Straight aisle reference with no intended curvature challenge.
+start: {x: 6.5, y: 6, yaw: 1.570796326795}
+goal: {x: 6.5, y: 13, yaw: 1.570796326795}
+expected_constraints: [free_space]
+synthetic_fixture: synthetic_greenhouse_v1

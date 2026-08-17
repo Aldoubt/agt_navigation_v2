@@ -1,0 +1,8 @@
+id: S02_90deg_entry
+level: p2p
+development_fixture: true
+description: Headland-to-row entry requiring a controlled ninety-degree transition.
+start: {x: 2, y: 2, yaw: 0}
+goal: {x: 6.5, y: 8, yaw: 1.570796326795}
+expected_constraints: [heading_change, footprint, minimum_turning_radius]
+synthetic_fixture: synthetic_greenhouse_v1

@@ -91,7 +91,9 @@ def _setup(context):
         output="screen",
         arguments=run_args,
     )
-    delayed_runner = TimerAction(period=1.0, actions=[runner])
+    # Hybrid planner configuration can take several seconds; action discovery
+    # alone does not mean the lifecycle-managed planner is active.
+    delayed_runner = TimerAction(period=5.0, actions=[runner])
     shutdown = RegisterEventHandler(
         OnProcessExit(
             target_action=runner,

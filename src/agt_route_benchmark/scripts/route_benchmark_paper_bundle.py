@@ -15,6 +15,7 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--map-yaml", type=Path)
     parser.add_argument("--semantic-map", type=Path)
+    parser.add_argument("--run-id-contains", help="Restrict the bundle to one immutable run-id revision")
     args = parser.parse_args()
 
     bundle = build_paper_bundle(
@@ -22,6 +23,7 @@ def main() -> int:
         args.output_dir,
         map_yaml=args.map_yaml,
         semantic_map=args.semantic_map,
+        run_id_contains=args.run_id_contains,
     )
     print(bundle.output_dir)
     return 0
