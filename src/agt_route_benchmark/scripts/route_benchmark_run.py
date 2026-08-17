@@ -112,7 +112,7 @@ def main() -> int:
     parser.add_argument("--graph", type=Path, help="Development-only sparse graph fixture for ours")
     parser.add_argument("--ours-route-csv", type=Path, help="Canonical V2.5 Route Asset CSV for the formal proposed method")
     parser.add_argument("--manual-waypoints-yaml", type=Path, help="Auditable manual waypoint mission plan with frozen best-P2P planner")
-    parser.add_argument("--coverage-components-json", type=Path)
+    parser.add_argument("--coverage-components-json", type=Path, help="Development-only frozen coverage components")
     parser.add_argument("--coverage-live", action="store_true")
     parser.add_argument("--semantic-map", type=Path)
     args = parser.parse_args()
@@ -136,6 +136,18 @@ def main() -> int:
     if render_map_yaml is None and snapshot is not None:
         render_map_yaml = Path(snapshot["assets"]["map_yaml"]["path"])
     nav_map = load_nav2_map(render_map_yaml) if render_map_yaml is not None else None
+
+    evaluation_semantic_map = args.semantic_map
+    if evaluation_semantic_map is None and snapshot is not None:
+        evaluation_semantic_map = Path(snapshot["assets"]["semantic_map"]["path"])
+    if evaluation_semantic_map is not None:
+        evaluation_semantic_map = Path(evaluation_semantic_map).expanduser().resolve()
+        if not evaluation_semantic_map.is_file():
+            raise SystemExit(f"semantic map does not exist: {evaluation_semantic_map}")
+        if snapshot is not None:
+            selected_semantic_sha = hashlib.sha256(evaluation_semantic_map.read_bytes()).hexdigest()
+            if selected_semantic_sha != snapshot["assets"]["semantic_map"]["sha256"]:
+                raise SystemExit("selected semantic map is not the semantic map bound by site snapshot")
 
     spec = ExperimentSpec(
         site_id=args.site,
@@ -190,13 +202,9 @@ def main() -> int:
             visited_semantic_ids=waypoint_plan.target_semantic_ids,
         )
     elif args.planner == "fields2cover":
-        semantic_map = args.semantic_map
-        if semantic_map is None and snapshot is not None:
-            semantic_map = Path(snapshot["assets"]["semantic_map"]["path"])
-        if semantic_map is not None and snapshot is not None:
-            selected_semantic_sha = hashlib.sha256(Path(semantic_map).read_bytes()).hexdigest()
-            if selected_semantic_sha != snapshot["assets"]["semantic_map"]["sha256"]:
-                raise SystemExit("selected semantic map is not the semantic map bound by site snapshot")
+        if args.formal and not args.coverage_live:
+            raise SystemExit("formal fields2cover requires --coverage-live; precomputed component JSON is development-only")
+        semantic_map = evaluation_semantic_map
         if args.coverage_live:
             if semantic_map is None:
                 raise SystemExit("--coverage-live requires --semantic-map or a bound --site-snapshot")
@@ -209,6 +217,8 @@ def main() -> int:
         else:
             adapter = Fields2CoverAdapter()
     elif args.planner in ("astar", "theta_star", "hybrid_astar", "state_lattice"):
+        if args.formal and not args.nav2_live:
+            raise SystemExit("formal P2P baselines require --nav2-live")
         if args.nav2_live:
             call, nav2_node, rclpy = _nav2_call()
             cleanup = (nav2_node, rclpy)
@@ -220,7 +230,12 @@ def main() -> int:
 
     path_evaluator = None
     if nav_map is not None:
-        path_evaluator = lambda points: evaluate_normalized_path(points, nav_map, profile)
+        path_evaluator = lambda points: evaluate_normalized_path(
+            points,
+            nav_map,
+            profile,
+            semantic_map_path=evaluation_semantic_map,
+        )
 
     try:
         out = ExperimentRunner(args.result_root).run(
