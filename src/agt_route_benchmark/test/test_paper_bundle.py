@@ -48,6 +48,9 @@ def _write_run(
         "success": success,
         "error_code": error_code,
         "planning_time_s": 0.01,
+        "path_length_m": 3.2,
+        "max_abs_curvature_1pm": 0.8,
+        "required_max_curvature_1pm": 2.0 / 3.0,
     }
     if collision_free is not None:
         metrics["collision_free"] = collision_free
@@ -96,6 +99,8 @@ def test_claims_distinguish_geometric_success_from_kinematic_infeasibility(tmp_p
     assert "real-vehicle tracking validation" in claims
     assert "outperforms" not in claims.lower()
     assert "superior" not in claims.lower()
+    assert "A* cannot solve" not in claims
+    assert "always slower" not in claims
 
 
 def test_claims_refuse_planner_conclusion_for_invalid_scenario(tmp_path: Path):
@@ -153,6 +158,9 @@ def test_bundle_writes_reproducible_tables_figures_and_source_manifest(tmp_path:
         "comparison.json",
         "claims.md",
         "figure_manifest.json",
+        "D1_synthetic_problem.svg",
+        "D1_synthetic_problem.pdf",
+        "D1_synthetic_problem.png",
         "D2_S02_planner_comparison.svg",
         "D2_S02_planner_comparison.pdf",
         "D2_S02_planner_comparison.png",
@@ -168,9 +176,15 @@ def test_bundle_writes_reproducible_tables_figures_and_source_manifest(tmp_path:
 
     rows = json.loads((out / "comparison.json").read_text())
     assert len(rows) == 6
+    assert all(len(row["metrics_sha256"]) == 64 for row in rows)
+    assert all(row["run_id"] == "diagnostic_001" for row in rows)
+    assert all(row["formal"] is False for row in rows)
+    assert all(len(row["path_sha256"]) == 64 for row in rows)
+
     manifest = json.loads((out / "figure_manifest.json").read_text())
     assert manifest["schema_version"] == "1.0"
     assert set(manifest["figures"]) == {
+        "D1_synthetic_problem",
         "D2_S02_planner_comparison",
         "D3_S03_planner_comparison",
         "D4_feasibility_matrix",
