@@ -25,12 +25,16 @@ def compute_path_metrics(
     reverse_segments = 0
     max_curvature = 0.0
     zero_length_segments = 0
+    in_reverse = False
     for a, b in zip(points, points[1:]):
         ds = _distance(a, b)
         length += ds
-        if b.direction == "R":
-            reverse_segments += 1
+        is_reverse = b.direction == "R"
+        if is_reverse:
             reverse_distance += ds
+            if not in_reverse:
+                reverse_segments += 1
+        in_reverse = is_reverse
         if ds <= 1e-12:
             zero_length_segments += 1
             continue
