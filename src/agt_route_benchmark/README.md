@@ -215,6 +215,8 @@ index,x_m,y_m,yaw_rad,direction,segment_type,semantic_ref
 
 The exact validated `path.csv` is the immutable handoff to tracking evaluation.
 
+For P2P runs, `experiment_manifest.json` also records the requested continuous start/goal pose under `scenario_request`, while `path.csv` preserves the returned planner endpoints. Endpoint position/yaw deviations in `metrics.json` therefore describe discretization explicitly instead of silently mixing requested and returned poses.
+
 ## 10. Canonical batch summary
 
 After the 23 valid cells have been run:
@@ -229,6 +231,8 @@ ros2 run agt_route_benchmark route_benchmark_batch.py \
 ```
 
 Formal summary rejects a missing canonical cell, dependency-skipped cell, duplicate or unexpected cell, and ignores development or old-site-revision runs that do not match the selected `site_snapshot_sha256`.
+
+`INVALID_SCENARIO` is an input-audit outcome, not a planner trial, and is excluded from planner success/failure denominators.
 
 ## 11. MKmini RPP tracking profile
 
@@ -327,3 +331,225 @@ Record at minimum:
 - reverse maneuver behavior
 
 That dataset is the direct input to the Paper I real-world discussion section.
+
+## 15. Controlled `synthetic_greenhouse_v1` diagnostic workflow
+
+The synthetic stage validates the mechanism and evidence chain before the real greenhouse map is frozen. It is **diagnostic only** and must never be promoted into a formal Paper I matrix cell.
+
+The code-authoritative fixture is deterministic:
+
+- fixture id: `synthetic_greenhouse_v1`
+- resolution: `0.10 m/cell`
+- extent: `30.0 x 20.0 m`
+- controlled structures: straight aisle, 90-degree row entry, wide U-turn headland, narrow/reverse headland, blocked row obstacle
+- canonical vehicle constraint: MKmini `R_min = 1.5 m`
+
+### 15.1 Local Codex / target-machine gate
+
+The following is the required Ubuntu 22.04 / ROS2 Humble gate. Run it from the target workspace; GitHub pure-Python CI does not replace this check.
+
+```bash
+cd ~/agt_navigation_v2
+
+git fetch origin
+git switch feat/paper1-agri-route-benchmark
+git pull --ff-only origin feat/paper1-agri-route-benchmark
+
+source /opt/ros/humble/setup.bash
+
+colcon build \
+  --symlink-install \
+  --packages-up-to agt_route_benchmark
+
+source install/setup.bash
+
+rm -rf /tmp/agt_route_benchmark_test_results
+
+colcon test \
+  --packages-select agt_route_benchmark \
+  --test-result-base /tmp/agt_route_benchmark_test_results \
+  --event-handlers console_direct+
+
+colcon test-result \
+  --test-result-base /tmp/agt_route_benchmark_test_results \
+  --verbose
+```
+
+Acceptance condition: `agt_route_benchmark` has zero test errors/failures. Do not use an unscoped `colcon test-result --verbose`, because unrelated historical results from third-party packages may be present under the workspace `build/` tree.
+
+### 15.2 Materialize the deterministic diagnostic assets
+
+```bash
+rm -rf \
+  runtime/maps/synthetic_greenhouse_v1 \
+  runtime/scenarios/synthetic_greenhouse_v1 \
+  runtime/results/paper1_route_benchmark_synthetic
+
+ros2 run agt_route_benchmark route_benchmark_generate_synthetic.py \
+  --map-dir runtime/maps/synthetic_greenhouse_v1 \
+  --scenario-dir runtime/scenarios/synthetic_greenhouse_v1
+
+cat runtime/maps/synthetic_greenhouse_v1/fixture_manifest.json
+sha256sum \
+  runtime/maps/synthetic_greenhouse_v1/map.pgm \
+  runtime/maps/synthetic_greenhouse_v1/map.yaml \
+  runtime/maps/synthetic_greenhouse_v1/semantic.geojson
+```
+
+The generator manifest is the source of truth for asset hashes. Do not hand-edit the generated PGM/YAML/GeoJSON or generated scenario YAMLs.
+
+### 15.3 Run the six live Nav2 diagnostic cells
+
+First exercise only S02 and S03 with A*, Theta* and Hybrid A*. S04/S05 remain downstream diagnostic cases; State Lattice remains deferred until its control-set contract is frozen.
+
+```bash
+MAP=$(pwd)/runtime/maps/synthetic_greenhouse_v1/map.yaml
+SEMANTIC=$(pwd)/runtime/maps/synthetic_greenhouse_v1/semantic.geojson
+PROFILE=$(pwd)/profiles/platforms/mk_mini.yaml
+SCENARIOS=$(pwd)/runtime/scenarios/synthetic_greenhouse_v1
+RESULTS=$(pwd)/runtime/results/paper1_route_benchmark_synthetic
+
+for SCENARIO in S02_90deg_entry S03_headland_uturn; do
+  for PLANNER in astar theta_star hybrid_astar; do
+    RUN_ID="diag_${SCENARIO}_${PLANNER}_001"
+    ros2 launch agt_route_benchmark benchmark_run.launch.py \
+      site:=synthetic_greenhouse_v1 \
+      scenario:=${SCENARIOS}/${SCENARIO}.yaml \
+      planner:=${PLANNER} \
+      map:=${MAP} \
+      semantic_map:=${SEMANTIC} \
+      platform_profile:=${PROFILE} \
+      result_root:=${RESULTS} \
+      run_id:=${RUN_ID} \
+      formal:=false
+  done
+done
+```
+
+The runner performs scenario-map/full-footprint preflight before live planning. An invalid scenario is written as `INVALID_SCENARIO` and must not be interpreted as planner failure.
+
+Inspect that every successful cell contains the standard artifacts and endpoint-deviation metrics:
+
+```bash
+find runtime/results/paper1_route_benchmark_synthetic \
+  -name metrics.json -o -name planner_report.json -o -name path.csv \
+  | sort
+
+python3 - <<'PY'
+from pathlib import Path
+import json
+
+root = Path('runtime/results/paper1_route_benchmark_synthetic')
+for metrics_path in sorted(root.rglob('metrics.json')):
+    m = json.loads(metrics_path.read_text())
+    print(
+        metrics_path.parent,
+        'success=', m.get('success'),
+        'error=', m.get('error_code'),
+        'collision=', m.get('collision_free'),
+        'kinematic=', m.get('kinematic_feasible'),
+        'execution=', m.get('execution_feasible'),
+        'kappa=', m.get('max_abs_curvature_1pm'),
+        'kappa_limit=', m.get('required_max_curvature_1pm'),
+        'goal_dev=', m.get('goal_pose_deviation_m'),
+    )
+PY
+```
+
+No expected planner ranking is encoded in the acceptance gate. If all planners are feasible, that scenario does not support a capability-separation claim. If one planner returns a collision-free but kinematically infeasible path while another passes the same frozen checks, only that scoped scenario-level distinction is supported.
+
+## 16. Planner-independent real-map curation (Scheme B)
+
+The formal real-map pipeline is:
+
+```text
+raw PCD
+  -> ground-relative projection
+  -> generated occupancy/traversability
+  -> deterministic filtering
+  -> explicit manual Override layer
+  -> accepted navigation map
+  -> semantic map / agricultural topology
+  -> site snapshot + hashes
+  -> formal 23-cell benchmark
+```
+
+Real-map manual smoothing/de-jagging is allowed only as an explicit evidence-backed overlay. Each override feature must contain:
+
+- unique `id`
+- `feature_type: map_override`
+- `edit_type: FORCE_FREE` or `FORCE_OCCUPIED`
+- non-empty `reason`
+- evidence category such as `pcd_inspection`, `site_photo`, `measured_structure`, `known_permanent_obstacle`, `field_note`
+- polygon geometry in `map`
+- optional `created_at_utc`
+
+The contract rejects planner-conditioned properties. Do not change the map because A*, Theta*, Hybrid A*, State Lattice, Fields2Cover or the proposed method produced an undesirable result.
+
+After the real map has been curated, bind the evidence revision:
+
+```bash
+ros2 run agt_route_benchmark route_benchmark_map_curation.py \
+  --site greenhouse_01 \
+  --source-pcd runtime/maps/greenhouse_01/source/greenhouse_01.pcd \
+  --generated-map-yaml runtime/maps/greenhouse_01/generated/raw_map.yaml \
+  --override-geojson runtime/maps/greenhouse_01/curation/overrides.geojson \
+  --accepted-map-yaml runtime/maps/greenhouse_01/greenhouse_01.yaml \
+  --semantic-map runtime/maps/greenhouse_01/semantic/semantic_map.geojson \
+  --platform-profile profiles/platforms/mk_mini.yaml \
+  --output runtime/maps/greenhouse_01/benchmark/map_curation_manifest.json
+```
+
+The manifest records the source PCD, pre-override map, override layer, accepted map, semantic map and platform-profile hashes. This evidence is prepared **before** formal planner execution.
+
+## 17. Evidence-conditioned paper bundle and review boundary
+
+After the six S02/S03 live diagnostic cells are available, generate the diagnostic paper bundle:
+
+```bash
+ros2 run agt_route_benchmark route_benchmark_paper_bundle.py \
+  --results-root runtime/results/paper1_route_benchmark_synthetic \
+  --output-dir runtime/results/paper1_route_benchmark_synthetic/paper_bundle \
+  --map-yaml runtime/maps/synthetic_greenhouse_v1/map.yaml \
+  --semantic-map runtime/maps/synthetic_greenhouse_v1/semantic.geojson
+```
+
+Expected outputs:
+
+```text
+comparison.csv
+comparison.json
+claims.md
+figure_manifest.json
+D1_synthetic_problem.svg/.pdf/.png
+D2_S02_planner_comparison.svg/.pdf/.png
+D3_S03_planner_comparison.svg/.pdf/.png
+D4_feasibility_matrix.svg/.pdf/.png
+```
+
+Figure semantics are deliberately explicit:
+
+- **D1**: controlled problem geometry and S01-S05 locations
+- **D2/D3**: same-map planner paths; returned path endpoints come from `path.csv`; hollow/dashed pose annotations come from requested continuous poses in `experiment_manifest.json`
+- each D2/D3 panel prints path length, maximum curvature, frozen curvature limit, goal position/yaw deviation, and path-level execution-feasibility result
+- **D4**: planner success, collision-free, kinematic-feasible and execution-feasible are shown as separate evidence columns
+
+`figure_manifest.json` hashes the source result files and supplied map/semantic assets so each exported figure can be traced back to exact evidence.
+
+`claims.md` is intentionally conservative. It may state a scoped observation such as:
+
+```text
+A planner returned a collision-free geometric path, but the independent evaluator
+classified it as kinematically infeasible under the frozen MKmini constraints.
+```
+
+It must not infer that “A* cannot solve the problem”, that one planner is universally superior, or that one single-run timing means another planner is always slower. If S02/S03 do not separate the planners, the generated interpretation explicitly says the scenario cannot support a planner-capability difference claim.
+
+At this stage, the remaining human review is intentionally narrow:
+
+1. inspect `D1-D4` for paper visual clarity and whether the figures communicate the intended constraint distinction without misleading emphasis;
+2. inspect `claims.md` and `comparison.csv` for a logically self-consistent evidence -> claim chain;
+3. accept or reject the synthetic diagnostic geometry as a useful mechanism demonstration;
+4. later repeat the same figure/claim pipeline with the frozen real `greenhouse_01` assets for the formal paper results.
+
+Synthetic figures are diagnostic evidence only. The final Paper I headline figures and conclusions must be regenerated from the accepted real-map/site-snapshot revision and the formal benchmark outputs.
