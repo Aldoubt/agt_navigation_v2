@@ -3,5 +3,5 @@ level: p2p
 development_fixture: true
 description: Straight aisle baseline; replace coordinates after greenhouse_01 acceptance.
 start: {x: 0.0, y: 0.0, yaw: 0.0}
-goal: {x: 6.0, y: 0.0, yaw: 0.0}
+goal: {x: 4.0, y: 0.0, yaw: 0.0}
 expected_constraints: [free_space]
