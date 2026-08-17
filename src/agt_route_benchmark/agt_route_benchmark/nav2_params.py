@@ -23,6 +23,11 @@ def _footprint_string(vertices: tuple[tuple[float, float], ...]) -> str:
     return json.dumps([[float(x), float(y)] for x, y in vertices], separators=(", ", ": "))
 
 
+def _analytic_expansion_max_length(min_turning_radius_m: float) -> float:
+    """Use a conservative Nav2-supported scale for Hybrid/Lattice expansions."""
+    return max(5.0 * float(min_turning_radius_m), 4.5)
+
+
 def _planner_config(planner_id: str, *, min_turning_radius_m: float, lattice_filepath: Path | None) -> tuple[str, dict[str, Any]]:
     if planner_id not in PLUGIN_IDS:
         raise ValueError(f"unsupported P2P planner {planner_id!r}")
@@ -65,7 +70,7 @@ def _planner_config(planner_id: str, *, min_turning_radius_m: float, lattice_fil
             "non_straight_penalty": 1.2,
             "cost_penalty": 2.0,
             "analytic_expansion_ratio": 3.5,
-            "analytic_expansion_max_length": max(3.0 * float(min_turning_radius_m), 4.5),
+            "analytic_expansion_max_length": _analytic_expansion_max_length(min_turning_radius_m),
         }
     if lattice_filepath is None:
         raise ValueError("state_lattice requires a lattice control-set file generated for the accepted map resolution and MKmini turning radius")
@@ -80,12 +85,13 @@ def _planner_config(planner_id: str, *, min_turning_radius_m: float, lattice_fil
         "max_on_approach_iterations": 1000,
         "max_planning_time": 5.0,
         "lattice_filepath": str(lattice_path),
+        "allow_reverse_expansion": True,
         "reverse_penalty": 2.0,
         "change_penalty": 0.0,
         "non_straight_penalty": 1.2,
         "cost_penalty": 2.0,
         "analytic_expansion_ratio": 3.5,
-        "analytic_expansion_max_length": max(3.0 * float(min_turning_radius_m), 4.5),
+        "analytic_expansion_max_length": _analytic_expansion_max_length(min_turning_radius_m),
     }
 
 
