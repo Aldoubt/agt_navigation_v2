@@ -86,7 +86,7 @@ A3.5 does not begin by tuning search parameters or replacing R6B wholesale.
 
 The first implementation increment must be diagnostic-only: it must expose why each R6B request fails without changing the search result for the same frozen inputs and configuration.
 
-Only after the real-data diagnostic report identifies the dominant blocker may a production behavior amendment be designed and implemented.
+Only after the real-data diagnostic report identifies the dominant blocker may a production behavior amendment be designed, separately approved, and implemented.
 
 ## 5. Current R6B Search Model
 
@@ -295,7 +295,7 @@ A3.5 is complete only when:
 
 1. diagnostic instrumentation has been verified not to change existing R6B outcomes;
 2. all 40 real connectors have a frozen diagnostic failure classification;
-3. one evidence-backed backend amendment has been implemented and tested if required;
+3. one evidence-backed backend behavior amendment has been separately approved, implemented, and tested;
 4. the real greenhouse A3 graph contains the mandatory 3-segment / >=2-aisle / >=2-transition continuous service chain;
 5. all hard safety invariants and upstream input hashes remain unchanged;
 6. the resulting A3 real-data state is documented before A4 begins.
