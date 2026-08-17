@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Sequence
 
 from .contracts import PathPoint
 from .map_io import Nav2Map, nav2_map_occupancy_data
+from .semantic_path_validation import evaluate_semantic_path
 
 
-def evaluate_normalized_path(points: Sequence[PathPoint], nav_map: Nav2Map, platform_profile) -> dict:
-    """Evaluate a normalized benchmark path with the existing V2.5 validator."""
+def evaluate_normalized_path(
+    points: Sequence[PathPoint],
+    nav_map: Nav2Map,
+    platform_profile,
+    *,
+    semantic_map_path: Path | str | None = None,
+) -> dict:
+    """Evaluate one normalized path using shared geometric/kinematic/semantic gates."""
     try:
         from agt_coverage_planning.path_validator import GridMap, Pose2D, ValidatorConfig, validate_path
     except ImportError as exc:
@@ -55,7 +63,7 @@ def evaluate_normalized_path(points: Sequence[PathPoint], nav_map: Nav2Map, plat
     )
     kinematic_feasible = "minimum_turning_radius_violation" not in error_set
 
-    return {
+    metrics = {
         "execution_feasible": bool(report.valid),
         "collision_free": collision_free,
         "kinematic_feasible": kinematic_feasible,
@@ -68,3 +76,15 @@ def evaluate_normalized_path(points: Sequence[PathPoint], nav_map: Nav2Map, plat
         "validation_sample_count": int(report.sample_count),
         "validation_error_codes": list(error_codes),
     }
+    if semantic_map_path is not None:
+        semantic_metrics = evaluate_semantic_path(
+            points,
+            semantic_map_path,
+            platform_profile,
+            sample_step_m=min(0.10, float(nav_map.resolution_m)),
+        )
+        metrics.update(semantic_metrics)
+        metrics["execution_feasible"] = bool(
+            metrics["execution_feasible"] and semantic_metrics["hard_semantic_feasible"]
+        )
+    return metrics
