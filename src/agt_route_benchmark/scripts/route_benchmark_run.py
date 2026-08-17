@@ -11,6 +11,7 @@ from agt_route_benchmark.adapters.fields2cover import Fields2CoverAdapter
 from agt_route_benchmark.adapters.nav2_p2p import Nav2P2PAdapter
 from agt_route_benchmark.adapters.proposed import ProposedAdapter
 from agt_route_benchmark.contracts import ExperimentSpec, PathPoint
+from agt_route_benchmark.coverage_bridge import collect_coverage_components_live
 from agt_route_benchmark.experiment import ExperimentRunner
 from agt_route_benchmark.graph_io import load_agricultural_graph
 from agt_route_benchmark.path_io import read_path_csv
@@ -106,6 +107,8 @@ def main() -> int:
     parser.add_argument("--nav2-live", action="store_true")
     parser.add_argument("--graph", type=Path)
     parser.add_argument("--coverage-components-json", type=Path)
+    parser.add_argument("--coverage-live", action="store_true")
+    parser.add_argument("--semantic-map", type=Path)
     args = parser.parse_args()
 
     scenario = load_scenario(args.scenario, formal=args.formal)
@@ -150,11 +153,24 @@ def main() -> int:
             args.graph = args.scenario.parent / str(graph_ref)
         adapter = ProposedAdapter(load_agricultural_graph(args.graph))
     elif args.planner == "fields2cover":
-        if args.coverage_components_json is None:
-            adapter = Fields2CoverAdapter()
-        else:
+        semantic_map = args.semantic_map
+        if semantic_map is None and snapshot is not None:
+            semantic_map = Path(snapshot["assets"]["semantic_map"]["path"])
+        if semantic_map is not None and snapshot is not None:
+            selected_semantic_sha = hashlib.sha256(Path(semantic_map).read_bytes()).hexdigest()
+            if selected_semantic_sha != snapshot["assets"]["semantic_map"]["sha256"]:
+                raise SystemExit("selected semantic map is not the semantic map bound by site snapshot")
+        if args.coverage_live:
+            if semantic_map is None:
+                raise SystemExit("--coverage-live requires --semantic-map or a bound --site-snapshot")
+            adapter = Fields2CoverAdapter(
+                lambda _spec: collect_coverage_components_live(semantic_map)
+            )
+        elif args.coverage_components_json is not None:
             components = _coverage_components(args.coverage_components_json)
             adapter = Fields2CoverAdapter(lambda _spec: (components, 0.0))
+        else:
+            adapter = Fields2CoverAdapter()
     elif args.planner in ("astar", "theta_star", "hybrid_astar", "state_lattice"):
         if args.nav2_live:
             call, nav2_node, rclpy = _nav2_call()

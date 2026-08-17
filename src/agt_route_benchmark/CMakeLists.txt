@@ -35,6 +35,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_site_snapshot test/test_site_snapshot.py)
   ament_add_pytest_test(test_map_io test/test_map_io.py)
   ament_add_pytest_test(test_nav2_params test/test_nav2_params.py)
+  ament_add_pytest_test(test_coverage_bridge test/test_coverage_bridge.py)
 endif()
 
 ament_package()
