@@ -34,6 +34,10 @@ _DIAGNOSTIC_SCENARIOS = {
     "S02_90deg_entry": "D2_S02_planner_comparison",
     "S03_headland_uturn": "D3_S03_planner_comparison",
 }
+_POSE_ANNOTATIONS = {
+    "requested_pose_source": "experiment_manifest.scenario_request",
+    "returned_endpoint_source": "path.csv",
+}
 
 
 @dataclass(frozen=True)
@@ -284,6 +288,8 @@ def _metric_text(run: Mapping[str, Any]) -> str:
     curvature = metrics.get("max_abs_curvature_1pm")
     limit = metrics.get("required_max_curvature_1pm")
     feasible = metrics.get("execution_feasible")
+    goal_deviation = metrics.get("goal_pose_deviation_m")
+    goal_heading_deviation = metrics.get("goal_heading_deviation_rad")
 
     def fmt(value):
         return "N/A" if value is None else f"{float(value):.3f}"
@@ -293,7 +299,40 @@ def _metric_text(run: Mapping[str, Any]) -> str:
         f"L={fmt(length)} m\n"
         f"κmax={fmt(curvature)} 1/m\n"
         f"κlimit={fmt(limit)} 1/m\n"
+        f"Δgoal={fmt(goal_deviation)} m\n"
+        f"Δψgoal={fmt(goal_heading_deviation)} rad\n"
         f"execution={feasible_text}"
+    )
+
+
+def _requested_pose(manifest: Mapping[str, Any], key: str) -> tuple[float, float, float] | None:
+    request = manifest.get("scenario_request")
+    if not isinstance(request, Mapping):
+        return None
+    pose = request.get(key)
+    if not isinstance(pose, Mapping):
+        return None
+    try:
+        return float(pose["x_m"]), float(pose["y_m"]), float(pose["yaw_rad"])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _draw_requested_pose(ax, pose: tuple[float, float, float] | None, *, marker: str) -> None:
+    if pose is None:
+        return
+    x, y, yaw = pose
+    ax.scatter([x], [y], marker=marker, s=28, facecolors="none", edgecolors="black", linewidths=1.0)
+    arrow_length = 0.55
+    ax.arrow(
+        x,
+        y,
+        arrow_length * math.cos(yaw),
+        arrow_length * math.sin(yaw),
+        head_width=0.13,
+        length_includes_head=True,
+        linestyle="--",
+        linewidth=1.0,
     )
 
 
@@ -305,7 +344,7 @@ def _comparison_figure(
 ) -> list[str]:
     ordered = sorted(runs, key=lambda r: (_planner_rank(str(r["planner_id"])), str(r["planner_id"])))
     count = max(1, len(ordered))
-    fig, axes = plt.subplots(1, count, figsize=(4.5 * count, 4.8), squeeze=False)
+    fig, axes = plt.subplots(1, count, figsize=(4.5 * count, 5.1), squeeze=False)
     for ax, run in zip(axes[0], ordered):
         _map_background(ax, nav_map)
         path_csv = run.get("path_csv")
@@ -313,11 +352,11 @@ def _comparison_figure(
             points = read_path_csv(path_csv)
             if points:
                 ax.plot([p.x_m for p in points], [p.y_m for p in points], linewidth=2.0)
-                ax.scatter([points[0].x_m], [points[0].y_m], marker="o", s=35)
-                ax.scatter([points[-1].x_m], [points[-1].y_m], marker="x", s=45)
-                arrow_length = 0.45
-                ax.arrow(points[0].x_m, points[0].y_m, arrow_length * math.cos(points[0].yaw_rad), arrow_length * math.sin(points[0].yaw_rad), head_width=0.12, length_includes_head=True)
-                ax.arrow(points[-1].x_m, points[-1].y_m, arrow_length * math.cos(points[-1].yaw_rad), arrow_length * math.sin(points[-1].yaw_rad), head_width=0.12, length_includes_head=True)
+                ax.scatter([points[0].x_m], [points[0].y_m], marker="o", s=35, label="returned start")
+                ax.scatter([points[-1].x_m], [points[-1].y_m], marker="x", s=45, label="returned goal")
+        _draw_requested_pose(ax, _requested_pose(run["manifest"], "start"), marker="o")
+        _draw_requested_pose(ax, _requested_pose(run["manifest"], "goal"), marker="s")
+
         metrics = run["metrics"]
         if not run["report"].get("success", False):
             status = "NO PATH"
@@ -334,7 +373,7 @@ def _comparison_figure(
             transform=ax.transAxes,
             ha="left",
             va="bottom",
-            fontsize=7.5,
+            fontsize=7.2,
             bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.82},
         )
         ax.set_xlabel("x [m]")
@@ -426,10 +465,13 @@ def build_paper_bundle(
                 "path_length_m",
                 "max_abs_curvature_1pm",
                 "required_max_curvature_1pm",
+                "goal_pose_deviation_m",
+                "goal_heading_deviation_rad",
                 "collision_free",
                 "kinematic_feasible",
                 "execution_feasible",
             ],
+            "pose_annotations": dict(_POSE_ANNOTATIONS),
             "formats": ["svg", "pdf", "png"],
         }
 
