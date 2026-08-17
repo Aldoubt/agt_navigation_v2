@@ -16,6 +16,8 @@ install(PROGRAMS
   scripts/route_csv_to_path.py
   scripts/route_benchmark_accept_site.py
   scripts/route_benchmark_generate_synthetic.py
+  scripts/route_benchmark_paper_bundle.py
+  scripts/route_benchmark_map_curation.py
   scripts/ackermann_kinematic_sim.py
   scripts/rpp_tracking_sim_trial.py
   DESTINATION lib/${PROJECT_NAME}
@@ -57,6 +59,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_preflight test/test_preflight.py)
   ament_add_pytest_test(test_endpoint_metrics test/test_endpoint_metrics.py)
   ament_add_pytest_test(test_synthetic_greenhouse test/test_synthetic_greenhouse.py)
+  ament_add_pytest_test(test_paper_bundle test/test_paper_bundle.py)
+  ament_add_pytest_test(test_map_curation test/test_map_curation.py)
 endif()
 
 ament_package()
