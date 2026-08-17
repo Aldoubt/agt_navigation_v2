@@ -14,7 +14,7 @@ parameter is relaxed.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dataclass_replace
 import heapq
 import math
 from pathlib import Path
@@ -42,6 +42,27 @@ from .reverse_fallback_admission import ReverseFallbackAdmissionPlan
 from .site_boundary import SiteBoundary, polygon_strictly_inside_site_boundary
 from .turn_zones import TurnZone, TurnZoneSet, _points_inside_polygon
 from .vehicle_profile import CanonicalVehicleProfile
+from .reverse_primitive_diagnostics import (
+    R6B_DIAGNOSTIC_SCHEMA,
+    SEARCH_ENVELOPE_LIMITED,
+    SITE_BOUNDARY_LIMITED,
+    FOOTPRINT_GRID_LIMITED,
+    STATE_DISCRETIZATION_OR_DOMINANCE_LIMITED,
+    GOAL_CONNECTION_LIMITED,
+    MOTION_PRIMITIVE_LIMITED,
+    PATH_OR_CUSP_ENVELOPE_LIMITED,
+    MIXED_LIMITATION,
+    INCONCLUSIVE,
+    ReversePrimitiveSearchDiagnostics,
+    classify_reverse_primitive_failure,
+    reverse_primitive_search_diagnostics_to_dict,
+    reverse_primitive_search_diagnostics_from_dict,
+)
+
+EDGE_FREE = "FREE"
+EDGE_SEARCH_ENVELOPE = "SEARCH_ENVELOPE"
+EDGE_SITE_BOUNDARY = "SITE_BOUNDARY"
+EDGE_NAVIGATION_GRID = "NAVIGATION_GRID"
 
 
 REVERSE_PRIMITIVE_CONNECTOR_SCHEMA = "agt_reverse_primitive_connector_plan/v1"
@@ -133,6 +154,50 @@ class ReversePrimitiveConnectorResult:
     centerline_evidence: GridPathEvidence
     footprint_evidence: GridPathEvidence
     reason: str = ""
+    diagnostics: ReversePrimitiveSearchDiagnostics = field(
+        default_factory=ReversePrimitiveSearchDiagnostics
+    )
+
+
+@dataclass
+class _MutableReversePrimitiveSearchDiagnostics:
+    failure_class: str | None = None
+    search_started: bool = False
+    search_expansions: int = 0
+    queue_exhausted: bool = False
+    expansion_budget_reached: bool = False
+    start_goal_position_error_m: float | None = None
+    best_goal_position_error_m: float | None = None
+    best_goal_yaw_error_rad: float | None = None
+    best_goal_distance_state_direction: str | None = None
+    best_goal_distance_cusp_count: int | None = None
+    nodes_popped: int = 0
+    stale_nodes_skipped: int = 0
+    cusp_switches_considered: int = 0
+    cusp_switches_rejected_state_dominance: int = 0
+    cusp_switches_enqueued: int = 0
+    nodes_at_max_cusps: int = 0
+    primitive_edges_considered: int = 0
+    primitive_edges_rejected_search_envelope: int = 0
+    primitive_edges_rejected_site_boundary: int = 0
+    primitive_edges_rejected_navigation_grid: int = 0
+    primitive_edges_rejected_path_length: int = 0
+    primitive_edges_rejected_state_dominance: int = 0
+    primitive_edges_enqueued: int = 0
+    goal_tolerance_checks: int = 0
+    goal_tolerance_successes: int = 0
+    goal_shot_attempts: int = 0
+    goal_shot_reverse_direction_blocked: int = 0
+    goal_shot_candidates_considered: int = 0
+    goal_shot_rejected_path_length: int = 0
+    goal_shot_rejected_search_envelope: int = 0
+    goal_shot_rejected_site_boundary: int = 0
+    goal_shot_rejected_navigation_grid: int = 0
+    goal_shot_successes: int = 0
+
+    def freeze(self) -> ReversePrimitiveSearchDiagnostics:
+        values = {name: getattr(self, name) for name in ReversePrimitiveSearchDiagnostics.__dataclass_fields__ if name != "schema"}
+        return ReversePrimitiveSearchDiagnostics(**values)
 
 
 @dataclass(frozen=True)
@@ -375,19 +440,34 @@ def _edge_is_free(
     local_footprint,
     site_boundary: SiteBoundary | None = None,
 ) -> bool:
+    return _edge_rejection_reason(
+        samples, bounds, navigation, local_footprint, site_boundary
+    ) == EDGE_FREE
+
+
+def _edge_rejection_reason(
+    samples,
+    bounds,
+    navigation: NavigationGridEvidence,
+    local_footprint,
+    site_boundary: SiteBoundary | None = None,
+) -> str:
     for x, y, yaw, _direction, _curvature, _is_cusp in samples:
         if not _inside_search_envelope(x, y, bounds):
-            return False
-        if not _preview_pose_free(
+            return EDGE_SEARCH_ENVELOPE
+        status = _preview_pose_status(
             x,
             y,
             yaw,
             navigation,
             local_footprint,
             site_boundary,
-        ):
-            return False
-    return True
+        )
+        if status == "SITE_BOUNDARY_CONFLICT":
+            return EDGE_SITE_BOUNDARY
+        if status != "FREE":
+            return EDGE_NAVIGATION_GRID
+    return EDGE_FREE
 
 
 def _try_forward_goal_shot(
@@ -399,14 +479,19 @@ def _try_forward_goal_shot(
     navigation: NavigationGridEvidence,
     local_footprint,
     site_boundary: SiteBoundary | None = None,
+    diagnostics: _MutableReversePrimitiveSearchDiagnostics | None = None,
 ) -> tuple[tuple[tuple[float, float, float, int, float, bool], ...], float] | None:
-    if node.direction != 1:
-        return None
     distance = math.hypot(
         request.goal_pose[0] - node.x,
         request.goal_pose[1] - node.y,
     )
     if distance > cfg.goal_shot_distance_m:
+        return None
+    if diagnostics is not None:
+        diagnostics.goal_shot_attempts += 1
+    if node.direction != 1:
+        if diagnostics is not None:
+            diagnostics.goal_shot_reverse_direction_blocked += 1
         return None
     start = (node.x, node.y, request.start_pose[2], node.yaw)
     candidates = _dubins_candidates(start, request.goal_pose, radius)
@@ -420,18 +505,32 @@ def _try_forward_goal_shot(
             cfg.collision_sample_step_m,
         )
         if node.travel_m + float(length_m) > cfg.max_path_length_m:
+            if diagnostics is not None:
+                diagnostics.goal_shot_candidates_considered += 1
+                diagnostics.goal_shot_rejected_path_length += 1
             continue
         converted = tuple(
             (float(s.x), float(s.y), float(s.yaw), 1, 0.0, False)
             for s in sampled[1:]
         )
-        if _edge_is_free(
+        reason = _edge_rejection_reason(
             converted,
             bounds,
             navigation,
             local_footprint,
             site_boundary,
-        ):
+        )
+        if diagnostics is not None:
+            diagnostics.goal_shot_candidates_considered += 1
+            if reason == EDGE_SEARCH_ENVELOPE:
+                diagnostics.goal_shot_rejected_search_envelope += 1
+            elif reason == EDGE_SITE_BOUNDARY:
+                diagnostics.goal_shot_rejected_site_boundary += 1
+            elif reason == EDGE_NAVIGATION_GRID:
+                diagnostics.goal_shot_rejected_navigation_grid += 1
+        if reason == EDGE_FREE:
+            if diagnostics is not None:
+                diagnostics.goal_shot_successes += 1
             return converted, float(length_m)
     return None
 
@@ -582,6 +681,11 @@ def _search_one(
         cfg.preview_footprint_padding_m,
     )
     bounds = _row_frame_bounds(request, zone, zones.row_direction_xy, cfg)
+    diagnostics = _MutableReversePrimitiveSearchDiagnostics()
+    diagnostics.start_goal_position_error_m = math.hypot(
+        float(request.goal_pose[0] - request.start_pose[0]),
+        float(request.goal_pose[1] - request.start_pose[1]),
+    )
     start = _SearchNode(
         x=float(request.start_pose[0]),
         y=float(request.start_pose[1]),
@@ -603,7 +707,8 @@ def _search_one(
         site_boundary,
     )
     if start_status == "SITE_BOUNDARY_CONFLICT":
-        return _boundary_conflict_result(request, radius)
+        result = _boundary_conflict_result(request, radius)
+        return dataclass_replace(result, diagnostics=diagnostics.freeze())
     if start_status != "FREE":
         return ReversePrimitiveConnectorResult(
             connector_id=request.connector_id,
@@ -624,6 +729,7 @@ def _search_one(
             centerline_evidence=_empty_evidence(),
             footprint_evidence=_empty_evidence(),
             reason="start preview footprint is not FREE in the frozen Navigation Grid",
+            diagnostics=diagnostics.freeze(),
         )
 
     nodes = [start]
@@ -635,6 +741,7 @@ def _search_one(
     )
     best_cost = {_state_key(start, cfg): 0.0}
     expansions = 0
+    diagnostics.search_started = True
     goal_yaw_tol = math.radians(cfg.goal_yaw_tolerance_deg)
     curvature_values = (-1.0 / radius, 0.0, 1.0 / radius)
 
@@ -643,18 +750,35 @@ def _search_one(
 
     while queue and expansions < cfg.max_expansions:
         _priority, _tie, node_index = heapq.heappop(queue)
+        diagnostics.nodes_popped += 1
         node = nodes[node_index]
         key = _state_key(node, cfg)
         if node.cost > best_cost.get(key, float("inf")) + 1.0e-9:
+            diagnostics.stale_nodes_skipped += 1
             continue
         expansions += 1
+        diagnostics.search_expansions = expansions
 
         position_error, yaw_error = _goal_error(node, request.goal_pose)
+        if (
+            diagnostics.best_goal_position_error_m is None
+            or position_error < diagnostics.best_goal_position_error_m - 1.0e-12
+            or (
+                abs(position_error - diagnostics.best_goal_position_error_m) <= 1.0e-12
+                and yaw_error < (diagnostics.best_goal_yaw_error_rad or float("inf")) - 1.0e-12
+            )
+        ):
+            diagnostics.best_goal_position_error_m = position_error
+            diagnostics.best_goal_yaw_error_rad = yaw_error
+            diagnostics.best_goal_distance_state_direction = _direction_name(node.direction)
+            diagnostics.best_goal_distance_cusp_count = node.cusp_count
+        diagnostics.goal_tolerance_checks += 1
         if (
             node.direction == 1
             and position_error <= cfg.goal_position_tolerance_m
             and yaw_error <= goal_yaw_tol
         ):
+            diagnostics.goal_tolerance_successes += 1
             solved_index = node_index
             break
 
@@ -667,6 +791,7 @@ def _search_one(
             navigation,
             local_footprint,
             site_boundary,
+            diagnostics,
         )
         if shot is not None:
             solved_index = node_index
@@ -674,6 +799,7 @@ def _search_one(
             break
 
         if node.cusp_count < cfg.max_cusps:
+            diagnostics.cusp_switches_considered += 1
             switched = _SearchNode(
                 x=node.x,
                 y=node.y,
@@ -712,23 +838,39 @@ def _search_one(
                         len(nodes) - 1,
                     ),
                 )
+                diagnostics.cusp_switches_enqueued += 1
+            else:
+                diagnostics.cusp_switches_rejected_state_dominance += 1
+        else:
+            diagnostics.nodes_at_max_cusps += 1
 
         if node.travel_m + cfg.primitive_length_m > cfg.max_path_length_m:
+            diagnostics.primitive_edges_considered += 3
+            diagnostics.primitive_edges_rejected_path_length += 3
             continue
         for curvature_index, curvature in enumerate(curvature_values, start=-1):
+            diagnostics.primitive_edges_considered += 1
             edge = _integrate_primitive(
                 node,
                 curvature,
                 cfg.primitive_length_m,
                 cfg.collision_sample_step_m,
             )
-            if not _edge_is_free(
+            rejection = _edge_rejection_reason(
                 edge,
                 bounds,
                 navigation,
                 local_footprint,
                 site_boundary,
-            ):
+            )
+            if rejection == EDGE_SEARCH_ENVELOPE:
+                diagnostics.primitive_edges_rejected_search_envelope += 1
+                continue
+            if rejection == EDGE_SITE_BOUNDARY:
+                diagnostics.primitive_edges_rejected_site_boundary += 1
+                continue
+            if rejection == EDGE_NAVIGATION_GRID:
+                diagnostics.primitive_edges_rejected_navigation_grid += 1
                 continue
             x, y, yaw, _direction, _curvature, _cusp = edge[-1]
             motion_cost = cfg.primitive_length_m * (
@@ -756,6 +898,7 @@ def _search_one(
                 child_key,
                 float("inf"),
             ):
+                diagnostics.primitive_edges_rejected_state_dominance += 1
                 continue
             best_cost[child_key] = child.cost
             nodes.append(child)
@@ -768,8 +911,16 @@ def _search_one(
                     len(nodes) - 1,
                 ),
             )
+            diagnostics.primitive_edges_enqueued += 1
 
     if solved_index is None:
+        if not queue:
+            diagnostics.queue_exhausted = True
+        elif expansions >= cfg.max_expansions:
+            diagnostics.expansion_budget_reached = True
+        diagnostics.failure_class = classify_reverse_primitive_failure(
+            diagnostics.freeze(), max_cusps=cfg.max_cusps
+        )
         return ReversePrimitiveConnectorResult(
             connector_id=request.connector_id,
             from_aisle_id=request.from_aisle_id,
@@ -793,6 +944,7 @@ def _search_one(
                 "Navigation Grid and Site Boundary gates remain fail-closed; hand this "
                 "connector to R7 rather than expanding R6B into a global planner"
             ),
+            diagnostics=diagnostics.freeze(),
         )
 
     raw = _reconstruct_raw(nodes, solved_index)
@@ -847,6 +999,7 @@ def _search_one(
         centerline_evidence=centerline_evidence,
         footprint_evidence=footprint_evidence,
         reason=reason,
+        diagnostics=diagnostics.freeze(),
     )
 
 
@@ -989,6 +1142,9 @@ def reverse_primitive_connector_plan_to_dict(
                     item.footprint_evidence
                 ),
                 "reason": item.reason,
+                "diagnostics": reverse_primitive_search_diagnostics_to_dict(
+                    item.diagnostics
+                ),
                 "samples": [
                     {
                         "x": sample.x,
