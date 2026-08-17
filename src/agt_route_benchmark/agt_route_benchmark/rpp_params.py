@@ -78,7 +78,7 @@ def build_mkmini_rpp_params(
                 },
                 "FollowPath": {
                     "plugin": "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController",
-                    # Humble uses desired_linear_vel; newer Nav2 renamed this to max_linear_vel.
+                    # Humble parameter name from the target navigation2 branch.
                     "desired_linear_vel": float(desired_linear_vel_mps),
                     "lookahead_dist": 0.45,
                     "min_lookahead_dist": 0.25,
@@ -98,14 +98,9 @@ def build_mkmini_rpp_params(
                     "inflation_cost_scaling_factor": float(inflation_cost_scaling_factor),
                     "regulated_linear_scaling_min_radius": float(profile.min_turning_radius_m),
                     "regulated_linear_scaling_min_speed": 0.10,
-                    # Ackermann chassis cannot perform Nav2 rotate-in-place recovery.
+                    # Humble RPP explicitly disables reversing if rotate-to-heading is on.
                     "use_rotate_to_heading": False,
-                    # V2.5 Route Assets preserve F/R segments; RPP must not discard them.
                     "allow_reversing": True,
-                    # Keep fixed-curvature lookahead disabled because sign changes in
-                    # reversing paths have had Humble/Jazzy edge cases in Nav2.
-                    "use_fixed_curvature_lookahead": False,
-                    "curvature_lookahead_dist": 0.45,
                     "rotate_to_heading_min_angle": 0.785,
                     "max_angular_accel": 0.80,
                     "max_robot_pose_search_dist": float(local_costmap_size_m),
@@ -122,6 +117,7 @@ def build_mkmini_rpp_params(
                     "global_frame": "odom",
                     "robot_base_frame": "base_footprint",
                     "rolling_window": True,
+                    "track_unknown_space": False,
                     "width": float(local_costmap_size_m),
                     "height": float(local_costmap_size_m),
                     "resolution": float(local_costmap_resolution_m),
@@ -130,8 +126,9 @@ def build_mkmini_rpp_params(
                     "plugins": ["obstacle_layer", "inflation_layer"],
                     "obstacle_layer": {
                         "plugin": "nav2_costmap_2d::ObstacleLayer",
-                        # No sensor source is hard-coded here. Simulation or site
-                        # bringup must inject the accepted local obstacle source.
+                        # No sensor source is hard-coded here. The lightweight tracking
+                        # simulation treats the already-validated route as static-free;
+                        # site bringup must inject the accepted live obstacle source.
                         "enabled": True,
                         "observation_sources": "",
                     },
