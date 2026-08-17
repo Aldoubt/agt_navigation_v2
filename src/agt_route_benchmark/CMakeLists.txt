@@ -53,6 +53,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_ackermann_kinematics test/test_ackermann_kinematics.py)
   ament_add_pytest_test(test_coverage_bridge test/test_coverage_bridge.py)
   ament_add_pytest_test(test_runner_ros_args test/test_runner_ros_args.py)
+  ament_add_pytest_test(test_preflight test/test_preflight.py)
 endif()
 
 ament_package()
