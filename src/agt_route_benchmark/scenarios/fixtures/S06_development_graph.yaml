@@ -1,0 +1,19 @@
+schema_version: "1.0"
+tasks: [row_01, row_02, row_03, row_04]
+reachable: [row_01, row_02, row_04]
+nodes:
+  row_01: {x: 0.0, y: 0.0, yaw: 0.0}
+  row_02: {x: 4.0, y: 0.0, yaw: 0.0}
+  row_03: {x: 6.0, y: 4.0, yaw: 0.0}
+  row_04: {x: 8.0, y: 0.0, yaw: 0.0}
+  headland_north: {x: 2.0, y: 2.0, yaw: 0.0}
+  headland_south: {x: 6.0, y: -2.0, yaw: 0.0}
+edges:
+  row_01:
+    - {to: row_02, cost: 2.0, semantic_ref: headland_north}
+  row_02:
+    - {to: row_01, cost: 2.0, semantic_ref: headland_north}
+    - {to: row_04, cost: 3.0, semantic_ref: headland_south}
+  row_03: []
+  row_04:
+    - {to: row_02, cost: 3.0, semantic_ref: headland_south}

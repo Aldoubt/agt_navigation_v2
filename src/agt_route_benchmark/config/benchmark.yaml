@@ -1,0 +1,40 @@
+schema_version: "1.0"
+site_id: greenhouse_01
+platform_profile: profiles/platforms/mk_mini.yaml
+result_root: runtime/results/paper1_route_benchmark
+formal_planners:
+  - astar
+  - theta_star
+  - hybrid_astar
+  - state_lattice
+  - fields2cover
+  - ours
+p2p_planners:
+  - astar
+  - theta_star
+  - hybrid_astar
+  - state_lattice
+mission_planners:
+  - manual_waypoints_best_p2p
+  - fields2cover
+  - ours
+scenarios:
+  - S01_straight_row
+  - S02_90deg_entry
+  - S03_headland_uturn
+  - S04_narrow_headland
+  - S05_blocked_row
+  - S06_full_mission
+path_csv_schema:
+  - index
+  - x_m
+  - y_m
+  - yaw_rad
+  - direction
+  - segment_type
+  - semantic_ref
+formal_rules:
+  reject_development_fixture: true
+  require_complete_matrix: true
+  require_platform_route_acceptance_for_execution_ready: true
+  real_tracking_metrics_must_not_be_imputed: true

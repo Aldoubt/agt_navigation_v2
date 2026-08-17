@@ -1,0 +1,7 @@
+id: S02_90deg_entry
+level: p2p
+development_fixture: true
+description: Ninety-degree aisle entry.
+start: {x: 0.0, y: 0.0, yaw: 0.0}
+goal: {x: 5.0, y: 5.0, yaw: 1.57079632679}
+expected_constraints: [heading_change, footprint]

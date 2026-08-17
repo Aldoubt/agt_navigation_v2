@@ -1,0 +1,7 @@
+id: S03_headland_uturn
+level: p2p
+development_fixture: true
+description: Headland U-turn between adjacent rows.
+start: {x: 0.0, y: 0.0, yaw: 0.0}
+goal: {x: 0.0, y: 2.0, yaw: 3.14159265359}
+expected_constraints: [minimum_turning_radius, final_heading]

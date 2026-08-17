@@ -1,0 +1,17 @@
+Panels:
+  - Class: rviz_common/Displays
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Map
+      Enabled: true
+      Name: Global Map
+      Topic:
+        Value: /map
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Benchmark Path
+      Topic:
+        Value: /agt/benchmark/path_preview
+  Global Options:
+    Fixed Frame: map

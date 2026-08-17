@@ -1,0 +1,40 @@
+import json
+from pathlib import Path
+from agt_route_benchmark.contracts import ExperimentSpec, PlannerResult, ScenarioSpec, PathPoint
+from agt_route_benchmark.experiment import ExperimentRunner
+from agt_route_benchmark.adapters.base import PlannerAdapter
+
+
+class FakeAdapter(PlannerAdapter):
+    def plan(self, spec):
+        return PlannerResult(
+            planner_id=spec.planner_id,
+            success=True,
+            error_code="OK",
+            path=(PathPoint(0, 0, 0, "F", "P2P", ""), PathPoint(1, 0, 0, "F", "P2P", "")),
+            planning_time_s=0.01,
+        )
+
+
+def test_experiment_runner_emits_stable_artifacts(tmp_path: Path):
+    scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (1, 0, 0), (), {})
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True)
+    out = ExperimentRunner(tmp_path).run(spec, FakeAdapter())
+    assert (out / "experiment_manifest.json").exists()
+    assert (out / "metrics.json").exists()
+    assert (out / "path.csv").exists()
+    manifest = json.loads((out / "experiment_manifest.json").read_text())
+    assert manifest["planner_id"] == "astar"
+
+
+class FailingAdapter(PlannerAdapter):
+    def plan(self, spec):
+        return PlannerResult(spec.planner_id, False, "NO_PATH", (), 0.02)
+
+
+def test_failed_run_still_emits_report_without_path_csv(tmp_path: Path):
+    scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (1, 0, 0), (), {})
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True)
+    out = ExperimentRunner(tmp_path).run(spec, FailingAdapter())
+    assert (out / "planner_report.json").exists()
+    assert not (out / "path.csv").exists()
