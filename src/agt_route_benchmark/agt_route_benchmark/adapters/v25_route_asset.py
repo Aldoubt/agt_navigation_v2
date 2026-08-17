@@ -1,10 +1,27 @@
 from __future__ import annotations
 
+import csv
+import hashlib
+import math
 from pathlib import Path
 import time
 
 from .base import PlannerAdapter
 from ..contracts import ExperimentSpec, PathPoint, PlannerResult
+
+V25_ROUTE_FIELDS = (
+    "seq",
+    "segment_id",
+    "x",
+    "y",
+    "yaw",
+    "direction",
+    "v_ref",
+    "curvature",
+    "clearance",
+    "semantic_ref",
+    "event_ref",
+)
 
 
 def _segment_type(segment_id: str, semantic_ref: str) -> str:
@@ -16,6 +33,28 @@ def _segment_type(segment_id: str, semantic_ref: str) -> str:
     if "access" in token or "service" in token:
         return "ACCESS"
     return "SWATH"
+
+
+def _load_route_rows(path: Path) -> list[dict[str, str]]:
+    with path.open("r", encoding="utf-8", newline="") as stream:
+        reader = csv.DictReader(stream)
+        if tuple(reader.fieldnames or ()) != V25_ROUTE_FIELDS:
+            raise ValueError("V2.5 route CSV header is not canonical")
+        rows = list(reader)
+    if len(rows) < 2:
+        raise ValueError("V2.5 route CSV requires at least two samples")
+    for expected_seq, row in enumerate(rows):
+        if int(row["seq"]) != expected_seq:
+            raise ValueError("V2.5 route CSV seq must be contiguous from zero")
+        if row["direction"] not in ("F", "R"):
+            raise ValueError("V2.5 route direction must be F or R")
+        numeric = tuple(
+            float(row[key])
+            for key in ("x", "y", "yaw", "v_ref", "curvature", "clearance")
+        )
+        if not all(math.isfinite(value) for value in numeric):
+            raise ValueError("V2.5 route CSV contains non-finite numeric values")
+    return rows
 
 
 class V25RouteAssetAdapter(PlannerAdapter):
@@ -32,35 +71,27 @@ class V25RouteAssetAdapter(PlannerAdapter):
 
     def plan(self, spec: ExperimentSpec) -> PlannerResult:
         started = time.perf_counter()
-        try:
-            from agt_offline_assets.route_asset import load_route_csv
-        except ImportError as exc:
-            raise RuntimeError("V2.5 route bridge requires agt_offline_assets.route_asset") from exc
-
-        samples = load_route_csv(self.route_csv)
+        rows = _load_route_rows(self.route_csv)
         points = tuple(
             PathPoint(
-                float(sample.x),
-                float(sample.y),
-                float(sample.yaw),
-                str(sample.direction),
-                _segment_type(str(sample.segment_id), str(sample.semantic_ref)),
-                "" if str(sample.semantic_ref).startswith("<") else str(sample.semantic_ref),
+                float(row["x"]),
+                float(row["y"]),
+                float(row["yaw"]),
+                row["direction"],
+                _segment_type(row["segment_id"], row["semantic_ref"]),
+                "" if row["semantic_ref"].startswith("<") else row["semantic_ref"],
             )
-            for sample in samples
+            for row in rows
         )
         visited = tuple(
-            dict.fromkeys(
-                point.semantic_ref
-                for point in points
-                if point.semantic_ref
-            )
+            dict.fromkeys(point.semantic_ref for point in points if point.semantic_ref)
         )
         reachable = (
             tuple(spec.scenario.reference_reachable_semantic_ids)
             if spec.scenario.reference_reachable_semantic_ids is not None
             else visited
         )
+        route_sha256 = hashlib.sha256(self.route_csv.read_bytes()).hexdigest()
         return PlannerResult(
             planner_id=spec.planner_id,
             success=True,
@@ -71,6 +102,7 @@ class V25RouteAssetAdapter(PlannerAdapter):
             visited_semantic_ids=visited,
             metadata={
                 "source_route_csv": str(self.route_csv),
+                "source_route_sha256": route_sha256,
                 "source_backend": "agt_navigation_v2_route_asset",
                 "geometry_modified_by_benchmark": False,
             },
