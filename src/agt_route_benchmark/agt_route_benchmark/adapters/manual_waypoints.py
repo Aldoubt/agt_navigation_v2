@@ -8,11 +8,18 @@ from ..contracts import ExperimentSpec, PlannerResult, ScenarioSpec
 
 
 class ManualWaypointAdapter(PlannerAdapter):
-    def __init__(self, waypoints: Sequence[tuple[float, float, float]], p2p_adapter: PlannerAdapter):
+    def __init__(
+        self,
+        waypoints: Sequence[tuple[float, float, float]],
+        p2p_adapter: PlannerAdapter,
+        *,
+        visited_semantic_ids: Sequence[str] = (),
+    ):
         if len(waypoints) < 2:
             raise ValueError("manual waypoint baseline requires at least two waypoints")
         self.waypoints = tuple((float(x), float(y), float(yaw)) for x, y, yaw in waypoints)
         self.p2p_adapter = p2p_adapter
+        self.visited_semantic_ids = tuple(dict.fromkeys(str(value) for value in visited_semantic_ids if str(value)))
 
     def plan(self, spec: ExperimentSpec) -> PlannerResult:
         started = time.perf_counter()
@@ -45,17 +52,33 @@ class ManualWaypointAdapter(PlannerAdapter):
                     f"MANUAL_SEGMENT_{index}_{result.error_code}",
                     (),
                     time.perf_counter() - started,
-                    metadata={"manual_waypoints": [list(p) for p in self.waypoints], "failed_segment": index},
+                    metadata={
+                        "manual_waypoints": [list(point) for point in self.waypoints],
+                        "manual_target_semantic_ids": list(self.visited_semantic_ids),
+                        "failed_segment": index,
+                    },
                 )
             points = list(result.path)
             if merged and points and merged[-1] == points[0]:
                 points = points[1:]
             merged.extend(points)
+
+        reachable = (
+            tuple(spec.scenario.reference_reachable_semantic_ids)
+            if spec.scenario.reference_reachable_semantic_ids is not None
+            else self.visited_semantic_ids
+        )
         return PlannerResult(
             spec.planner_id,
             True,
             "OK",
             tuple(merged),
             planning_time,
-            metadata={"manual_waypoints": [list(p) for p in self.waypoints]},
+            reachable_semantic_ids=reachable,
+            visited_semantic_ids=self.visited_semantic_ids,
+            metadata={
+                "manual_waypoints": [list(point) for point in self.waypoints],
+                "manual_target_semantic_ids": list(self.visited_semantic_ids),
+                "p2p_planner_id": getattr(self.p2p_adapter, "planner_id", "unknown"),
+            },
         )
