@@ -5,6 +5,7 @@ import argparse
 import json
 import hashlib
 import math
+import sys
 from pathlib import Path
 
 from agt_route_benchmark.adapters.fields2cover import Fields2CoverAdapter
@@ -28,6 +29,16 @@ from agt_route_benchmark.validation import evaluate_normalized_path
 
 def _quat_to_yaw(q) -> float:
     return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+
+def _benchmark_cli_args(argv: list[str]) -> list[str]:
+    try:
+        from rclpy.utilities import remove_ros_args
+        return list(remove_ros_args(args=argv)[1:])
+    except ImportError:
+        if "--ros-args" in argv:
+            return list(argv[1:argv.index("--ros-args")])
+        return list(argv[1:])
 
 
 def _nav2_call(server_wait_s: float = 20.0, result_wait_s: float = 30.0):
@@ -115,7 +126,7 @@ def main() -> int:
     parser.add_argument("--coverage-components-json", type=Path, help="Development-only frozen coverage components")
     parser.add_argument("--coverage-live", action="store_true")
     parser.add_argument("--semantic-map", type=Path)
-    args = parser.parse_args()
+    args = parser.parse_args(_benchmark_cli_args(sys.argv))
 
     scenario = load_scenario(args.scenario, formal=args.formal)
     profile = load_platform_profile(args.platform_profile)
