@@ -16,6 +16,21 @@ def test_length_reverse_and_curvature_metrics():
     assert abs(m["max_abs_curvature_1pm"] - math.pi / 4) < 1e-9
 
 
+def test_reverse_segment_count_means_contiguous_reverse_maneuvers():
+    pts = [
+        PathPoint(0, 0, 0, "F", "P2P", ""),
+        PathPoint(1, 0, 0, "R", "TURN", ""),
+        PathPoint(2, 0, 0, "R", "TURN", ""),
+        PathPoint(3, 0, 0, "R", "TURN", ""),
+        PathPoint(4, 0, 0, "F", "P2P", ""),
+        PathPoint(5, 0, 0, "R", "TURN", ""),
+        PathPoint(6, 0, 0, "R", "TURN", ""),
+    ]
+    m = compute_path_metrics(pts)
+    assert m["reverse_segment_count"] == 2
+    assert m["reverse_distance_m"] == 5.0
+
+
 def test_mission_metrics_keep_unreachable_tasks_visible():
     m = compute_mission_metrics(
         required_semantic_ids=["row_1", "row_2", "row_3"],
