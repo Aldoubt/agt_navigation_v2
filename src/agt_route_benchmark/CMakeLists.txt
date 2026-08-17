@@ -15,6 +15,7 @@ install(PROGRAMS
   scripts/route_tracking_tf_recorder.py
   scripts/route_csv_to_path.py
   scripts/route_benchmark_accept_site.py
+  scripts/route_benchmark_generate_synthetic.py
   scripts/ackermann_kinematic_sim.py
   scripts/rpp_tracking_sim_trial.py
   DESTINATION lib/${PROJECT_NAME}
@@ -55,6 +56,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_runner_ros_args test/test_runner_ros_args.py)
   ament_add_pytest_test(test_preflight test/test_preflight.py)
   ament_add_pytest_test(test_endpoint_metrics test/test_endpoint_metrics.py)
+  ament_add_pytest_test(test_synthetic_greenhouse test/test_synthetic_greenhouse.py)
 endif()
 
 ament_package()
