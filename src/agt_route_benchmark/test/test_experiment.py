@@ -3,6 +3,7 @@ from pathlib import Path
 from agt_route_benchmark.contracts import ExperimentSpec, PlannerResult, ScenarioSpec, PathPoint
 from agt_route_benchmark.experiment import ExperimentRunner
 from agt_route_benchmark.adapters.base import PlannerAdapter
+from agt_route_benchmark.preflight import PreflightResult
 
 
 class FakeAdapter(PlannerAdapter):
@@ -61,6 +62,32 @@ def test_failed_run_still_emits_report_without_path_csv(tmp_path: Path):
     spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True, metadata={"site_snapshot_sha256": "a" * 64})
     out = ExperimentRunner(tmp_path).run(spec, FailingAdapter())
     assert (out / "planner_report.json").exists()
+    assert not (out / "path.csv").exists()
+
+
+def test_invalid_preflight_emits_audit_result_without_calling_planner(tmp_path: Path):
+    class MustNotRunAdapter(PlannerAdapter):
+        def plan(self, spec):
+            raise AssertionError("planner must not run for invalid scenario input")
+
+    scenario = ScenarioSpec("S01_straight_row", "p2p", True, (0, 0, 0), (6, 0, 0), (), {})
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=False)
+    preflight = PreflightResult(
+        False,
+        ("GOAL_OUT_OF_MAP",),
+        {"start_cell": [12, 12], "goal_cell": None},
+    )
+
+    out = ExperimentRunner(tmp_path).run(spec, MustNotRunAdapter(), preflight_result=preflight)
+    report = json.loads((out / "planner_report.json").read_text())
+    metrics = json.loads((out / "metrics.json").read_text())
+    manifest = json.loads((out / "experiment_manifest.json").read_text())
+
+    assert report["error_code"] == "INVALID_SCENARIO"
+    assert report["metadata"]["preflight_error_codes"] == ["GOAL_OUT_OF_MAP"]
+    assert metrics["success"] is False
+    assert metrics["error_code"] == "INVALID_SCENARIO"
+    assert manifest["metadata"]["preflight"]["error_codes"] == ["GOAL_OUT_OF_MAP"]
     assert not (out / "path.csv").exists()
 
 
