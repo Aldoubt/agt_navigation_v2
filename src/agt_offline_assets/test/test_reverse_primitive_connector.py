@@ -1,6 +1,7 @@
 import math
 
 import numpy as np
+import pytest
 
 import agt_offline_assets.reverse_primitive_connector as r6b
 from agt_offline_assets.agricultural_coverage_ordering import ConnectorRequest
@@ -130,6 +131,14 @@ def _a35_api():
     assert diagnostics_type is not None, "missing A3.5 diagnostics type"
     assert edge_reason is not None, "missing A3.5 edge rejection reason API"
     return diagnostics_type, edge_reason
+
+
+def _a36_curvature_api():
+    fractions = getattr(r6b, "_PRIMITIVE_CURVATURE_FRACTIONS", None)
+    values = getattr(r6b, "_primitive_curvature_values", None)
+    assert fractions is not None, "missing A3.6 curvature fraction contract"
+    assert values is not None, "missing A3.6 primitive curvature helper"
+    return fractions, values
 
 
 def _assert_a35_accounting(diagnostics):
@@ -398,3 +407,102 @@ def test_a35_accounting_holds_on_existing_executable_reverse_fixture():
     assert result.backend == REVERSE_PRIMITIVE_BACKEND
     assert result.samples
     _assert_a35_accounting(result.diagnostics)
+
+
+def test_a36_curvature_family_is_fixed_five_level_and_respects_minimum_radius():
+    fractions, values_fn = _a36_curvature_api()
+    radius = 1.5
+    assert tuple(fractions) == (-1.0, -0.5, 0.0, 0.5, 1.0)
+    values = tuple(values_fn(radius))
+    expected = tuple(fraction / radius for fraction in fractions)
+    assert values == expected
+    assert len(values) == 5
+    assert values[2] == 0.0
+    assert max(abs(value) for value in values) <= (1.0 / radius) + 1.0e-12
+
+
+@pytest.mark.parametrize("radius", [0.0, -1.0, float("inf"), float("-inf"), float("nan")])
+def test_a36_curvature_helper_rejects_invalid_radius(radius):
+    _fractions, values_fn = _a36_curvature_api()
+    with pytest.raises(ValueError, match="radius"):
+        values_fn(radius)
+
+
+def _a36_intermediate_goal_request(connector_id="connector_a36_half_curvature"):
+    radius = 1.5
+    length = 0.30
+    curvature = 0.5 / radius
+    yaw = curvature * length
+    x = math.sin(yaw) / curvature
+    y = (1.0 - math.cos(yaw)) / curvature
+    return ConnectorRequest(
+        connector_id=connector_id,
+        from_aisle_id="aisle_002",
+        to_aisle_id="aisle_003",
+        turn_zone_id="turn_low_u",
+        side="LOW_U",
+        start_pose=(0.0, 0.0, -1.6, 0.0),
+        goal_pose=(x, y, -1.6, yaw),
+    )
+
+
+def test_a36_intermediate_curvature_recovers_one_primitive_reachable_state():
+    request = _a36_intermediate_goal_request()
+    boundary = SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=((-2.0, -2.0), (2.0, -2.0), (2.0, 2.0), (-2.0, 2.0)),
+    )
+    cfg = ReversePrimitiveConnectorConfig(
+        primitive_length_m=0.30,
+        collision_sample_step_m=0.10,
+        goal_position_tolerance_m=0.005,
+        goal_yaw_tolerance_deg=1.0,
+        goal_shot_distance_m=0.01,
+        max_cusps=1,
+        max_expansions=100,
+        max_path_length_m=0.31,
+    )
+    result = derive_reverse_primitive_connector_plan(
+        (request,),
+        _admission(request.connector_id),
+        _zones(),
+        _grid(),
+        _vehicle(),
+        cfg,
+        site_boundary=boundary,
+    ).connectors[0]
+
+    assert result.status == "FORWARD_PRIMITIVE_PREVIEW_FREE"
+    assert result.path_length_m is not None
+    assert result.path_length_m <= 0.31 + 1.0e-9
+    assert result.reverse_distance_m == pytest.approx(0.0, abs=1.0e-9)
+    assert result.goal_position_error_m is not None
+    assert result.goal_position_error_m <= cfg.goal_position_tolerance_m
+    assert result.goal_yaw_error_rad is not None
+    assert result.goal_yaw_error_rad <= math.radians(cfg.goal_yaw_tolerance_deg)
+    assert any(
+        abs(sample.curvature_per_m - (0.5 / _vehicle().minimum_turning_radius_m))
+        <= 1.0e-12
+        for sample in result.samples
+    )
+
+
+def test_a36_path_length_short_circuit_accounts_for_five_primitive_categories():
+    request = _request("connector_a36_path_limit")
+    result = derive_reverse_primitive_connector_plan(
+        (request,),
+        _admission(request.connector_id),
+        _zones(),
+        _grid(),
+        _vehicle(),
+        ReversePrimitiveConnectorConfig(
+            max_path_length_m=0.10,
+            max_expansions=50,
+        ),
+    ).connectors[0]
+    diagnostics = result.diagnostics
+    assert result.status == "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION"
+    assert diagnostics.search_expansions > 0
+    assert diagnostics.primitive_edges_considered == 5 * diagnostics.search_expansions
+    assert diagnostics.primitive_edges_rejected_path_length == diagnostics.primitive_edges_considered
+    _assert_a35_accounting(diagnostics)
