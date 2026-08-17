@@ -2,6 +2,7 @@ import pytest
 from agt_route_benchmark.batch import (
     MatrixCell,
     canonical_expected_cells,
+    planner_outcome_counts,
     validate_batch_completeness,
     validate_canonical_batch_completeness,
 )
@@ -47,3 +48,20 @@ def test_canonical_formal_matrix_rejects_one_missing_cell():
 def test_canonical_formal_matrix_accepts_exact_valid_cells():
     cells = [MatrixCell(s, p, "OK") for s, p in canonical_expected_cells()]
     validate_canonical_batch_completeness(cells, formal=True)
+
+
+def test_planner_outcome_counts_excludes_invalid_scenario_from_denominator():
+    counts = planner_outcome_counts(
+        [
+            MatrixCell("S01_straight_row", "astar", "OK"),
+            MatrixCell("S02_90deg_entry", "astar", "NO_PATH"),
+            MatrixCell("S03_headland_uturn", "astar", "INVALID_SCENARIO"),
+        ]
+    )
+
+    assert counts == {
+        "planner_evaluated_count": 2,
+        "planner_success_count": 1,
+        "planner_failure_count": 1,
+        "invalid_scenario_count": 1,
+    }
