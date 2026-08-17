@@ -4,5 +4,6 @@ development_fixture: true
 description: Full agricultural mission; formal semantic IDs are replaced only after greenhouse_01 semantic acceptance.
 mission:
   required_semantic_ids: [row_01, row_02, row_03, row_04]
+reference_reachable_semantic_ids: [row_01, row_02, row_04]
 expected_constraints: [maximum_feasible_coverage, semantic_topology, task_ordering, ackermann_connectors]
 graph_fixture: fixtures/S06_development_graph.yaml

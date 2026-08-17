@@ -26,7 +26,8 @@ python3 src/agt_route_benchmark/scripts/route_benchmark_run.py \
   --scenario src/agt_route_benchmark/scenarios/S06_full_mission.yaml \
   --planner ours \
   --platform-profile profiles/platforms/mk_mini.yaml \
-  --result-root runtime/results/paper1_route_benchmark
+  --result-root runtime/results/paper1_route_benchmark \
+  --run-id run_001
 ```
 
 The output cell contains:
@@ -68,6 +69,10 @@ python3 src/agt_route_benchmark/scripts/route_benchmark_run.py \
 ## Fields2Cover baseline
 
 The existing `agt_coverage_planning` package remains the authoritative OpenNav/Fields2Cover adapter and validator. The benchmark adapter consumes reconstructed SWATH/CONNECTION components rather than RViz markers. Until the direct ROS bridge is added, a component JSON can be imported with `--coverage-components-json`; lack of the dependency is reported as `SKIPPED_DEPENDENCY`, never silently replaced by another planner.
+
+## Reference reachable truth
+
+Mission-level `reachable_task_coverage_ratio` is evaluated against a scenario-level `reference_reachable_semantic_ids` set, not against each planner's own claimed reachable set. This reference is an evaluation truth artifact accepted with the site/scenario and is not generated per planner. Formal mission scenarios require it.
 
 ## Proposed method contract
 

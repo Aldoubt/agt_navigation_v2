@@ -17,10 +17,13 @@ class ExperimentRunner:
     def _run_dir(self, spec: ExperimentSpec) -> Path:
         key = f"{spec.site_id}|{spec.scenario.scenario_id}|{spec.planner_id}|{spec.platform_profile}"
         suffix = hashlib.sha256(key.encode()).hexdigest()[:10]
-        return self.result_root / spec.site_id / spec.scenario.scenario_id / f"{spec.planner_id}-{suffix}"
+        safe_run_id = spec.run_id.replace("/", "_").replace("\\", "_")
+        return self.result_root / spec.site_id / spec.scenario.scenario_id / f"{spec.planner_id}-{suffix}-{safe_run_id}"
 
     def run(self, spec: ExperimentSpec, adapter: PlannerAdapter) -> Path:
         out = self._run_dir(spec)
+        if spec.formal and out.exists():
+            raise FileExistsError(f"formal result already exists: {out}")
         out.mkdir(parents=True, exist_ok=True)
         result = adapter.plan(spec)
         manifest = {
@@ -33,6 +36,7 @@ class ExperimentRunner:
             "formal": spec.formal,
             "development_fixture": spec.scenario.development_fixture,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "run_id": spec.run_id,
             "metadata": dict(spec.metadata),
         }
         write_json_atomic(manifest, out / "experiment_manifest.json")
@@ -57,7 +61,11 @@ class ExperimentRunner:
                 metrics.update(
                     compute_mission_metrics(
                         required_semantic_ids=spec.scenario.required_semantic_ids,
-                        reachable_semantic_ids=result.reachable_semantic_ids,
+                        reachable_semantic_ids=(
+                            spec.scenario.reference_reachable_semantic_ids
+                            if spec.scenario.reference_reachable_semantic_ids is not None
+                            else result.reachable_semantic_ids
+                        ),
                         visited_semantic_ids=result.visited_semantic_ids,
                         path_points=result.path,
                     )

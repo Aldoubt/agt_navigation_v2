@@ -51,3 +51,18 @@ def test_fields2cover_normalizer_preserves_swath_connection_semantics():
     assert result.success
     assert result.visited_semantic_ids == ("row_1", "row_2")
     assert [p.segment_type for p in result.path] == ["SWATH", "SWATH", "CONNECTION", "SWATH"]
+
+
+def test_nav2_adapter_infers_reverse_from_vehicle_heading_and_path_tangent():
+    scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (-1, 0, 0), (), {})
+    spec = ExperimentSpec("greenhouse_01", "hybrid_astar", scenario, formal=False)
+
+    def call(_plugin, _start, _goal):
+        return (
+            PathPoint(0, 0, 0, "UNKNOWN", "P2P", ""),
+            PathPoint(-1, 0, 0, "UNKNOWN", "P2P", ""),
+        )
+
+    result = Nav2P2PAdapter("hybrid_astar", call).plan(spec)
+    assert result.success
+    assert [p.direction for p in result.path] == ["R", "R"]

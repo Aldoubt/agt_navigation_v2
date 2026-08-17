@@ -77,6 +77,7 @@ def main() -> int:
     parser.add_argument("--platform-profile", type=Path, default=Path("profiles/platforms/mk_mini.yaml"))
     parser.add_argument("--result-root", type=Path, default=Path("runtime/results/paper1_route_benchmark"))
     parser.add_argument("--formal", action="store_true")
+    parser.add_argument("--run-id", default="run_001")
     parser.add_argument("--nav2-live", action="store_true")
     parser.add_argument("--graph", type=Path)
     parser.add_argument("--coverage-components-json", type=Path)
@@ -98,6 +99,7 @@ def main() -> int:
             "min_turning_radius_m": profile.min_turning_radius_m,
             "execution_ready": profile.execution_ready,
         },
+        run_id=args.run_id,
     )
 
     cleanup = None

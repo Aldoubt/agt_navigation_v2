@@ -34,6 +34,7 @@ def load_scenario(path: Path | str, formal: bool = False) -> ScenarioSpec:
     level = str(data["level"])
     start = goal = None
     required: tuple[str, ...] = ()
+    reference_reachable: tuple[str, ...] | None = None
     if level == "p2p":
         if "start" not in data:
             raise ValueError("p2p scenario missing start")
@@ -46,7 +47,17 @@ def load_scenario(path: Path | str, formal: bool = False) -> ScenarioSpec:
         if not isinstance(mission, dict) or not mission.get("required_semantic_ids"):
             raise ValueError("mission scenario missing required_semantic_ids")
         required = tuple(str(v) for v in mission["required_semantic_ids"])
+        if "reference_reachable_semantic_ids" in data:
+            raw_reference = data["reference_reachable_semantic_ids"]
+            if not isinstance(raw_reference, list):
+                raise ValueError("reference_reachable_semantic_ids must be a list")
+            reference_reachable = tuple(str(v) for v in raw_reference)
+            unknown = sorted(set(reference_reachable) - set(required))
+            if unknown:
+                raise ValueError(f"reference reachable contains non-required semantic IDs: {unknown}")
+        elif formal:
+            raise ValueError("formal mission scenario requires reference_reachable_semantic_ids")
     else:
         raise ValueError("scenario level must be p2p or mission")
-    metadata = {k: v for k, v in data.items() if k not in {"id", "level", "development_fixture", "start", "goal", "mission"}}
-    return ScenarioSpec(str(data["id"]), level, development_fixture, start, goal, required, metadata)
+    metadata = {k: v for k, v in data.items() if k not in {"id", "level", "development_fixture", "start", "goal", "mission", "reference_reachable_semantic_ids"}}
+    return ScenarioSpec(str(data["id"]), level, development_fixture, start, goal, required, metadata, reference_reachable)

@@ -54,6 +54,7 @@ class ScenarioSpec:
     goal: Pose2D | None
     required_semantic_ids: tuple[str, ...]
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    reference_reachable_semantic_ids: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         validate_matrix_name(self.scenario_id, SCENARIO_IDS)
@@ -69,6 +70,7 @@ class ExperimentSpec:
     formal: bool = False
     platform_profile: str = "profiles/platforms/mk_mini.yaml"
     metadata: Mapping[str, Any] = field(default_factory=dict)
+    run_id: str = "run_001"
 
 
 @dataclass(frozen=True)

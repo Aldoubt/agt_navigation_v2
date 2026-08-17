@@ -38,3 +38,16 @@ def test_failed_run_still_emits_report_without_path_csv(tmp_path: Path):
     out = ExperimentRunner(tmp_path).run(spec, FailingAdapter())
     assert (out / "planner_report.json").exists()
     assert not (out / "path.csv").exists()
+
+
+def test_formal_rerun_does_not_overwrite_existing_result(tmp_path: Path):
+    scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (1, 0, 0), (), {}, ())
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True)
+    runner = ExperimentRunner(tmp_path)
+    runner.run(spec, FakeAdapter())
+    try:
+        runner.run(spec, FakeAdapter())
+    except FileExistsError as exc:
+        assert "formal result already exists" in str(exc)
+    else:
+        raise AssertionError("formal rerun silently overwrote experiment")

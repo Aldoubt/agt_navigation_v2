@@ -31,3 +31,14 @@ def test_mission_metrics_keep_unreachable_tasks_visible():
     assert m["reachable_task_coverage_ratio"] == 1.0
     assert m["required_but_unreachable"] == ["row_2"]
     assert m["deadhead_distance_m"] == 1.0
+
+
+def test_mission_metrics_use_independent_reference_reachable_set():
+    m = compute_mission_metrics(
+        required_semantic_ids=["row_1", "row_2", "row_3"],
+        reachable_semantic_ids=["row_1", "row_3"],
+        visited_semantic_ids=["row_1"],
+        path_points=[PathPoint(0, 0, 0, "F", "SWATH", "row_1")],
+    )
+    assert m["reachable_task_coverage_ratio"] == 0.5
+    assert m["missed_reachable"] == ["row_3"]

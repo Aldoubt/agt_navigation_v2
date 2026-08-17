@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+import math
 import time
 
 from .base import PlannerAdapter
@@ -14,6 +15,25 @@ NAV2_PLUGIN_BY_PLANNER = {
 }
 
 PlannerCall = Callable[[str, tuple[float, float, float], tuple[float, float, float]], Sequence[PathPoint]]
+
+
+def _infer_missing_directions(points: tuple[PathPoint, ...]) -> tuple[PathPoint, ...]:
+    if len(points) < 2:
+        return points
+    inferred: list[str] = []
+    for a, b in zip(points, points[1:]):
+        dx = b.x_m - a.x_m
+        dy = b.y_m - a.y_m
+        if math.hypot(dx, dy) <= 1e-9:
+            inferred.append("UNKNOWN")
+            continue
+        dot = math.cos(a.yaw_rad) * dx + math.sin(a.yaw_rad) * dy
+        inferred.append("F" if dot >= 0.0 else "R")
+    inferred.append(inferred[-1])
+    return tuple(
+        PathPoint(p.x_m, p.y_m, p.yaw_rad, inferred[i] if p.direction == "UNKNOWN" else p.direction, p.segment_type, p.semantic_ref)
+        for i, p in enumerate(points)
+    )
 
 
 class Nav2P2PAdapter(PlannerAdapter):
@@ -44,7 +64,7 @@ class Nav2P2PAdapter(PlannerAdapter):
                 metadata={"nav2_plugin_id": self.plugin_id},
             )
         try:
-            points = tuple(self._planner_call(self.plugin_id, spec.scenario.start, spec.scenario.goal))
+            points = _infer_missing_directions(tuple(self._planner_call(self.plugin_id, spec.scenario.start, spec.scenario.goal)))
         except Exception as exc:
             return PlannerResult(
                 self.planner_id,
