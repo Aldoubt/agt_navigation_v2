@@ -20,9 +20,9 @@ Visualization Manager:
         Value: /agt/benchmark/executed_path
     - Class: rviz_default_plugins/Path
       Enabled: true
-      Name: RPP Lookahead Arc
+      Name: RPP Lookahead Collision Arc
       Topic:
-        Value: /lookahead_arc
+        Value: /lookahead_collision_arc
     - Class: rviz_default_plugins/Odometry
       Enabled: true
       Name: MKmini Sim Odometry
