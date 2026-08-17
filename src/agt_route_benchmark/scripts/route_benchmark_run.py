@@ -20,6 +20,7 @@ from agt_route_benchmark.graph_io import load_agricultural_graph
 from agt_route_benchmark.manual_waypoint_io import load_manual_waypoint_plan
 from agt_route_benchmark.path_io import read_path_csv
 from agt_route_benchmark.map_io import load_nav2_map
+from agt_route_benchmark.preflight import evaluate_p2p_preflight
 from agt_route_benchmark.profile import load_platform_profile
 from agt_route_benchmark.renderer import render_route
 from agt_route_benchmark.scenario import load_scenario
@@ -147,6 +148,9 @@ def main() -> int:
     if render_map_yaml is None and snapshot is not None:
         render_map_yaml = Path(snapshot["assets"]["map_yaml"]["path"])
     nav_map = load_nav2_map(render_map_yaml) if render_map_yaml is not None else None
+    preflight_result = None
+    if scenario.level == "p2p" and nav_map is not None:
+        preflight_result = evaluate_p2p_preflight(scenario, nav_map, profile)
 
     evaluation_semantic_map = args.semantic_map
     if evaluation_semantic_map is None and snapshot is not None:
@@ -230,7 +234,9 @@ def main() -> int:
     elif args.planner in ("astar", "theta_star", "hybrid_astar", "state_lattice"):
         if args.formal and not args.nav2_live:
             raise SystemExit("formal P2P baselines require --nav2-live")
-        if args.nav2_live:
+        if preflight_result is not None and not preflight_result.valid:
+            adapter = Nav2P2PAdapter(args.planner)
+        elif args.nav2_live:
             call, nav2_node, rclpy = _nav2_call()
             cleanup = (nav2_node, rclpy)
             adapter = Nav2P2PAdapter(args.planner, call)
@@ -253,6 +259,7 @@ def main() -> int:
             spec,
             adapter,
             path_evaluator=path_evaluator,
+            preflight_result=preflight_result,
         )
         path_csv = out / "path.csv"
         if path_csv.exists():
