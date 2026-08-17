@@ -27,13 +27,19 @@ class StraightConnector(PlannerAdapter):
         ), 0.001)
 
 
-def test_manual_waypoints_preserves_authored_waypoints_in_metadata():
-    scenario = ScenarioSpec("S06_full_mission", "mission", False, None, None, ("row_1", "row_2"), {})
+def test_manual_waypoints_preserves_authored_waypoints_and_target_semantics():
+    scenario = ScenarioSpec("S06_full_mission", "mission", False, None, None, ("row_1", "row_2"), {}, ("row_1", "row_2"))
     spec = ExperimentSpec("greenhouse_01", "manual_waypoints_best_p2p", scenario, True)
-    adapter = ManualWaypointAdapter([(0, 0, 0), (1, 0, 0), (2, 0, 0)], StraightConnector())
+    adapter = ManualWaypointAdapter(
+        [(0, 0, 0), (1, 0, 0), (2, 0, 0)],
+        StraightConnector(),
+        visited_semantic_ids=("row_1", "row_2"),
+    )
     result = adapter.plan(spec)
     assert result.success
     assert result.metadata["manual_waypoints"] == [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]]
+    assert result.visited_semantic_ids == ("row_1", "row_2")
+    assert result.reachable_semantic_ids == ("row_1", "row_2")
     assert len(result.path) == 3
 
 
