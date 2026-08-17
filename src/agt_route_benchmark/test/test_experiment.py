@@ -27,6 +27,30 @@ def test_experiment_runner_emits_stable_artifacts(tmp_path: Path):
     assert manifest["planner_id"] == "astar"
 
 
+def test_experiment_runner_merges_offline_validation_metrics(tmp_path: Path):
+    scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (1, 0, 0), (), {})
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True, metadata={"site_snapshot_sha256": "a" * 64})
+
+    def evaluator(points):
+        assert len(points) == 2
+        return {
+            "execution_feasible": False,
+            "collision_free": False,
+            "kinematic_feasible": True,
+            "min_clearance_m": 0.08,
+            "footprint_collision_count": 2,
+            "validation_error_codes": ["footprint_collision"],
+        }
+
+    out = ExperimentRunner(tmp_path).run(spec, FakeAdapter(), path_evaluator=evaluator)
+    metrics = json.loads((out / "metrics.json").read_text())
+    assert metrics["execution_feasible"] is False
+    assert metrics["collision_free"] is False
+    assert metrics["kinematic_feasible"] is True
+    assert metrics["min_clearance_m"] == 0.08
+    assert metrics["footprint_collision_count"] == 2
+
+
 class FailingAdapter(PlannerAdapter):
     def plan(self, spec):
         return PlannerResult(spec.planner_id, False, "NO_PATH", (), 0.02)
