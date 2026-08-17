@@ -39,7 +39,9 @@ planner_server:
       non_straight_penalty: 1.2
       cost_penalty: 2.0
       analytic_expansion_ratio: 3.5
-      analytic_expansion_max_length: 4.5
+      # 5 x MK-mini minimum turning radius; keeps the strong baseline away from
+      # Nav2's documented short-expansion regime.
+      analytic_expansion_max_length: 7.5
 
     GridBasedLattice:
       plugin: "nav2_smac_planner/SmacPlannerLattice"
@@ -51,9 +53,10 @@ planner_server:
       # Development-only default. Formal runs must replace this with a control
       # set generated for MK-mini min_turning_radius=1.5 m and the map resolution.
       lattice_filepath: ""
+      allow_reverse_expansion: true
       reverse_penalty: 2.0
       change_penalty: 0.0
       non_straight_penalty: 1.2
       cost_penalty: 2.0
       analytic_expansion_ratio: 3.5
-      analytic_expansion_max_length: 4.5
+      analytic_expansion_max_length: 7.5
