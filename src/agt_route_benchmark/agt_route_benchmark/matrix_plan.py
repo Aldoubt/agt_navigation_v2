@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 from pathlib import Path
 import shlex
 from typing import Iterable
@@ -35,14 +36,51 @@ def _path_value(path: Path | str | None) -> Path | None:
     return Path(path).expanduser().resolve()
 
 
-def _existing_result(result_root: Path, site_id: str, scenario_id: str, planner_id: str) -> Path | None:
+def _snapshot_identity(path: Path | None) -> str | None:
+    if path is None or not path.is_file():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    value = str(data.get("snapshot_sha256", "")) if isinstance(data, dict) else ""
+    if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
+        raise ValueError("site snapshot must contain a valid 64-hex snapshot_sha256")
+    return value
+
+
+def _existing_result(
+    result_root: Path,
+    site_id: str,
+    scenario_id: str,
+    planner_id: str,
+    *,
+    formal: bool,
+    site_snapshot_sha256: str | None,
+) -> Path | None:
     base = result_root / site_id / scenario_id
     if not base.is_dir():
         return None
     candidates = sorted(base.glob(f"{planner_id}-*"))
     for candidate in reversed(candidates):
-        if (candidate / "planner_report.json").is_file() and (candidate / "metrics.json").is_file():
+        report_path = candidate / "planner_report.json"
+        metrics_path = candidate / "metrics.json"
+        manifest_path = candidate / "experiment_manifest.json"
+        if not report_path.is_file() or not metrics_path.is_file():
+            continue
+        if not formal:
             return candidate
+        if site_snapshot_sha256 is None or not manifest_path.is_file():
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(manifest, dict) or manifest.get("formal") is not True:
+            continue
+        metadata = manifest.get("metadata")
+        if not isinstance(metadata, dict):
+            continue
+        if str(metadata.get("site_snapshot_sha256", "")) != site_snapshot_sha256:
+            continue
+        return candidate
     return None
 
 
@@ -52,10 +90,6 @@ def _missing(required: Iterable[tuple[str, Path | None]]) -> tuple[str, ...]:
 
 def _arg(name: str, value) -> str:
     return f"{name}:={shlex.quote(str(value))}"
-
-
-def _shell(*parts) -> str:
-    return " ".join(shlex.quote(str(part)) for part in parts)
 
 
 def build_execution_plan(
@@ -82,11 +116,19 @@ def build_execution_plan(
     ours_route_csv = _path_value(ours_route_csv)
     lattice_filepath = _path_value(lattice_filepath)
     site_snapshot = _path_value(site_snapshot)
+    snapshot_sha256 = _snapshot_identity(site_snapshot) if formal else None
 
     output: list[ExecutionCell] = []
     for scenario_id, planner_id in canonical_expected_cells():
         scenario = scenario_dir / SCENARIO_FILE_BY_ID[scenario_id]
-        existing = _existing_result(result_root, site_id, scenario_id, planner_id)
+        existing = _existing_result(
+            result_root,
+            site_id,
+            scenario_id,
+            planner_id,
+            formal=formal,
+            site_snapshot_sha256=snapshot_sha256,
+        )
 
         if planner_id in {"astar", "theta_star", "hybrid_astar", "state_lattice"}:
             runtime_kind = "nav2_p2p"
