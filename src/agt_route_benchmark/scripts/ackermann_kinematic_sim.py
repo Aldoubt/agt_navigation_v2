@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import math
 
-from geometry_msgs.msg import TransformStamped, Twist
-from nav_msgs.msg import Odometry
+from geometry_msgs.msg import PoseStamped, TransformStamped, Twist
+from nav_msgs.msg import Odometry, Path as NavPath
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from tf2_ros import TransformBroadcaster
 
 from agt_route_benchmark.ackermann_kinematics import AckermannState, step_ackermann_twist
@@ -23,6 +24,9 @@ class AckermannKinematicSim(Node):
         self._base_frame = str(self.declare_parameter("base_frame", "base_footprint").value)
         self._odom_topic = str(self.declare_parameter("odom_topic", "/agt/mapping/odometry").value)
         self._cmd_topic = str(self.declare_parameter("cmd_vel_topic", "/agt/navigation/cmd_vel_raw").value)
+        self._executed_path_topic = str(
+            self.declare_parameter("executed_path_topic", "/agt/benchmark/executed_path").value
+        )
         self._state = AckermannState(
             float(self.declare_parameter("initial_x", 0.0).value),
             float(self.declare_parameter("initial_y", 0.0).value),
@@ -38,6 +42,12 @@ class AckermannKinematicSim(Node):
         self._last_command_s = float("-inf")
         self._last_update_s = self._now_s()
         self._odom_pub = self.create_publisher(Odometry, self._odom_topic, 20)
+        path_qos = QoSProfile(depth=1)
+        path_qos.durability = DurabilityPolicy.TRANSIENT_LOCAL
+        path_qos.reliability = ReliabilityPolicy.RELIABLE
+        self._path_pub = self.create_publisher(NavPath, self._executed_path_topic, path_qos)
+        self._executed_path = NavPath()
+        self._executed_path.header.frame_id = self._odom_frame
         self._tf = TransformBroadcaster(self)
         self.create_subscription(Twist, self._cmd_topic, self._cmd_callback, 20)
         self.create_timer(1.0 / self._rate_hz, self._update)
@@ -98,6 +108,21 @@ class AckermannKinematicSim(Node):
         transform.transform.rotation.z = qz
         transform.transform.rotation.w = qw
         self._tf.sendTransform(transform)
+
+        pose = PoseStamped()
+        pose.header.stamp = stamp
+        pose.header.frame_id = self._odom_frame
+        pose.pose.position.x = self._state.x_m
+        pose.pose.position.y = self._state.y_m
+        pose.pose.orientation.z = qz
+        pose.pose.orientation.w = qw
+        self._executed_path.header.stamp = stamp
+        self._executed_path.poses.append(pose)
+        # Bound visualization memory while preserving more than enough history for
+        # a greenhouse route. Formal metrics are recorded independently as CSV.
+        if len(self._executed_path.poses) > 20000:
+            self._executed_path.poses = self._executed_path.poses[-20000:]
+        self._path_pub.publish(self._executed_path)
 
 
 def main(args=None) -> None:
