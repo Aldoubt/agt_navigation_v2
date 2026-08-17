@@ -4,6 +4,7 @@ from dataclasses import dataclass
 import csv
 import hashlib
 import json
+import math
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -12,6 +13,11 @@ import numpy as np
 
 from .map_io import Nav2Map, load_nav2_map
 from .path_io import read_path_csv
+from .synthetic_greenhouse import (
+    SYNTHETIC_HEIGHT_M,
+    SYNTHETIC_WIDTH_M,
+    build_synthetic_greenhouse,
+)
 
 
 _PLANNER_LABELS = {
@@ -86,13 +92,20 @@ def _discover_runs(results_root: Path) -> list[dict[str, Any]]:
 def _comparison_row(run: Mapping[str, Any], results_root: Path) -> dict[str, Any]:
     metrics = dict(run["metrics"])
     report = dict(run["report"])
+    manifest = dict(run["manifest"])
+    path_csv = run.get("path_csv")
     row: dict[str, Any] = {
         "scenario_id": run["scenario_id"],
         "planner_id": run["planner_id"],
         "planner_label": _PLANNER_LABELS.get(run["planner_id"], run["planner_id"]),
+        "run_id": str(manifest.get("run_id", "")),
+        "formal": bool(manifest.get("formal", False)),
+        "development_fixture": bool(manifest.get("development_fixture", False)),
         "run_dir": str(Path(run["run_dir"]).relative_to(results_root)),
         "success": bool(report.get("success", metrics.get("success", False))),
         "error_code": str(report.get("error_code", metrics.get("error_code", ""))),
+        "metrics_sha256": _sha256(Path(run["metrics_path"])),
+        "path_sha256": _sha256(Path(path_csv)) if path_csv is not None else None,
     }
     for key, value in sorted(metrics.items()):
         if key not in row:
@@ -101,7 +114,19 @@ def _comparison_row(run: Mapping[str, Any], results_root: Path) -> dict[str, Any
 
 
 def _write_comparison(rows: Sequence[Mapping[str, Any]], output_dir: Path) -> None:
-    keys = ["scenario_id", "planner_id", "planner_label", "run_dir", "success", "error_code"]
+    keys = [
+        "scenario_id",
+        "planner_id",
+        "planner_label",
+        "run_id",
+        "formal",
+        "development_fixture",
+        "run_dir",
+        "success",
+        "error_code",
+        "metrics_sha256",
+        "path_sha256",
+    ]
     extra = sorted({key for row in rows for key in row if key not in keys})
     fieldnames = [*keys, *extra]
     with (output_dir / "comparison.csv").open("w", newline="", encoding="utf-8") as stream:
@@ -217,6 +242,61 @@ def _save_figure(fig, stem: Path) -> None:
     plt.close(fig)
 
 
+def _synthetic_problem_figure(runs: Sequence[Mapping[str, Any]], output_stem: Path) -> list[str]:
+    fixture = build_synthetic_greenhouse()
+    fig, ax = plt.subplots(figsize=(11.0, 6.8))
+    ax.imshow(
+        fixture.image,
+        extent=(0.0, SYNTHETIC_WIDTH_M, 0.0, SYNTHETIC_HEIGHT_M),
+        origin="upper",
+        cmap="gray",
+        interpolation="nearest",
+    )
+    for scenario_id, scenario in sorted(fixture.scenarios.items()):
+        start = scenario["start"]
+        goal = scenario["goal"]
+        assert isinstance(start, Mapping)
+        assert isinstance(goal, Mapping)
+        sx, sy, syaw = float(start["x"]), float(start["y"]), float(start["yaw"])
+        gx, gy, gyaw = float(goal["x"]), float(goal["y"]), float(goal["yaw"])
+        ax.scatter([sx], [sy], marker="o", s=28)
+        ax.scatter([gx], [gy], marker="x", s=34)
+        ax.arrow(sx, sy, 0.7 * math.cos(syaw), 0.7 * math.sin(syaw), head_width=0.18, length_includes_head=True)
+        ax.arrow(gx, gy, 0.7 * math.cos(gyaw), 0.7 * math.sin(gyaw), head_width=0.18, length_includes_head=True)
+        ax.text((sx + gx) / 2.0, (sy + gy) / 2.0, scenario_id.split("_")[0], fontsize=8)
+    ax.text(2.0, 18.6, "wide headland", fontsize=9)
+    ax.text(23.0, 18.7, "narrow headland", fontsize=9)
+    ax.text(12.5, 10.9, "permanent obstacle", fontsize=8)
+    ax.set_title("D1 Controlled synthetic greenhouse diagnostic geometry")
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.set_xlim(0.0, SYNTHETIC_WIDTH_M)
+    ax.set_ylim(0.0, SYNTHETIC_HEIGHT_M)
+    ax.set_aspect("equal", adjustable="box")
+    fig.tight_layout()
+    _save_figure(fig, output_stem)
+    return [str(run["run_dir"]) for run in runs]
+
+
+def _metric_text(run: Mapping[str, Any]) -> str:
+    metrics = run["metrics"]
+    length = metrics.get("path_length_m")
+    curvature = metrics.get("max_abs_curvature_1pm")
+    limit = metrics.get("required_max_curvature_1pm")
+    feasible = metrics.get("execution_feasible")
+
+    def fmt(value):
+        return "N/A" if value is None else f"{float(value):.3f}"
+
+    feasible_text = "N/A" if feasible is None else ("PASS" if feasible else "FAIL")
+    return (
+        f"L={fmt(length)} m\n"
+        f"κmax={fmt(curvature)} 1/m\n"
+        f"κlimit={fmt(limit)} 1/m\n"
+        f"execution={feasible_text}"
+    )
+
+
 def _comparison_figure(
     scenario: str,
     runs: Sequence[Mapping[str, Any]],
@@ -225,7 +305,7 @@ def _comparison_figure(
 ) -> list[str]:
     ordered = sorted(runs, key=lambda r: (_planner_rank(str(r["planner_id"])), str(r["planner_id"])))
     count = max(1, len(ordered))
-    fig, axes = plt.subplots(1, count, figsize=(4.2 * count, 4.2), squeeze=False)
+    fig, axes = plt.subplots(1, count, figsize=(4.5 * count, 4.8), squeeze=False)
     for ax, run in zip(axes[0], ordered):
         _map_background(ax, nav_map)
         path_csv = run.get("path_csv")
@@ -233,27 +313,41 @@ def _comparison_figure(
             points = read_path_csv(path_csv)
             if points:
                 ax.plot([p.x_m for p in points], [p.y_m for p in points], linewidth=2.0)
-                ax.scatter([points[0].x_m], [points[0].y_m], marker="o", s=35, label="start")
-                ax.scatter([points[-1].x_m], [points[-1].y_m], marker="x", s=45, label="goal")
+                ax.scatter([points[0].x_m], [points[0].y_m], marker="o", s=35)
+                ax.scatter([points[-1].x_m], [points[-1].y_m], marker="x", s=45)
+                arrow_length = 0.45
+                ax.arrow(points[0].x_m, points[0].y_m, arrow_length * math.cos(points[0].yaw_rad), arrow_length * math.sin(points[0].yaw_rad), head_width=0.12, length_includes_head=True)
+                ax.arrow(points[-1].x_m, points[-1].y_m, arrow_length * math.cos(points[-1].yaw_rad), arrow_length * math.sin(points[-1].yaw_rad), head_width=0.12, length_includes_head=True)
         metrics = run["metrics"]
-        status = "planner fail" if not run["report"].get("success", False) else (
-            "feasible" if metrics.get("execution_feasible") is True else "infeasible"
-            if metrics.get("execution_feasible") is False else "not evaluated"
-        )
+        if not run["report"].get("success", False):
+            status = "NO PATH"
+            ax.text(0.5, 0.5, "NO PATH", transform=ax.transAxes, ha="center", va="center", fontsize=14)
+        else:
+            status = "feasible" if metrics.get("execution_feasible") is True else (
+                "infeasible" if metrics.get("execution_feasible") is False else "not evaluated"
+            )
         ax.set_title(f"{_PLANNER_LABELS.get(run['planner_id'], run['planner_id'])}\n{status}")
+        ax.text(
+            0.02,
+            0.02,
+            _metric_text(run),
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=7.5,
+            bbox={"boxstyle": "round", "facecolor": "white", "alpha": 0.82},
+        )
         ax.set_xlabel("x [m]")
         ax.set_ylabel("y [m]")
         ax.set_aspect("equal", adjustable="box")
         ax.grid(True, alpha=0.25)
-    fig.suptitle(scenario)
+    fig.suptitle(f"{scenario}: same-map planner comparison")
+    fig.tight_layout()
     _save_figure(fig, output_stem)
     return [str(run["run_dir"]) for run in ordered]
 
 
-def _feasibility_matrix(
-    runs: Sequence[Mapping[str, Any]],
-    output_stem: Path,
-) -> list[str]:
+def _feasibility_matrix(runs: Sequence[Mapping[str, Any]], output_stem: Path) -> list[str]:
     ordered = sorted(
         runs,
         key=lambda r: (str(r["scenario_id"]), _planner_rank(str(r["planner_id"])), str(r["planner_id"])),
@@ -285,12 +379,9 @@ def _feasibility_matrix(
     ax.set_xticks(range(len(columns)), labels=columns)
     ax.set_yticks(
         range(len(ordered)),
-        labels=[
-            f"{run['scenario_id']} / {_PLANNER_LABELS.get(run['planner_id'], run['planner_id'])}"
-            for run in ordered
-        ],
+        labels=[f"{run['scenario_id']} / {_PLANNER_LABELS.get(run['planner_id'], run['planner_id'])}" for run in ordered],
     )
-    ax.set_title("Independent feasibility evidence matrix")
+    ax.set_title("D4 Independent feasibility evidence matrix")
     fig.tight_layout()
     _save_figure(fig, output_stem)
     return [str(run["run_dir"]) for run in ordered]
@@ -314,21 +405,27 @@ def build_paper_bundle(
     nav_map = load_nav2_map(map_yaml) if map_yaml is not None else None
 
     figures: dict[str, dict[str, Any]] = {}
+    if any(str(run["manifest"].get("site_id", "")) == "synthetic_greenhouse_v1" for run in runs):
+        source_runs = _synthetic_problem_figure(runs, output_dir / "D1_synthetic_problem")
+        figures["D1_synthetic_problem"] = {
+            "source_runs": source_runs,
+            "geometry_source": "agt_route_benchmark.synthetic_greenhouse",
+            "formats": ["svg", "pdf", "png"],
+        }
+
     for scenario, figure_id in _DIAGNOSTIC_SCENARIOS.items():
         scenario_runs = [run for run in runs if run["scenario_id"] == scenario]
         if not scenario_runs:
             continue
-        source_runs = _comparison_figure(
-            scenario,
-            scenario_runs,
-            output_dir / figure_id,
-            nav_map,
-        )
+        source_runs = _comparison_figure(scenario, scenario_runs, output_dir / figure_id, nav_map)
         figures[figure_id] = {
             "scenario_id": scenario,
             "source_runs": source_runs,
             "metrics_used": [
                 "success",
+                "path_length_m",
+                "max_abs_curvature_1pm",
+                "required_max_curvature_1pm",
                 "collision_free",
                 "kinematic_feasible",
                 "execution_feasible",
@@ -338,18 +435,10 @@ def build_paper_bundle(
 
     evidence_runs = [run for run in runs if run["scenario_id"] in _DIAGNOSTIC_SCENARIOS]
     if evidence_runs:
-        source_runs = _feasibility_matrix(
-            evidence_runs,
-            output_dir / "D4_feasibility_matrix",
-        )
+        source_runs = _feasibility_matrix(evidence_runs, output_dir / "D4_feasibility_matrix")
         figures["D4_feasibility_matrix"] = {
             "source_runs": source_runs,
-            "metrics_used": [
-                "success",
-                "collision_free",
-                "kinematic_feasible",
-                "execution_feasible",
-            ],
+            "metrics_used": ["success", "collision_free", "kinematic_feasible", "execution_feasible"],
             "formats": ["svg", "pdf", "png"],
         }
 
@@ -359,6 +448,12 @@ def build_paper_bundle(
             path = run.get(key)
             if path is not None and Path(path).is_file():
                 source_files[str(Path(path).relative_to(results_root))] = _sha256(Path(path))
+    if map_yaml is not None:
+        map_yaml_path = Path(map_yaml).expanduser().resolve()
+        source_files[f"external_map/{map_yaml_path.name}"] = _sha256(map_yaml_path)
+        if nav_map is not None:
+            source_files[f"external_map/{nav_map.image_path.name}"] = _sha256(nav_map.image_path)
+
     manifest = {
         "schema_version": "1.0",
         "bundle_policy": "evidence_conditioned_no_posthoc_planner_tuning",
