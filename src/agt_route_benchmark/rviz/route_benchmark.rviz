@@ -10,8 +10,27 @@ Visualization Manager:
         Value: /agt/map/global_occupancy
     - Class: rviz_default_plugins/Path
       Enabled: true
-      Name: Benchmark Path
+      Name: Reference Benchmark Path
       Topic:
         Value: /agt/benchmark/path_preview
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Executed Ackermann Path
+      Topic:
+        Value: /agt/benchmark/executed_path
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: RPP Lookahead Arc
+      Topic:
+        Value: /lookahead_arc
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: MKmini Sim Odometry
+      Topic:
+        Value: /agt/mapping/odometry
+      Keep: 100
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
   Global Options:
     Fixed Frame: map
