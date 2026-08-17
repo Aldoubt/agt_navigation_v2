@@ -6,6 +6,7 @@ import hashlib
 
 from .adapters.base import PlannerAdapter
 from .contracts import ExperimentSpec, PlannerResult
+from .endpoint_metrics import compute_endpoint_deviation
 from .metrics import compute_mission_metrics, compute_path_metrics
 from .path_io import write_json_atomic, write_path_csv, write_path_geojson
 from .preflight import PreflightResult
@@ -101,6 +102,19 @@ class ExperimentRunner:
                 )
             )
             metrics.update(validation_metrics)
+            if (
+                spec.scenario.level == "p2p"
+                and spec.scenario.start is not None
+                and spec.scenario.goal is not None
+                and result.path
+            ):
+                metrics.update(
+                    compute_endpoint_deviation(
+                        spec.scenario.start,
+                        spec.scenario.goal,
+                        result.path,
+                    )
+                )
             if spec.scenario.level == "mission":
                 metrics.update(
                     compute_mission_metrics(
