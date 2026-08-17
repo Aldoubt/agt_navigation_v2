@@ -12,6 +12,16 @@ from .path_io import write_json_atomic, write_path_csv, write_path_geojson
 from .preflight import PreflightResult
 
 
+def _pose_manifest(value):
+    if value is None:
+        return None
+    return {
+        "x_m": float(value[0]),
+        "y_m": float(value[1]),
+        "yaw_rad": float(value[2]),
+    }
+
+
 class ExperimentRunner:
     def __init__(self, result_root: Path | str):
         self.result_root = Path(result_root)
@@ -62,6 +72,13 @@ class ExperimentRunner:
         else:
             result = adapter.plan(spec)
 
+        scenario_request = None
+        if spec.scenario.level == "p2p":
+            scenario_request = {
+                "start": _pose_manifest(spec.scenario.start),
+                "goal": _pose_manifest(spec.scenario.goal),
+            }
+
         manifest = {
             "schema_version": "1.0",
             "site_id": spec.site_id,
@@ -73,6 +90,7 @@ class ExperimentRunner:
             "development_fixture": spec.scenario.development_fixture,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "run_id": spec.run_id,
+            "scenario_request": scenario_request,
             "metadata": manifest_metadata,
         }
         write_json_atomic(manifest, out / "experiment_manifest.json")
