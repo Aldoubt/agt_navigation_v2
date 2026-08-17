@@ -1,0 +1,8 @@
+id: S05_blocked_row
+level: p2p
+development_fixture: true
+description: Blocked aisle requiring a legal headland detour or an explicit no-path result.
+start: {x: 13.5, y: 6, yaw: 1.570796326795}
+goal: {x: 13.5, y: 14, yaw: 1.570796326795}
+expected_constraints: [obstacle, footprint, detour]
+synthetic_fixture: synthetic_greenhouse_v1
