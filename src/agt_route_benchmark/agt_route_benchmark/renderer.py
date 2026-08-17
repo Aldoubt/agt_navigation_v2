@@ -13,6 +13,7 @@ def render_route(
     title: str,
     map_extent: tuple[float, float, float, float] | None = None,
     occupancy_image=None,
+    image_origin: str = "lower",
 ) -> tuple[Path, Path, Path]:
     if not points:
         raise ValueError("cannot render empty path")
@@ -26,7 +27,9 @@ def render_route(
     if occupancy_image is not None:
         if map_extent is None:
             raise ValueError("map_extent is required with occupancy_image")
-        ax.imshow(occupancy_image, origin="lower", extent=map_extent, interpolation="nearest")
+        if image_origin not in ("lower", "upper"):
+            raise ValueError("image_origin must be lower or upper")
+        ax.imshow(occupancy_image, origin=image_origin, extent=map_extent, interpolation="nearest", cmap="gray")
     xs = [p.x_m for p in points]
     ys = [p.y_m for p in points]
     ax.plot(xs, ys, linewidth=1.8)

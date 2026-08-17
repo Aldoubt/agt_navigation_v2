@@ -7,7 +7,7 @@ Visualization Manager:
       Enabled: true
       Name: Global Map
       Topic:
-        Value: /map
+        Value: /agt/map/global_occupancy
     - Class: rviz_default_plugins/Path
       Enabled: true
       Name: Benchmark Path

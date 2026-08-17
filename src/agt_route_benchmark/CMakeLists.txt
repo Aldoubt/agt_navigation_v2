@@ -33,6 +33,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_batch test/test_batch.py)
   ament_add_pytest_test(test_batch_export test/test_batch_export.py)
   ament_add_pytest_test(test_site_snapshot test/test_site_snapshot.py)
+  ament_add_pytest_test(test_map_io test/test_map_io.py)
+  ament_add_pytest_test(test_nav2_params test/test_nav2_params.py)
 endif()
 
 ament_package()

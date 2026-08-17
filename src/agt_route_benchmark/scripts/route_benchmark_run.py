@@ -14,6 +14,7 @@ from agt_route_benchmark.contracts import ExperimentSpec, PathPoint
 from agt_route_benchmark.experiment import ExperimentRunner
 from agt_route_benchmark.graph_io import load_agricultural_graph
 from agt_route_benchmark.path_io import read_path_csv
+from agt_route_benchmark.map_io import load_nav2_map
 from agt_route_benchmark.profile import load_platform_profile
 from agt_route_benchmark.renderer import render_route
 from agt_route_benchmark.scenario import load_scenario
@@ -24,21 +25,24 @@ def _quat_to_yaw(q) -> float:
     return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
 
 
-def _nav2_call():
+def _nav2_call(server_wait_s: float = 20.0, result_wait_s: float = 30.0):
     try:
         import rclpy
+        from rclpy.action import ActionClient
+        from rclpy.node import Node
         from geometry_msgs.msg import PoseStamped
-        from nav2_simple_commander.robot_navigator import BasicNavigator
+        from nav2_msgs.action import ComputePathToPose
     except ImportError as exc:
-        raise RuntimeError("Nav2 live mode requires ROS2 Humble + nav2_simple_commander") from exc
+        raise RuntimeError("Nav2 live mode requires ROS2 Humble + nav2_msgs") from exc
 
     rclpy.init()
-    navigator = BasicNavigator()
+    node = Node("agt_route_benchmark_nav2_client")
+    client = ActionClient(node, ComputePathToPose, "compute_path_to_pose")
 
     def pose(value):
         msg = PoseStamped()
         msg.header.frame_id = "map"
-        msg.header.stamp = navigator.get_clock().now().to_msg()
+        msg.header.stamp = node.get_clock().now().to_msg()
         msg.pose.position.x = value[0]
         msg.pose.position.y = value[1]
         msg.pose.orientation.z = math.sin(value[2] / 2.0)
@@ -46,9 +50,26 @@ def _nav2_call():
         return msg
 
     def call(plugin_id, start, goal):
-        path = navigator.getPath(pose(start), pose(goal), planner_id=plugin_id, use_start=True)
-        if path is None:
-            return ()
+        if not client.wait_for_server(timeout_sec=server_wait_s):
+            raise RuntimeError(f"compute_path_to_pose action unavailable after {server_wait_s:.1f}s")
+        request = ComputePathToPose.Goal()
+        request.start = pose(start)
+        request.goal = pose(goal)
+        request.use_start = True
+        request.planner_id = plugin_id
+        send_future = client.send_goal_async(request)
+        rclpy.spin_until_future_complete(node, send_future, timeout_sec=result_wait_s)
+        if not send_future.done() or send_future.result() is None:
+            raise RuntimeError("compute_path_to_pose goal request timed out")
+        goal_handle = send_future.result()
+        if not goal_handle.accepted:
+            raise RuntimeError(f"planner {plugin_id} rejected compute_path_to_pose goal")
+        result_future = goal_handle.get_result_async()
+        rclpy.spin_until_future_complete(node, result_future, timeout_sec=result_wait_s)
+        if not result_future.done() or result_future.result() is None:
+            raise RuntimeError("compute_path_to_pose result timed out")
+        response = result_future.result().result
+        path = response.path
         return tuple(
             PathPoint(
                 p.pose.position.x,
@@ -61,7 +82,7 @@ def _nav2_call():
             for p in path.poses
         )
 
-    return call, navigator, rclpy
+    return call, node, rclpy
 
 
 def _coverage_components(path: Path):
@@ -81,6 +102,7 @@ def main() -> int:
     parser.add_argument("--formal", action="store_true")
     parser.add_argument("--run-id", default="run_001")
     parser.add_argument("--site-snapshot", type=Path)
+    parser.add_argument("--map-yaml", type=Path, help="Optional Nav2 map YAML for deterministic route-background rendering")
     parser.add_argument("--nav2-live", action="store_true")
     parser.add_argument("--graph", type=Path)
     parser.add_argument("--coverage-components-json", type=Path)
@@ -135,8 +157,8 @@ def main() -> int:
             adapter = Fields2CoverAdapter(lambda _spec: (components, 0.0))
     elif args.planner in ("astar", "theta_star", "hybrid_astar", "state_lattice"):
         if args.nav2_live:
-            call, navigator, rclpy = _nav2_call()
-            cleanup = (navigator, rclpy)
+            call, nav2_node, rclpy = _nav2_call()
+            cleanup = (nav2_node, rclpy)
             adapter = Nav2P2PAdapter(args.planner, call)
         else:
             adapter = Nav2P2PAdapter(args.planner)
@@ -148,13 +170,27 @@ def main() -> int:
         path_csv = out / "path.csv"
         if path_csv.exists():
             points = read_path_csv(path_csv)
-            render_route(points, out / "figure", title=f"{scenario.scenario_id} / {args.planner}")
+            render_map_yaml = args.map_yaml
+            if render_map_yaml is None and snapshot is not None:
+                render_map_yaml = Path(snapshot["assets"]["map_yaml"]["path"])
+            if render_map_yaml is not None:
+                nav_map = load_nav2_map(render_map_yaml)
+                render_route(
+                    points,
+                    out / "figure",
+                    title=f"{scenario.scenario_id} / {args.planner}",
+                    map_extent=nav_map.extent,
+                    occupancy_image=nav_map.image,
+                    image_origin="upper",
+                )
+            else:
+                render_route(points, out / "figure", title=f"{scenario.scenario_id} / {args.planner}")
         print(out)
         return 0
     finally:
         if cleanup is not None:
-            navigator, rclpy = cleanup
-            navigator.destroy_node()
+            nav2_node, rclpy = cleanup
+            nav2_node.destroy_node()
             rclpy.shutdown()
 
 
