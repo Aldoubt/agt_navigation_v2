@@ -12,6 +12,7 @@ install(PROGRAMS
   scripts/route_benchmark_matrix_plan.py
   scripts/route_benchmark_rpp_params.py
   scripts/route_tracking_evaluate.py
+  scripts/route_tracking_tf_recorder.py
   scripts/route_csv_to_path.py
   scripts/route_benchmark_accept_site.py
   scripts/ackermann_kinematic_sim.py
