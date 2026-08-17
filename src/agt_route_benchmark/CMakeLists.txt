@@ -54,6 +54,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_coverage_bridge test/test_coverage_bridge.py)
   ament_add_pytest_test(test_runner_ros_args test/test_runner_ros_args.py)
   ament_add_pytest_test(test_preflight test/test_preflight.py)
+  ament_add_pytest_test(test_endpoint_metrics test/test_endpoint_metrics.py)
 endif()
 
 ament_package()
