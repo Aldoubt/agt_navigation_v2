@@ -64,6 +64,15 @@ EDGE_SEARCH_ENVELOPE = "SEARCH_ENVELOPE"
 EDGE_SITE_BOUNDARY = "SITE_BOUNDARY"
 EDGE_NAVIGATION_GRID = "NAVIGATION_GRID"
 
+_PRIMITIVE_CURVATURE_FRACTIONS = (-1.0, -0.5, 0.0, 0.5, 1.0)
+
+
+def _primitive_curvature_values(radius: float) -> tuple[float, ...]:
+    radius = float(radius)
+    if not math.isfinite(radius) or radius <= 0.0:
+        raise ValueError("primitive curvature radius must be finite and > 0")
+    return tuple(fraction / radius for fraction in _PRIMITIVE_CURVATURE_FRACTIONS)
+
 
 REVERSE_PRIMITIVE_CONNECTOR_SCHEMA = "agt_reverse_primitive_connector_plan/v1"
 REVERSE_PRIMITIVE_BACKEND = (
@@ -743,7 +752,7 @@ def _search_one(
     expansions = 0
     diagnostics.search_started = True
     goal_yaw_tol = math.radians(cfg.goal_yaw_tolerance_deg)
-    curvature_values = (-1.0 / radius, 0.0, 1.0 / radius)
+    curvature_values = _primitive_curvature_values(radius)
 
     solved_index: int | None = None
     solved_shot: tuple[tuple[float, float, float, int, float, bool], ...] = ()
@@ -845,10 +854,11 @@ def _search_one(
             diagnostics.nodes_at_max_cusps += 1
 
         if node.travel_m + cfg.primitive_length_m > cfg.max_path_length_m:
-            diagnostics.primitive_edges_considered += 3
-            diagnostics.primitive_edges_rejected_path_length += 3
+            primitive_count = len(curvature_values)
+            diagnostics.primitive_edges_considered += primitive_count
+            diagnostics.primitive_edges_rejected_path_length += primitive_count
             continue
-        for curvature_index, curvature in enumerate(curvature_values, start=-1):
+        for curvature_index, curvature in enumerate(curvature_values, start=-2):
             diagnostics.primitive_edges_considered += 1
             edge = _integrate_primitive(
                 node,
