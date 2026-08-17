@@ -515,10 +515,6 @@ def validate_transition_candidates(
                         + ", ".join(missing_reverse)
                     )
 
-                local_footprint = _preview_local_footprint(
-                    vehicle,
-                    config.preview_footprint_padding_m,
-                )
                 for connector_id in sorted(reverse_ids):
                     candidate = candidates[connector_id]
                     binding = bindings[connector_id]
@@ -590,6 +586,10 @@ def validate_transition_candidates(
                                 z=float(request.start_pose[2]),
                                 yaw=float(request.start_pose[3]),
                             ),
+                        )
+                        local_footprint = _preview_local_footprint(
+                            vehicle,
+                            config.preview_footprint_padding_m,
                         )
                         _center, footprint = _evaluate_candidate(
                             probe,
