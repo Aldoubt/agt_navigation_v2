@@ -31,6 +31,7 @@ def test_hybrid_params_derive_map_resolution_footprint_and_turn_radius(tmp_path:
     assert p["planner_plugins"] == ["GridBasedHybrid"]
     assert p["GridBasedHybrid"]["minimum_turning_radius"] == 1.5
     assert p["GridBasedHybrid"]["motion_model_for_search"] == "REEDS_SHEPP"
+    assert p["GridBasedHybrid"]["analytic_expansion_max_length"] >= 7.5
 
 
 def test_state_lattice_fails_closed_without_control_set(tmp_path: Path):
@@ -46,6 +47,8 @@ def test_state_lattice_binds_existing_control_set(tmp_path: Path):
     data = build_planning_params(map_yaml, profile, "state_lattice", lattice_filepath=lattice)
     cfg = data["planner_server"]["ros__parameters"]["GridBasedLattice"]
     assert cfg["lattice_filepath"] == str(lattice.resolve())
+    assert cfg["allow_reverse_expansion"] is True
+    assert cfg["analytic_expansion_max_length"] >= 7.5
 
 
 def test_written_params_are_valid_yaml(tmp_path: Path):
