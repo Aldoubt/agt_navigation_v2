@@ -10,6 +10,7 @@ install(PROGRAMS
   scripts/route_benchmark_run.py
   scripts/route_benchmark_batch.py
   scripts/route_csv_to_path.py
+  scripts/route_benchmark_accept_site.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -31,6 +32,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_renderer test/test_renderer.py)
   ament_add_pytest_test(test_batch test/test_batch.py)
   ament_add_pytest_test(test_batch_export test/test_batch_export.py)
+  ament_add_pytest_test(test_site_snapshot test/test_site_snapshot.py)
 endif()
 
 ament_package()

@@ -21,6 +21,10 @@ class ExperimentRunner:
         return self.result_root / spec.site_id / spec.scenario.scenario_id / f"{spec.planner_id}-{suffix}-{safe_run_id}"
 
     def run(self, spec: ExperimentSpec, adapter: PlannerAdapter) -> Path:
+        if spec.formal:
+            snapshot_id = str(spec.metadata.get("site_snapshot_sha256", ""))
+            if len(snapshot_id) != 64 or any(c not in "0123456789abcdef" for c in snapshot_id):
+                raise ValueError("formal experiment requires 64-hex site_snapshot_sha256")
         out = self._run_dir(spec)
         if spec.formal and out.exists():
             raise FileExistsError(f"formal result already exists: {out}")

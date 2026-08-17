@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 import math
 from pathlib import Path
 
@@ -16,6 +17,7 @@ from agt_route_benchmark.path_io import read_path_csv
 from agt_route_benchmark.profile import load_platform_profile
 from agt_route_benchmark.renderer import render_route
 from agt_route_benchmark.scenario import load_scenario
+from agt_route_benchmark.site_snapshot import load_site_snapshot
 
 
 def _quat_to_yaw(q) -> float:
@@ -78,6 +80,7 @@ def main() -> int:
     parser.add_argument("--result-root", type=Path, default=Path("runtime/results/paper1_route_benchmark"))
     parser.add_argument("--formal", action="store_true")
     parser.add_argument("--run-id", default="run_001")
+    parser.add_argument("--site-snapshot", type=Path)
     parser.add_argument("--nav2-live", action="store_true")
     parser.add_argument("--graph", type=Path)
     parser.add_argument("--coverage-components-json", type=Path)
@@ -85,6 +88,16 @@ def main() -> int:
 
     scenario = load_scenario(args.scenario, formal=args.formal)
     profile = load_platform_profile(args.platform_profile)
+    snapshot = None
+    if args.site_snapshot is not None:
+        snapshot = load_site_snapshot(args.site_snapshot, verify_assets=True)
+        if snapshot["site_id"] != args.site:
+            raise SystemExit("site snapshot site_id does not match --site")
+        selected_profile_sha = hashlib.sha256(args.platform_profile.read_bytes()).hexdigest()
+        if selected_profile_sha != snapshot["assets"]["platform_profile"]["sha256"]:
+            raise SystemExit("selected platform profile is not the profile bound by site snapshot")
+    elif args.formal:
+        raise SystemExit("formal mode requires --site-snapshot")
     if not profile.preview_planning_enabled:
         raise SystemExit("platform profile disables preview planning")
 
@@ -98,6 +111,10 @@ def main() -> int:
             "platform_name": profile.name,
             "min_turning_radius_m": profile.min_turning_radius_m,
             "execution_ready": profile.execution_ready,
+            **({
+                "site_snapshot_sha256": snapshot["snapshot_sha256"],
+                "site_asset_hashes": {k: v["sha256"] for k, v in snapshot["assets"].items()},
+            } if snapshot is not None else {}),
         },
         run_id=args.run_id,
     )

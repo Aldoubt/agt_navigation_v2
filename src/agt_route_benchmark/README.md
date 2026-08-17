@@ -13,6 +13,24 @@ It **extends** existing V2.5 map/site/semantic/coverage contracts; it does not c
 
 The checked-in scenarios are **development fixtures only**. Formal mode rejects them until the real PCD-derived map and semantic IDs are accepted and the scenario files are replaced with the accepted `greenhouse_01` values.
 
+## Freeze the real `greenhouse_01` input revision
+
+Formal experiments are gated by a human-accepted site snapshot. After the user has accepted the PCD-derived 2D map and the semantic annotations, copy `config/site_acceptance_template.yaml` into the runtime site directory, set both acceptance flags to `true`, and record `accepted_by` / `accepted_at`. Then freeze the exact PCD, map, map image, semantic map, coverage YAML and MK-mini profile hashes:
+
+```bash
+PYTHONPATH=src/agt_route_benchmark \
+python3 src/agt_route_benchmark/scripts/route_benchmark_accept_site.py \
+  --pcd runtime/maps/greenhouse_01/source/greenhouse_01.pcd \
+  --map-yaml runtime/maps/greenhouse_01/greenhouse_01.yaml \
+  --semantic-map runtime/maps/greenhouse_01/semantic/semantic_map.geojson \
+  --coverage-yaml runtime/maps/greenhouse_01/semantic/coverage.yaml \
+  --platform-profile profiles/platforms/mk_mini.yaml \
+  --acceptance runtime/maps/greenhouse_01/benchmark/acceptance.yaml \
+  --output runtime/maps/greenhouse_01/benchmark/site_snapshot.json
+```
+
+`--formal` runs require this snapshot and re-hash every bound asset before planning, so changing the PCD/map/semantics/profile invalidates the frozen revision rather than silently mixing experiment versions.
+
 ## What is already runnable without ROS
 
 The proposed route-ordering core, CSV/GeoJSON export, metrics, batch summary and paper renderer have no ROS dependency.

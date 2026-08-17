@@ -18,7 +18,7 @@ class FakeAdapter(PlannerAdapter):
 
 def test_experiment_runner_emits_stable_artifacts(tmp_path: Path):
     scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (1, 0, 0), (), {})
-    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True)
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True, metadata={"site_snapshot_sha256": "a" * 64})
     out = ExperimentRunner(tmp_path).run(spec, FakeAdapter())
     assert (out / "experiment_manifest.json").exists()
     assert (out / "metrics.json").exists()
@@ -34,7 +34,7 @@ class FailingAdapter(PlannerAdapter):
 
 def test_failed_run_still_emits_report_without_path_csv(tmp_path: Path):
     scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (1, 0, 0), (), {})
-    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True)
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True, metadata={"site_snapshot_sha256": "a" * 64})
     out = ExperimentRunner(tmp_path).run(spec, FailingAdapter())
     assert (out / "planner_report.json").exists()
     assert not (out / "path.csv").exists()
@@ -42,7 +42,7 @@ def test_failed_run_still_emits_report_without_path_csv(tmp_path: Path):
 
 def test_formal_rerun_does_not_overwrite_existing_result(tmp_path: Path):
     scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (1, 0, 0), (), {}, ())
-    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True)
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True, metadata={"site_snapshot_sha256": "a" * 64})
     runner = ExperimentRunner(tmp_path)
     runner.run(spec, FakeAdapter())
     try:
@@ -51,3 +51,10 @@ def test_formal_rerun_does_not_overwrite_existing_result(tmp_path: Path):
         assert "formal result already exists" in str(exc)
     else:
         raise AssertionError("formal rerun silently overwrote experiment")
+
+
+def test_formal_run_requires_bound_site_snapshot_identity(tmp_path: Path):
+    scenario = ScenarioSpec("S01_straight_row", "p2p", False, (0, 0, 0), (1, 0, 0), (), {})
+    spec = ExperimentSpec("greenhouse_01", "astar", scenario, formal=True, metadata={})
+    with __import__("pytest").raises(ValueError, match="site_snapshot_sha256"):
+        ExperimentRunner(tmp_path).run(spec, FakeAdapter())
