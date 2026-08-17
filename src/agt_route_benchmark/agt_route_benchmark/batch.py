@@ -32,6 +32,20 @@ def canonical_expected_cells() -> tuple[tuple[str, str], ...]:
     )
 
 
+def planner_outcome_counts(cells: Iterable[MatrixCell]) -> dict[str, int]:
+    """Count planner outcomes without treating invalid inputs as planner trials."""
+    cells = list(cells)
+    invalid_scenario_count = sum(cell.status == "INVALID_SCENARIO" for cell in cells)
+    evaluated = [cell for cell in cells if cell.status != "INVALID_SCENARIO"]
+    planner_success_count = sum(cell.status == "OK" for cell in evaluated)
+    return {
+        "planner_evaluated_count": len(evaluated),
+        "planner_success_count": planner_success_count,
+        "planner_failure_count": len(evaluated) - planner_success_count,
+        "invalid_scenario_count": invalid_scenario_count,
+    }
+
+
 def validate_batch_completeness(
     cells: Iterable[MatrixCell],
     expected_cells: Iterable[tuple[str, str]],
