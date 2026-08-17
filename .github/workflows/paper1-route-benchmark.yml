@@ -1,0 +1,39 @@
+name: Paper I Route Benchmark
+
+on:
+  push:
+    branches:
+      - feat/paper1-agri-route-benchmark
+    paths:
+      - 'src/agt_route_benchmark/**'
+      - 'src/agt_coverage_planning/**'
+      - 'src/agt_offline_assets/**'
+      - 'profiles/platforms/mk_mini.yaml'
+      - '.github/workflows/paper1-route-benchmark.yml'
+  pull_request:
+    paths:
+      - 'src/agt_route_benchmark/**'
+      - 'src/agt_coverage_planning/**'
+      - 'src/agt_offline_assets/**'
+      - 'profiles/platforms/mk_mini.yaml'
+      - '.github/workflows/paper1-route-benchmark.yml'
+
+jobs:
+  pure-python-contracts:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+      - name: Install test dependencies
+        run: python -m pip install --upgrade pip pytest PyYAML numpy matplotlib pillow
+      - name: Run Paper I benchmark unit tests
+        env:
+          MPLBACKEND: Agg
+          PYTHONPATH: src/agt_route_benchmark:src/agt_coverage_planning:src/agt_offline_assets
+        run: python -m pytest -q src/agt_route_benchmark/test
+      - name: Compile benchmark Python sources
+        run: python -m compileall -q src/agt_route_benchmark/agt_route_benchmark src/agt_route_benchmark/scripts
