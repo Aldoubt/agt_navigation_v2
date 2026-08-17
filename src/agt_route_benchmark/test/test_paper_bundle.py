@@ -30,6 +30,10 @@ def _write_run(
             "formal": False,
             "development_fixture": True,
             "run_id": "diagnostic_001",
+            "scenario_request": {
+                "start": {"x_m": 0.5, "y_m": 0.5, "yaw_rad": 0.0},
+                "goal": {"x_m": 2.5, "y_m": 2.5, "yaw_rad": 1.0},
+            },
             "metadata": {},
         }),
         encoding="utf-8",
@@ -51,6 +55,9 @@ def _write_run(
         "path_length_m": 3.2,
         "max_abs_curvature_1pm": 0.8,
         "required_max_curvature_1pm": 2.0 / 3.0,
+        "start_pose_deviation_m": 0.70710678,
+        "goal_pose_deviation_m": 0.70710678,
+        "goal_heading_deviation_rad": 0.5,
     }
     if collision_free is not None:
         metrics["collision_free"] = collision_free
@@ -190,4 +197,9 @@ def test_bundle_writes_reproducible_tables_figures_and_source_manifest(tmp_path:
         "D4_feasibility_matrix",
     }
     assert all(manifest["figures"][name]["source_runs"] for name in manifest["figures"])
+    for figure_id in ("D2_S02_planner_comparison", "D3_S03_planner_comparison"):
+        assert manifest["figures"][figure_id]["pose_annotations"] == {
+            "requested_pose_source": "experiment_manifest.scenario_request",
+            "returned_endpoint_source": "path.csv",
+        }
     assert bundle.output_dir == out
