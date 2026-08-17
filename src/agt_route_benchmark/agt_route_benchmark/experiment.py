@@ -5,9 +5,10 @@ from pathlib import Path
 import hashlib
 
 from .adapters.base import PlannerAdapter
-from .contracts import ExperimentSpec
+from .contracts import ExperimentSpec, PlannerResult
 from .metrics import compute_mission_metrics, compute_path_metrics
 from .path_io import write_json_atomic, write_path_csv, write_path_geojson
+from .preflight import PreflightResult
 
 
 class ExperimentRunner:
@@ -20,7 +21,14 @@ class ExperimentRunner:
         safe_run_id = spec.run_id.replace("/", "_").replace("\\", "_")
         return self.result_root / spec.site_id / spec.scenario.scenario_id / f"{spec.planner_id}-{suffix}-{safe_run_id}"
 
-    def run(self, spec: ExperimentSpec, adapter: PlannerAdapter, *, path_evaluator=None) -> Path:
+    def run(
+        self,
+        spec: ExperimentSpec,
+        adapter: PlannerAdapter,
+        *,
+        path_evaluator=None,
+        preflight_result: PreflightResult | None = None,
+    ) -> Path:
         if spec.formal:
             snapshot_id = str(spec.metadata.get("site_snapshot_sha256", ""))
             if len(snapshot_id) != 64 or any(c not in "0123456789abcdef" for c in snapshot_id):
@@ -29,7 +37,30 @@ class ExperimentRunner:
         if spec.formal and out.exists():
             raise FileExistsError(f"formal result already exists: {out}")
         out.mkdir(parents=True, exist_ok=True)
-        result = adapter.plan(spec)
+
+        manifest_metadata = dict(spec.metadata)
+        if preflight_result is not None:
+            manifest_metadata["preflight"] = {
+                "valid": preflight_result.valid,
+                "error_codes": list(preflight_result.error_codes),
+                "metadata": dict(preflight_result.metadata),
+            }
+
+        if preflight_result is not None and not preflight_result.valid:
+            result = PlannerResult(
+                planner_id=spec.planner_id,
+                success=False,
+                error_code="INVALID_SCENARIO",
+                path=(),
+                planning_time_s=0.0,
+                metadata={
+                    "preflight_error_codes": list(preflight_result.error_codes),
+                    "preflight": dict(preflight_result.metadata),
+                },
+            )
+        else:
+            result = adapter.plan(spec)
+
         manifest = {
             "schema_version": "1.0",
             "site_id": spec.site_id,
@@ -41,7 +72,7 @@ class ExperimentRunner:
             "development_fixture": spec.scenario.development_fixture,
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
             "run_id": spec.run_id,
-            "metadata": dict(spec.metadata),
+            "metadata": manifest_metadata,
         }
         write_json_atomic(manifest, out / "experiment_manifest.json")
         write_json_atomic(
