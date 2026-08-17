@@ -10,8 +10,12 @@ install(PROGRAMS
   scripts/route_benchmark_run.py
   scripts/route_benchmark_batch.py
   scripts/route_benchmark_matrix_plan.py
+  scripts/route_benchmark_rpp_params.py
+  scripts/route_tracking_evaluate.py
   scripts/route_csv_to_path.py
   scripts/route_benchmark_accept_site.py
+  scripts/ackermann_kinematic_sim.py
+  scripts/rpp_tracking_sim_trial.py
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -41,6 +45,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_validation test/test_validation.py)
   ament_add_pytest_test(test_semantic_path_validation test/test_semantic_path_validation.py)
   ament_add_pytest_test(test_nav2_params test/test_nav2_params.py)
+  ament_add_pytest_test(test_rpp_params test/test_rpp_params.py)
+  ament_add_pytest_test(test_tracking_metrics test/test_tracking_metrics.py)
+  ament_add_pytest_test(test_tracking_io test/test_tracking_io.py)
+  ament_add_pytest_test(test_ackermann_kinematics test/test_ackermann_kinematics.py)
   ament_add_pytest_test(test_coverage_bridge test/test_coverage_bridge.py)
 endif()
 
