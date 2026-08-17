@@ -2,7 +2,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from agt_route_benchmark.map_io import load_nav2_map
+from agt_route_benchmark.map_io import load_nav2_map, nav2_map_occupancy_data
 
 
 def test_nav2_map_loads_image_and_world_extent(tmp_path: Path):
@@ -20,6 +20,18 @@ def test_nav2_map_loads_image_and_world_extent(tmp_path: Path):
     assert loaded.extent == (10.0, 11.5, -2.0, -1.0)
     assert np.asarray(loaded.image)[0, 0] == 0
     assert np.asarray(loaded.image)[1, 0] == 255
+
+
+def test_nav2_map_occupancy_data_matches_ros_bottom_left_grid_order(tmp_path: Path):
+    image = tmp_path / "map.pgm"
+    image.write_text("P2\n3 2\n255\n0 127 255\n255 127 0\n", encoding="ascii")
+    yaml_path = tmp_path / "map.yaml"
+    yaml_path.write_text(
+        "image: map.pgm\nresolution: 0.5\norigin: [10.0, -2.0, 0.0]\nnegate: 0\noccupied_thresh: 0.65\nfree_thresh: 0.196\n",
+        encoding="utf-8",
+    )
+    nav_map = load_nav2_map(yaml_path)
+    assert nav2_map_occupancy_data(nav_map) == (0, -1, 100, 100, -1, 0)
 
 
 def test_nav2_map_rejects_rotated_origin_for_axis_aligned_paper_renderer(tmp_path: Path):
