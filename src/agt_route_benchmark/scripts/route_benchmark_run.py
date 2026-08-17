@@ -10,6 +10,7 @@ from pathlib import Path
 from agt_route_benchmark.adapters.fields2cover import Fields2CoverAdapter
 from agt_route_benchmark.adapters.nav2_p2p import Nav2P2PAdapter
 from agt_route_benchmark.adapters.proposed import ProposedAdapter
+from agt_route_benchmark.adapters.v25_route_asset import V25RouteAssetAdapter
 from agt_route_benchmark.contracts import ExperimentSpec, PathPoint
 from agt_route_benchmark.coverage_bridge import collect_coverage_components_live
 from agt_route_benchmark.experiment import ExperimentRunner
@@ -106,7 +107,8 @@ def main() -> int:
     parser.add_argument("--site-snapshot", type=Path)
     parser.add_argument("--map-yaml", type=Path, help="Optional Nav2 map YAML for deterministic route-background rendering and path validation")
     parser.add_argument("--nav2-live", action="store_true")
-    parser.add_argument("--graph", type=Path)
+    parser.add_argument("--graph", type=Path, help="Development-only sparse graph fixture for ours")
+    parser.add_argument("--ours-route-csv", type=Path, help="Canonical V2.5 Route Asset CSV for the formal proposed method")
     parser.add_argument("--coverage-components-json", type=Path)
     parser.add_argument("--coverage-live", action="store_true")
     parser.add_argument("--semantic-map", type=Path)
@@ -144,7 +146,7 @@ def main() -> int:
             "execution_ready": profile.execution_ready,
             **({
                 "site_snapshot_sha256": snapshot["snapshot_sha256"],
-                "site_asset_hashes": {k: v["sha256"] for k, v in snapshot["assets"].items()},
+                "site_asset_hashes": {key: value["sha256"] for key, value in snapshot["assets"].items()},
             } if snapshot is not None else {}),
         },
         run_id=args.run_id,
@@ -152,12 +154,19 @@ def main() -> int:
 
     cleanup = None
     if args.planner == "ours":
-        if args.graph is None:
-            graph_ref = scenario.metadata.get("graph_fixture")
-            if not graph_ref:
-                raise SystemExit("ours requires --graph or scenario graph_fixture")
-            args.graph = args.scenario.parent / str(graph_ref)
-        adapter = ProposedAdapter(load_agricultural_graph(args.graph))
+        if args.ours_route_csv is not None:
+            adapter = V25RouteAssetAdapter(args.ours_route_csv)
+        elif args.formal:
+            raise SystemExit(
+                "formal ours requires --ours-route-csv from the accepted V2.5 maximum-feasible route pipeline; sparse graph fixtures are development-only"
+            )
+        else:
+            if args.graph is None:
+                graph_ref = scenario.metadata.get("graph_fixture")
+                if not graph_ref:
+                    raise SystemExit("development ours requires --graph or scenario graph_fixture")
+                args.graph = args.scenario.parent / str(graph_ref)
+            adapter = ProposedAdapter(load_agricultural_graph(args.graph))
     elif args.planner == "fields2cover":
         semantic_map = args.semantic_map
         if semantic_map is None and snapshot is not None:
