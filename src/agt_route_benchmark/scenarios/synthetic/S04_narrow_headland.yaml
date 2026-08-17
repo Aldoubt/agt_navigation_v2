@@ -1,0 +1,8 @@
+id: S04_narrow_headland
+level: p2p
+development_fixture: true
+description: Narrow upper headland intended to expose reverse or multi-stage Ackermann maneuver requirements.
+start: {x: 24, y: 17, yaw: 1.570796326795}
+goal: {x: 27.5, y: 17, yaw: -1.570796326795}
+expected_constraints: [minimum_turning_radius, reverse, footprint]
+synthetic_fixture: synthetic_greenhouse_v1
