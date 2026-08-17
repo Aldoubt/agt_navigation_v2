@@ -74,7 +74,7 @@ def test_preflight_detects_occupied_start_cell_without_double_counting_footprint
 
 def test_preflight_detects_footprint_collision_with_free_reference_cell():
     result = evaluate_p2p_preflight(
-        _scenario((1.5, 1.5, 0.0), (3.5, 1.5, 0.0)),
+        _scenario((1.5, 1.5, 0.0), (3.5, 3.5, 0.0)),
         _map(occupied_cells=((2, 1),)),
         _profile(footprint=((-0.7, -0.3), (0.7, -0.3), (0.7, 0.3), (-0.7, 0.3))),
     )
