@@ -63,6 +63,34 @@ def test_admission_auto_selects_only_known_occupancy_blocked():
     assert decisions["connector_004"] == "KEEP_FORWARD"
 
 
+def test_admission_rejects_endpoint_boundary_conflict_without_reverse():
+    audit = ForwardConnectorCandidateAuditPlan(
+        frame_id="map",
+        platform_id="mk_mini",
+        platform_profile_sha256="deadbeef",
+        connectors=(
+            _result("connector_005", "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT"),
+        ),
+    )
+    plan = derive_reverse_fallback_admission(audit)
+    assert plan.items[0].decision == "REJECT_HARD_CONSTRAINT"
+    assert plan.eligible_connector_ids == ()
+
+
+def test_admission_allows_endpoint_safe_forward_path_boundary_conflict():
+    audit = ForwardConnectorCandidateAuditPlan(
+        frame_id="map",
+        platform_id="mk_mini",
+        platform_profile_sha256="deadbeef",
+        connectors=(
+            _result("connector_005", "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT"),
+        ),
+    )
+    plan = derive_reverse_fallback_admission(audit)
+    assert plan.items[0].decision == "ELIGIBLE_REVERSE_FALLBACK"
+    assert plan.eligible_connector_ids == ("connector_005",)
+
+
 def test_mixed_evidence_requires_explicit_operator_approval():
     plan = derive_reverse_fallback_admission(
         _audit(),
@@ -102,6 +130,9 @@ def test_serialization_preserves_r6b_input_selection_boundary():
     assert payload["schema"] == "agt_reverse_fallback_admission/v1"
     assert payload["status"] == "DRAFT"
     assert payload["eligible_connector_ids"] == ["connector_001"]
-    assert payload["source"]["admission_policy"] == "AUTO_ONLY_LOCAL_FORWARD_OCCUPANCY_BLOCKED"
+    assert payload["source"]["admission_policy"] == (
+        "AUTO_LOCAL_OCCUPANCY_OR_ENDPOINT_SAFE_FORWARD_PATH_BOUNDARY"
+    )
+    assert payload["source"]["endpoint_boundary_conflict_never_reverse_admitted"] is True
     assert payload["source"]["map_insufficient_never_auto_admitted"] is True
     assert payload["source"]["validation_scope"] == "R6B_INPUT_SELECTION_NOT_ROUTE_READY"
