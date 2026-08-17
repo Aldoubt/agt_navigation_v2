@@ -75,6 +75,9 @@ def _setup(context):
         "--map-yaml", str(map_yaml),
         "--nav2-live",
     ]
+    semantic_map = LaunchConfiguration("semantic_map").perform(context).strip()
+    if semantic_map:
+        run_args.extend(["--semantic-map", str(Path(semantic_map).expanduser().resolve())])
     snapshot = LaunchConfiguration("site_snapshot").perform(context).strip()
     if snapshot:
         run_args.extend(["--site-snapshot", str(Path(snapshot).expanduser().resolve())])
@@ -119,6 +122,7 @@ def generate_launch_description():
         DeclareLaunchArgument("run_id", default_value="run_001"),
         DeclareLaunchArgument("formal", default_value="false"),
         DeclareLaunchArgument("site_snapshot", default_value=""),
+        DeclareLaunchArgument("semantic_map", default_value=""),
         DeclareLaunchArgument("lattice_filepath", default_value=""),
         DeclareLaunchArgument("clearance_margin_m", default_value="0.0"),
         DeclareLaunchArgument("generated_params_file", default_value="/tmp/agt_route_benchmark_nav2.yaml"),
