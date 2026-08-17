@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from pathlib import Path
 
@@ -157,8 +158,15 @@ def test_bundle_writes_reproducible_tables_figures_and_source_manifest(tmp_path:
                 execution_feasible=(planner == "hybrid_astar" or scenario == "S03_headland_uturn"),
             )
 
+    semantic_map = tmp_path / "semantic.geojson"
+    semantic_map.write_text(
+        '{"type":"FeatureCollection","frame_id":"map","features":[]}',
+        encoding="utf-8",
+    )
+    semantic_sha = hashlib.sha256(semantic_map.read_bytes()).hexdigest()
+
     out = tmp_path / "paper"
-    bundle = build_paper_bundle(results, out)
+    bundle = build_paper_bundle(results, out, semantic_map=semantic_map)
 
     for filename in (
         "comparison.csv",
@@ -190,6 +198,7 @@ def test_bundle_writes_reproducible_tables_figures_and_source_manifest(tmp_path:
 
     manifest = json.loads((out / "figure_manifest.json").read_text())
     assert manifest["schema_version"] == "1.0"
+    assert manifest["source_files_sha256"]["external_semantic/semantic.geojson"] == semantic_sha
     assert set(manifest["figures"]) == {
         "D1_synthetic_problem",
         "D2_S02_planner_comparison",
