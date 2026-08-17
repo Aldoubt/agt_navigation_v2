@@ -299,6 +299,20 @@ Metrics include lateral RMSE / mean / maximum error, heading RMSE, final positio
 
 Do not re-click or retype waypoints for the site test. The same accepted Route Asset / normalized `path.csv` identity must be retained. The existing V2.5 `Nav2FollowPathTrackerAdapter` is the intended controller boundary: it tracks provided Route segments and does not request a new global path.
 
+Start the real trajectory recorder in a separate terminal before enabling the route task:
+
+```bash
+ros2 run agt_route_benchmark route_tracking_tf_recorder.py \
+  --reference runtime/results/paper1_route_benchmark/greenhouse_01/S06_full_mission/<ours-run>/path.csv \
+  --executed runtime/results/paper1_real_tracking/run_001/executed.csv \
+  --metrics runtime/results/paper1_real_tracking/run_001/tracking_metrics.json \
+  --fixed-frame map \
+  --base-frame base_footprint \
+  --rate 20
+```
+
+The recorder samples the real `map -> base_footprint` TF directly. Stop it with `Ctrl-C` after the route trial; it then writes the same executed-trajectory schema and tracking metrics used by the lightweight simulation. This keeps simulation and field evaluation on one metric implementation.
+
 Before enabling physical execution, the MKmini platform profile must be updated from preview-only to execution-ready only after the actual `base_footprint`, mounted envelope and real steering/turning limit have been measured and accepted.
 
 Record at minimum:
