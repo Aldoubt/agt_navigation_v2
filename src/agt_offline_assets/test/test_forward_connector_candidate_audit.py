@@ -174,6 +174,9 @@ def test_serialization_keeps_all_candidates_and_preview_only_boundary():
     assert len(item["candidates"]) == item["candidate_count"]
     assert "required_zone_extension" in item["candidates"][0]
     assert "preview_footprint_evidence" in item["candidates"][0]
+    assert item["start_endpoint_site_boundary_free"] is True
+    assert item["goal_endpoint_site_boundary_free"] is True
+    assert "site_boundary_free" in item["candidates"][0]
 
 
 def test_candidate_audit_explicit_none_boundary_matches_default():
@@ -197,7 +200,7 @@ def test_candidate_audit_explicit_none_boundary_matches_default():
     assert default == explicit
 
 
-def test_candidate_audit_rejects_locally_relevant_boundary_crossing_set():
+def test_candidate_audit_endpoint_boundary_conflict_is_connector_level_hard_evidence():
     plan = derive_forward_connector_candidate_audit(
         (_request(),),
         _zones(),
@@ -205,4 +208,40 @@ def test_candidate_audit_rejects_locally_relevant_boundary_crossing_set():
         _vehicle(),
         site_boundary=_boundary(),
     )
-    assert plan.connectors[0].status == "LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT"
+    result = plan.connectors[0]
+    assert result.status == "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT"
+    assert result.start_endpoint_site_boundary_free is False
+    assert result.goal_endpoint_site_boundary_free is False
+    assert result.candidate_count == 0
+
+
+def test_candidate_audit_endpoint_safe_forward_path_boundary_conflict_is_distinct(
+    monkeypatch,
+):
+    import agt_offline_assets.forward_connector_candidate_audit as audit_api
+
+    def endpoint_safe_path_blocked(samples, footprint, boundary):
+        return len(tuple(samples)) == 1
+
+    monkeypatch.setattr(
+        audit_api,
+        "_candidate_inside_site_boundary",
+        endpoint_safe_path_blocked,
+    )
+    plan = derive_forward_connector_candidate_audit(
+        (_request(),),
+        _zones(),
+        _grid(FREE),
+        _vehicle(),
+        site_boundary=_boundary(-2.0, 2.0),
+    )
+    result = plan.connectors[0]
+    assert result.status == "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT"
+    assert result.start_endpoint_site_boundary_free is True
+    assert result.goal_endpoint_site_boundary_free is True
+    assert result.local_candidate_count >= 1
+    assert all(
+        not item.site_boundary_free
+        for item in result.candidates
+        if item.local_headland_candidate
+    )
