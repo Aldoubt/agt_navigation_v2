@@ -20,7 +20,7 @@ class ExperimentRunner:
         safe_run_id = spec.run_id.replace("/", "_").replace("\\", "_")
         return self.result_root / spec.site_id / spec.scenario.scenario_id / f"{spec.planner_id}-{suffix}-{safe_run_id}"
 
-    def run(self, spec: ExperimentSpec, adapter: PlannerAdapter) -> Path:
+    def run(self, spec: ExperimentSpec, adapter: PlannerAdapter, *, path_evaluator=None) -> Path:
         if spec.formal:
             snapshot_id = str(spec.metadata.get("site_snapshot_sha256", ""))
             if len(snapshot_id) != 64 or any(c not in "0123456789abcdef" for c in snapshot_id):
@@ -60,7 +60,16 @@ class ExperimentRunner:
         if result.success:
             write_path_csv(result.path, out / "path.csv")
             write_path_geojson(result.path, out / "path.geojson")
-            metrics.update(compute_path_metrics(result.path))
+            validation_metrics = dict(path_evaluator(result.path)) if path_evaluator is not None else {}
+            metrics.update(
+                compute_path_metrics(
+                    result.path,
+                    min_clearance_m=validation_metrics.get("min_clearance_m"),
+                    footprint_collision_count=validation_metrics.get("footprint_collision_count"),
+                    semantic_violation_count=validation_metrics.get("semantic_violation_count"),
+                )
+            )
+            metrics.update(validation_metrics)
             if spec.scenario.level == "mission":
                 metrics.update(
                     compute_mission_metrics(
