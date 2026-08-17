@@ -10,6 +10,7 @@ from agt_offline_assets.forward_connector_candidate_audit import (
 )
 from agt_offline_assets.navigation_grid import NavigationGridEvidence
 from agt_offline_assets.navigation_map_derivation import FREE, OCCUPIED, UNKNOWN
+from agt_offline_assets.site_boundary import SiteBoundary
 from agt_offline_assets.turn_zones import TurnZone, TurnZoneSet
 from agt_offline_assets.vehicle_profile import CanonicalVehicleProfile
 
@@ -24,8 +25,18 @@ def _vehicle() -> CanonicalVehicleProfile:
         base_frame="base_link",
         physical_length_m=0.84,
         physical_width_m=0.60,
-        footprint_xy=((0.42, 0.30), (0.42, -0.30), (-0.42, -0.30), (-0.42, 0.30)),
-        navigation_footprint_xy=((0.42, 0.30), (0.42, -0.30), (-0.42, -0.30), (-0.42, 0.30)),
+        footprint_xy=(
+            (0.42, 0.30),
+            (0.42, -0.30),
+            (-0.42, -0.30),
+            (-0.42, 0.30),
+        ),
+        navigation_footprint_xy=(
+            (0.42, 0.30),
+            (0.42, -0.30),
+            (-0.42, -0.30),
+            (-0.42, 0.30),
+        ),
         navigation_width_m=0.60,
         navigation_length_m=0.84,
         wheel_base_m=0.60,
@@ -67,7 +78,12 @@ def _zones() -> TurnZoneSet:
             TurnZone(
                 zone_id="turn_high_u",
                 side="HIGH_U",
-                polygon_xy=((-0.5, -0.5), (0.5, -0.5), (0.5, 2.5), (-0.5, 2.5)),
+                polygon_xy=(
+                    (-0.5, -0.5),
+                    (0.5, -0.5),
+                    (0.5, 2.5),
+                    (-0.5, 2.5),
+                ),
                 supported_aisle_ids=("aisle_001", "aisle_002"),
                 endpoint_count=2,
                 free_fraction=float("nan"),
@@ -89,6 +105,19 @@ def _grid(fill) -> NavigationGridEvidence:
     )
 
 
+def _boundary(x0=-0.20, x1=0.20) -> SiteBoundary:
+    return SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=(
+            (x0, -1.0),
+            (x1, -1.0),
+            (x1, 3.0),
+            (x0, 3.0),
+        ),
+        source={"fixture": "narrow_boundary"},
+    )
+
+
 def test_all_free_grid_classifies_forward_preview_free_and_orders_by_zone_extension():
     plan = derive_forward_connector_candidate_audit(
         (_request(),), _zones(), _grid(FREE), _vehicle()
@@ -97,7 +126,9 @@ def test_all_free_grid_classifies_forward_preview_free_and_orders_by_zone_extens
     assert result.status == "FORWARD_PREVIEW_FREE"
     assert plan.forward_preview_free_count == 1
     assert result.candidate_count >= 4
-    extensions = [item.max_required_zone_extension_m for item in result.candidates]
+    extensions = [
+        item.max_required_zone_extension_m for item in result.candidates
+    ]
     assert extensions == sorted(extensions)
     assert result.local_candidate_count >= 1
 
@@ -110,7 +141,10 @@ def test_occupied_grid_classifies_local_forward_as_known_blocked():
     assert result.status == "LOCAL_FORWARD_OCCUPANCY_BLOCKED"
     assert plan.local_occupancy_blocked_count == 1
     assert result.local_known_occupied_count == result.local_candidate_count
-    assert all(item.footprint_evidence.occupied_fraction == 1.0 for item in result.candidates)
+    assert all(
+        item.footprint_evidence.occupied_fraction == 1.0
+        for item in result.candidates
+    )
 
 
 def test_unknown_grid_classifies_local_map_evidence_insufficient():
@@ -119,7 +153,9 @@ def test_unknown_grid_classifies_local_map_evidence_insufficient():
         _zones(),
         _grid(UNKNOWN),
         _vehicle(),
-        ForwardConnectorCandidateAuditConfig(known_map_max_unknown_fraction=0.02),
+        ForwardConnectorCandidateAuditConfig(
+            known_map_max_unknown_fraction=0.02
+        ),
     )
     result = plan.connectors[0]
     assert result.status == "LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT"
@@ -138,3 +174,35 @@ def test_serialization_keeps_all_candidates_and_preview_only_boundary():
     assert len(item["candidates"]) == item["candidate_count"]
     assert "required_zone_extension" in item["candidates"][0]
     assert "preview_footprint_evidence" in item["candidates"][0]
+
+
+def test_candidate_audit_explicit_none_boundary_matches_default():
+    requests = (_request(),)
+    zones = _zones()
+    navigation = _grid(FREE)
+    vehicle = _vehicle()
+    default = derive_forward_connector_candidate_audit(
+        requests,
+        zones,
+        navigation,
+        vehicle,
+    )
+    explicit = derive_forward_connector_candidate_audit(
+        requests,
+        zones,
+        navigation,
+        vehicle,
+        site_boundary=None,
+    )
+    assert default == explicit
+
+
+def test_candidate_audit_rejects_locally_relevant_boundary_crossing_set():
+    plan = derive_forward_connector_candidate_audit(
+        (_request(),),
+        _zones(),
+        _grid(FREE),
+        _vehicle(),
+        site_boundary=_boundary(),
+    )
+    assert plan.connectors[0].status == "LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT"
