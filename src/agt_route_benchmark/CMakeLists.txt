@@ -61,6 +61,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_synthetic_greenhouse test/test_synthetic_greenhouse.py)
   ament_add_pytest_test(test_paper_bundle test/test_paper_bundle.py)
   ament_add_pytest_test(test_map_curation test/test_map_curation.py)
+  ament_add_pytest_test(test_benchmark_launch_contract test/test_benchmark_launch_contract.py)
 endif()
 
 ament_package()
