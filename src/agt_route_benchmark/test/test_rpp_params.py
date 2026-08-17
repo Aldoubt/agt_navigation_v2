@@ -29,7 +29,8 @@ def test_humble_rpp_profile_is_ackermann_safe_and_uses_humble_parameter_names(tm
     assert rpp["use_rotate_to_heading"] is False
     assert rpp["allow_reversing"] is True
     assert rpp["regulated_linear_scaling_min_radius"] == 1.5
-    assert rpp["use_fixed_curvature_lookahead"] is False
+    assert "use_fixed_curvature_lookahead" not in rpp
+    assert "curvature_lookahead_dist" not in rpp
     assert controller["controller_frequency"] == 20.0
 
 
@@ -40,6 +41,7 @@ def test_rpp_local_costmap_uses_mkmini_footprint_and_odom_frame(tmp_path: Path):
     assert local["robot_base_frame"] == "base_footprint"
     assert local["footprint"] == "[[0.42, 0.3], [0.42, -0.3], [-0.42, -0.3], [-0.42, 0.3]]"
     assert local["rolling_window"] is True
+    assert local["track_unknown_space"] is False
     assert local["inflation_layer"]["cost_scaling_factor"] == 4.0
     assert data["controller_server"]["ros__parameters"]["FollowPath"]["inflation_cost_scaling_factor"] == 4.0
 
