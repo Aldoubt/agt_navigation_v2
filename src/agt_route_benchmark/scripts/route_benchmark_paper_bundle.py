@@ -14,12 +14,14 @@ def main() -> int:
     parser.add_argument("--results-root", required=True, type=Path)
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--map-yaml", type=Path)
+    parser.add_argument("--semantic-map", type=Path)
     args = parser.parse_args()
 
     bundle = build_paper_bundle(
         args.results_root,
         args.output_dir,
         map_yaml=args.map_yaml,
+        semantic_map=args.semantic_map,
     )
     print(bundle.output_dir)
     return 0
