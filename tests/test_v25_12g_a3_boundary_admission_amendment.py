@@ -437,7 +437,10 @@ def test_acceptance_summary_rejects_endpoint_boundary_reverse_admission():
     service_graph, motion_graph, transition_records = _summary_fixture(
         endpoint_decision="ELIGIBLE_REVERSE_FALLBACK"
     )
-    with pytest.raises(ValueError, match="endpoint.*boundary|boundary.*endpoint"):
+    with pytest.raises(
+        ValueError,
+        match="endpoint Site Boundary conflict",
+    ):
         harness._summary(
             service_graph,
             motion_graph,

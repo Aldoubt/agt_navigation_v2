@@ -21,7 +21,13 @@ import numpy as np
 import yaml
 
 from .agricultural_coverage_ordering import ConnectorRequest
-from .forward_connector import ForwardConnectorConfig, _dubins_candidates, _sample_candidate, _zone_by_id
+from .forward_connector import (
+    ForwardConnectorConfig,
+    ForwardConnectorSample,
+    _dubins_candidates,
+    _sample_candidate,
+    _zone_by_id,
+)
 from .forward_connector_diagnostics import _candidate_expansion
 from .forward_connector_navigation_gate import (
     ForwardConnectorNavigationGateConfig,
@@ -92,6 +98,8 @@ class ForwardConnectorCandidateAuditResult:
     local_map_insufficient_count: int
     candidates: tuple[ForwardCandidateAuditItem, ...]
     reason: str
+    start_endpoint_site_boundary_free: bool = True
+    goal_endpoint_site_boundary_free: bool = True
 
 
 @dataclass(frozen=True)
@@ -125,6 +133,22 @@ def _known_map(evidence: GridPathEvidence, cfg: ForwardConnectorCandidateAuditCo
     return (
         evidence.grid_coverage_fraction >= cfg.known_map_min_grid_coverage_fraction
         and evidence.unknown_fraction <= cfg.known_map_max_unknown_fraction
+    )
+
+
+def _endpoint_inside_site_boundary(pose, local_footprint, site_boundary) -> bool:
+    if site_boundary is None:
+        return True
+    sample = ForwardConnectorSample(
+        x=float(pose[0]),
+        y=float(pose[1]),
+        z=float(pose[2]),
+        yaw=float(pose[3]),
+    )
+    return _candidate_inside_site_boundary(
+        (sample,),
+        local_footprint,
+        site_boundary,
     )
 
 
@@ -189,6 +213,43 @@ def derive_forward_connector_candidate_audit(
             )
             continue
 
+        start_boundary_free = _endpoint_inside_site_boundary(
+            request.start_pose,
+            local_footprint,
+            site_boundary,
+        )
+        goal_boundary_free = _endpoint_inside_site_boundary(
+            request.goal_pose,
+            local_footprint,
+            site_boundary,
+        )
+        if site_boundary is not None and not (
+            start_boundary_free and goal_boundary_free
+        ):
+            results.append(
+                ForwardConnectorCandidateAuditResult(
+                    connector_id=request.connector_id,
+                    from_aisle_id=request.from_aisle_id,
+                    to_aisle_id=request.to_aisle_id,
+                    turn_zone_id=request.turn_zone_id,
+                    status="CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT",
+                    minimum_zone_extension_m=0.0,
+                    local_zone_extension_limit_m=0.0,
+                    candidate_count=0,
+                    local_candidate_count=0,
+                    local_known_occupied_count=0,
+                    local_map_insufficient_count=0,
+                    candidates=(),
+                    reason=(
+                        "connector start or goal footprint touches or crosses "
+                        "the hard Site Boundary"
+                    ),
+                    start_endpoint_site_boundary_free=start_boundary_free,
+                    goal_endpoint_site_boundary_free=goal_boundary_free,
+                )
+            )
+            continue
+
         raw_items = []
         for path_type, normalized_lengths in _dubins_candidates(
             request.start_pose, request.goal_pose, radius
@@ -201,7 +262,11 @@ def derive_forward_connector_candidate_audit(
                 radius,
                 forward_cfg.sample_step_m,
             )
-            centerline, footprint = _evaluate_candidate(samples, navigation, local_footprint)
+            centerline, footprint = _evaluate_candidate(
+                samples,
+                navigation,
+                local_footprint,
+            )
             boundary_free = _candidate_inside_site_boundary(
                 samples,
                 local_footprint,
@@ -243,6 +308,8 @@ def derive_forward_connector_candidate_audit(
                     local_map_insufficient_count=0,
                     candidates=(),
                     reason="no analytic forward-only Dubins candidate exists",
+                    start_endpoint_site_boundary_free=start_boundary_free,
+                    goal_endpoint_site_boundary_free=goal_boundary_free,
                 )
             )
             continue
@@ -282,9 +349,13 @@ def derive_forward_connector_candidate_audit(
 
         local = [item for item in items if item.local_headland_candidate]
         local_safe = [item for item in local if item.site_boundary_free]
-        local_known = [item for item in local_safe if _known_map(item.footprint_evidence, cfg)]
+        local_known = [
+            item for item in local_safe if _known_map(item.footprint_evidence, cfg)
+        ]
         local_known_occupied = [
-            item for item in local_known if item.footprint_evidence.occupied_fraction > 0.0
+            item
+            for item in local_known
+            if item.footprint_evidence.occupied_fraction > 0.0
         ]
         local_map_insufficient = [
             item for item in local_safe if not _known_map(item.footprint_evidence, cfg)
@@ -294,26 +365,35 @@ def derive_forward_connector_candidate_audit(
             status = "FORWARD_PREVIEW_FREE"
             reason = "at least one forward Dubins candidate is preview-footprint free"
         elif site_boundary is not None and local and not local_safe:
-            status = "LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT"
+            status = "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT"
             reason = (
-                "all locally relevant forward candidates touch or cross the hard Site Boundary"
+                "all locally relevant forward candidates touch or cross the hard "
+                "Site Boundary while connector endpoints remain legal"
             )
         elif local_safe and len(local_known_occupied) == len(local_safe):
             status = "LOCAL_FORWARD_OCCUPANCY_BLOCKED"
             reason = (
-                "all boundary-safe locally relevant forward candidates are sufficiently mapped and intersect OCCUPIED cells"
+                "all boundary-safe locally relevant forward candidates are "
+                "sufficiently mapped and intersect OCCUPIED cells"
             )
         elif local_known_occupied and local_map_insufficient:
             status = "LOCAL_FORWARD_MIXED_EVIDENCE"
             reason = (
-                "boundary-safe locally relevant candidates include known OCCUPIED conflicts and insufficient-map alternatives"
+                "boundary-safe locally relevant candidates include known OCCUPIED "
+                "conflicts and insufficient-map alternatives"
             )
         elif local_map_insufficient:
             status = "LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT"
-            reason = "local forward candidates require UNKNOWN or incompletely covered map evidence"
+            reason = (
+                "local forward candidates require UNKNOWN or incompletely covered "
+                "map evidence"
+            )
         else:
             status = "LOCAL_FORWARD_POLICY_REVIEW"
-            reason = "local forward candidates are rejected but do not fit a stronger diagnostic class"
+            reason = (
+                "local forward candidates are rejected but do not fit a stronger "
+                "diagnostic class"
+            )
 
         results.append(
             ForwardConnectorCandidateAuditResult(
@@ -330,6 +410,8 @@ def derive_forward_connector_candidate_audit(
                 local_map_insufficient_count=len(local_map_insufficient),
                 candidates=tuple(items),
                 reason=reason,
+                start_endpoint_site_boundary_free=start_boundary_free,
+                goal_endpoint_site_boundary_free=goal_boundary_free,
             )
         )
 
@@ -398,6 +480,12 @@ def forward_connector_candidate_audit_to_dict(
                 "local_candidate_count": result.local_candidate_count,
                 "local_known_occupied_count": result.local_known_occupied_count,
                 "local_map_insufficient_count": result.local_map_insufficient_count,
+                "start_endpoint_site_boundary_free": (
+                    result.start_endpoint_site_boundary_free
+                ),
+                "goal_endpoint_site_boundary_free": (
+                    result.goal_endpoint_site_boundary_free
+                ),
                 "validation_scope": "PREVIEW_ONLY_NOT_R8_VEHICLE_READY",
                 "candidates": [
                     {
@@ -414,7 +502,9 @@ def forward_connector_candidate_audit_to_dict(
                             "max_m": item.max_required_zone_extension_m,
                         },
                         "centerline_evidence": _evidence_dict(item.centerline_evidence),
-                        "preview_footprint_evidence": _evidence_dict(item.footprint_evidence),
+                        "preview_footprint_evidence": _evidence_dict(
+                            item.footprint_evidence
+                        ),
                     }
                     for item in result.candidates
                 ],

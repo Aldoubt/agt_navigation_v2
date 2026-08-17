@@ -15,6 +15,8 @@ from agt_offline_assets.vehicle_profile import load_canonical_vehicle_profile
 from agt_offline_assets.vehicle_feasible_motion_graph import (
     A1_CENTERLINE_EXACT_REVERSE_RETRACE,
     BOUNDED_REVERSE_PRIMITIVE_SEARCH,
+    BOUNDED_SEARCH_NO_SOLUTION,
+    EXECUTABLE,
     derive_vehicle_feasible_motion_graph,
     write_vehicle_feasible_motion_graph,
 )
@@ -161,7 +163,9 @@ def _dead_end_is_exact_retrace(item) -> bool:
         return True
     if item.backend != A1_CENTERLINE_EXACT_REVERSE_RETRACE or item.cusp_count != 1:
         return False
-    cusp_indices = [index for index, sample in enumerate(item.samples) if sample.is_cusp]
+    cusp_indices = [
+        index for index, sample in enumerate(item.samples) if sample.is_cusp
+    ]
     if len(cusp_indices) != 1:
         return False
     cusp = cusp_indices[0]
@@ -202,24 +206,55 @@ def _forbidden_key_count(value: Any) -> int:
 def _summary(service_graph, motion_graph, service_records, transition_records):
     summary = _diagnostics_dict(motion_graph.diagnostics)
     service_ids = {str(item.service_state_id) for item in service_graph.service_states}
-    motion_service_ids = {str(item.service_state_id) for item in motion_graph.service_actions}
+    motion_service_ids = {
+        str(item.service_state_id) for item in motion_graph.service_actions
+    }
     connector_ids = {
         str(item.connector_candidate_id) for item in service_graph.connector_candidates
     }
     motion_connector_ids = {
-        str(item.connector_candidate_id) for item in motion_graph.transition_validations
+        str(item.connector_candidate_id)
+        for item in motion_graph.transition_validations
     }
     dead_end_non_retrace = sum(
         not _dead_end_is_exact_retrace(item)
         for item in motion_graph.service_actions
         if item.service_type == "DEAD_END_FORWARD_IN_REVERSE_OUT"
     )
-    boundary_reverse_bypass = sum(
-        item.backend == BOUNDED_REVERSE_PRIMITIVE_SEARCH
-        and str(item.forward_evidence.get("audit_status", ""))
-        == "LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT"
-        for item in motion_graph.transition_validations
-    )
+
+    endpoint_conflicts = 0
+    path_conflicts = 0
+    path_reverse_admitted = 0
+    path_reverse_executable = 0
+    path_reverse_bounded_no_solution = 0
+    endpoint_reverse_admission = 0
+    for item in motion_graph.transition_validations:
+        forward_status = str(item.forward_evidence.get("audit_status", ""))
+        admission_decision = str(
+            item.reverse_admission_evidence.get("decision", "")
+        )
+        if forward_status == "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT":
+            endpoint_conflicts += 1
+            if (
+                admission_decision == "ELIGIBLE_REVERSE_FALLBACK"
+                or item.backend == BOUNDED_REVERSE_PRIMITIVE_SEARCH
+            ):
+                endpoint_reverse_admission += 1
+        elif forward_status == "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT":
+            path_conflicts += 1
+            if admission_decision == "ELIGIBLE_REVERSE_FALLBACK":
+                path_reverse_admitted += 1
+                if (
+                    item.backend == BOUNDED_REVERSE_PRIMITIVE_SEARCH
+                    and item.status == EXECUTABLE
+                ):
+                    path_reverse_executable += 1
+                if (
+                    item.backend == BOUNDED_REVERSE_PRIMITIVE_SEARCH
+                    and item.proof_scope == BOUNDED_SEARCH_NO_SOLUTION
+                ):
+                    path_reverse_bounded_no_solution += 1
+
     forbidden = _forbidden_key_count(
         {"service_actions": service_records, "transitions": transition_records}
     )
@@ -228,14 +263,32 @@ def _summary(service_graph, motion_graph, service_records, transition_records):
             "all_a2_service_states_preserved": service_ids == motion_service_ids,
             "all_a2_connector_candidates_preserved": connector_ids == motion_connector_ids,
             "dead_end_non_retrace_count": int(dead_end_non_retrace),
-            "site_boundary_reverse_bypass_count": int(boundary_reverse_bypass),
+            "endpoint_boundary_conflict_count": int(endpoint_conflicts),
+            "forward_path_boundary_conflict_count": int(path_conflicts),
+            "forward_path_boundary_reverse_admitted_count": int(
+                path_reverse_admitted
+            ),
+            "forward_path_boundary_reverse_executable_count": int(
+                path_reverse_executable
+            ),
+            "forward_path_boundary_reverse_bounded_no_solution_count": int(
+                path_reverse_bounded_no_solution
+            ),
+            "endpoint_boundary_conflict_reverse_admission_count": int(
+                endpoint_reverse_admission
+            ),
+            # Backward-compatible key with corrected semantics: only a true
+            # endpoint-hard-conflict reverse admission counts as a bypass.
+            "site_boundary_reverse_bypass_count": int(endpoint_reverse_admission),
             "forbidden_semantic_key_count": int(forbidden),
         }
     )
     if dead_end_non_retrace:
         raise ValueError("A3 dead-end validation contains non-retrace semantics")
-    if boundary_reverse_bypass:
-        raise ValueError("A3 reverse fallback bypassed a Site Boundary conflict")
+    if endpoint_reverse_admission:
+        raise ValueError(
+            "A3 endpoint Site Boundary conflict was admitted to reverse fallback"
+        )
     if forbidden:
         raise ValueError("A3 report contains forbidden route-readiness semantics")
     return summary
@@ -273,7 +326,9 @@ def main(argv: list[str] | None = None) -> int:
         },
     )
 
-    service_records = [_service_record(item) for item in motion_graph.service_actions]
+    service_records = [
+        _service_record(item) for item in motion_graph.service_actions
+    ]
     transition_records = [
         _transition_record(item) for item in motion_graph.transition_validations
     ]

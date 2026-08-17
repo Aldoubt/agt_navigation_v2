@@ -166,6 +166,7 @@ def load_forward_connector_candidate_audit(
                     ),
                     preview_footprint_free=bool(candidate.get("preview_footprint_free", False)),
                     local_headland_candidate=bool(candidate.get("local_headland_candidate", False)),
+                    site_boundary_free=bool(candidate.get("site_boundary_free", True)),
                 )
             )
 
@@ -184,6 +185,12 @@ def load_forward_connector_candidate_audit(
                 local_map_insufficient_count=int(item.get("local_map_insufficient_count", 0)),
                 candidates=tuple(candidates),
                 reason=str(item.get("reason", "")),
+                start_endpoint_site_boundary_free=bool(
+                    item.get("start_endpoint_site_boundary_free", True)
+                ),
+                goal_endpoint_site_boundary_free=bool(
+                    item.get("goal_endpoint_site_boundary_free", True)
+                ),
             )
         )
 

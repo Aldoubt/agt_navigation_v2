@@ -1,17 +1,21 @@
 """R6A admission gate for reverse-aware agricultural connectors.
 
 The forward candidate audit is the evidence boundary for entering reverse
-planning.  This module deliberately does not generate reverse motion.  It only
+planning. This module deliberately does not generate reverse motion. It only
 classifies which connector requests may be handed to R6B.
 
 Automatic admission is conservative:
 
 - ``LOCAL_FORWARD_OCCUPANCY_BLOCKED`` -> eligible for reverse fallback
+- ``LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT`` -> eligible only after endpoint safety
+- ``CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT`` -> hard rejection
 - ``LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT`` -> hold for map review
 - ``LOCAL_FORWARD_MIXED_EVIDENCE`` -> hold unless explicitly operator-approved
 - ``FORWARD_PREVIEW_FREE`` -> keep the forward solution path
 
-This prevents a reverse planner from hiding incomplete map evidence.
+This prevents a reverse planner from hiding incomplete map evidence while
+allowing an endpoint-safe reverse-aware motion family to satisfy the same hard
+Site Boundary independently of the forward Dubins family.
 """
 
 from __future__ import annotations
@@ -106,6 +110,27 @@ def derive_reverse_fallback_admission(
                 "all locally relevant forward Dubins candidates are sufficiently mapped "
                 "and intersect OCCUPIED cells"
             )
+        elif status == "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT":
+            if not (
+                bool(item.start_endpoint_site_boundary_free)
+                and bool(item.goal_endpoint_site_boundary_free)
+            ):
+                raise ValueError(
+                    "forward path Site Boundary conflict cannot enter reverse fallback "
+                    "unless both connector endpoint footprints are boundary-safe"
+                )
+            decision = "ELIGIBLE_REVERSE_FALLBACK"
+            reason = (
+                "connector endpoints are boundary-safe but locally relevant forward "
+                "Dubins paths violate the hard Site Boundary; R6B may search for an "
+                "independently boundary-safe reverse-aware local motion"
+            )
+        elif status == "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT":
+            decision = "REJECT_HARD_CONSTRAINT"
+            reason = (
+                "connector start or goal footprint violates the hard Site Boundary; "
+                "reverse fallback cannot change the frozen endpoint poses"
+            )
         elif status == "LOCAL_FORWARD_MIXED_EVIDENCE":
             if item.connector_id in approved_mixed:
                 decision = "ELIGIBLE_REVERSE_FALLBACK"
@@ -148,7 +173,10 @@ def derive_reverse_fallback_admission(
     merged_source.update(dict(source or {}))
     merged_source.update(
         {
-            "admission_policy": "AUTO_ONLY_LOCAL_FORWARD_OCCUPANCY_BLOCKED",
+            "admission_policy": (
+                "AUTO_LOCAL_OCCUPANCY_OR_ENDPOINT_SAFE_FORWARD_PATH_BOUNDARY"
+            ),
+            "endpoint_boundary_conflict_never_reverse_admitted": True,
             "mixed_evidence_requires_operator_approval": True,
             "map_insufficient_never_auto_admitted": True,
             "validation_scope": "R6B_INPUT_SELECTION_NOT_ROUTE_READY",

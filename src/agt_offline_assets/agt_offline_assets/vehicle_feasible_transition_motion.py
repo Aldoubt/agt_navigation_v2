@@ -14,7 +14,6 @@ from .forward_connector_candidate_audit import (
 )
 from .forward_connector_navigation_gate import (
     ForwardConnectorNavigationGateConfig,
-    GridPathEvidence,
     _evaluate_candidate,
     _preview_local_footprint,
     derive_forward_connector_navigation_gate,
@@ -195,10 +194,37 @@ def _evidence_dict(evidence) -> dict[str, Any]:
     return {name: getattr(evidence, name) for name in names if hasattr(evidence, name)}
 
 
-def _base_result(binding, candidate, *, status, proof_scope, backend, backend_status, reason,
-                 path_length_m=0.0, forward_distance_m=0.0, reverse_distance_m=0.0,
-                 cusp_count=0, search_expansions=0, samples=(), forward_evidence=None,
-                 reverse_admission_evidence=None):
+def _forward_audit_evidence(item) -> dict[str, Any]:
+    return {
+        "audit_status": str(item.status),
+        "reason": str(item.reason),
+        "start_endpoint_site_boundary_free": bool(
+            getattr(item, "start_endpoint_site_boundary_free", True)
+        ),
+        "goal_endpoint_site_boundary_free": bool(
+            getattr(item, "goal_endpoint_site_boundary_free", True)
+        ),
+    }
+
+
+def _base_result(
+    binding,
+    candidate,
+    *,
+    status,
+    proof_scope,
+    backend,
+    backend_status,
+    reason,
+    path_length_m=0.0,
+    forward_distance_m=0.0,
+    reverse_distance_m=0.0,
+    cusp_count=0,
+    search_expansions=0,
+    samples=(),
+    forward_evidence=None,
+    reverse_admission_evidence=None,
+):
     return TransitionValidation(
         connector_candidate_id=binding.connector_candidate_id,
         from_service_state_id=binding.from_service_state_id,
@@ -267,7 +293,9 @@ def validate_transition_candidates(
     gate_by_id = {str(item.connector_id): item for item in gate.connectors}
     missing_gate = sorted(set(request_by_id) - set(gate_by_id))
     if missing_gate:
-        raise ValueError("forward navigation gate dropped connector ids: " + ", ".join(missing_gate))
+        raise ValueError(
+            "forward navigation gate dropped connector ids: " + ", ".join(missing_gate)
+        )
 
     results: dict[str, TransitionValidation] = {}
     unresolved_requests: list[ConnectorRequest] = []
@@ -294,7 +322,9 @@ def validate_transition_candidates(
                 },
             )
         elif item.status == "TURN_ZONE_METADATA_INVALID":
-            raise ValueError(f"adapter/gate Turn Zone metadata inconsistency for {connector_id}")
+            raise ValueError(
+                f"adapter/gate Turn Zone metadata inconsistency for {connector_id}"
+            )
         else:
             unresolved_requests.append(request_by_id[connector_id])
 
@@ -311,20 +341,32 @@ def validate_transition_candidates(
             source={"acceptance_stage": "v25_12g_a3"},
         )
         audit_by_id = {str(item.connector_id): item for item in audit.connectors}
-        missing_audit = sorted({r.connector_id for r in unresolved_requests} - set(audit_by_id))
+        missing_audit = sorted(
+            {request.connector_id for request in unresolved_requests} - set(audit_by_id)
+        )
         if missing_audit:
-            raise ValueError("forward audit dropped connector ids: " + ", ".join(missing_audit))
+            raise ValueError(
+                "forward audit dropped connector ids: " + ", ".join(missing_audit)
+            )
 
-        occupancy_ids: list[str] = []
+        r6a_ids: list[str] = []
         for request in unresolved_requests:
             connector_id = request.connector_id
             item = audit_by_id[connector_id]
             binding = bindings[connector_id]
             candidate = candidates[connector_id]
-            forward_evidence = {"audit_status": item.status, "reason": item.reason}
+            forward_evidence = _forward_audit_evidence(item)
+
+            if item.status == "TURN_ZONE_METADATA_INVALID":
+                raise ValueError(
+                    f"adapter/audit Turn Zone metadata inconsistency for {connector_id}"
+                )
+            if item.status == "FORWARD_PREVIEW_FREE":
+                raise ValueError(f"forward gate/audit disagreement for {connector_id}")
             if item.status == "LOCAL_FORWARD_SITE_BOUNDARY_CONFLICT":
                 results[connector_id] = _base_result(
-                    binding, candidate,
+                    binding,
+                    candidate,
                     status=REJECTED,
                     proof_scope=PROVEN_HARD_CONSTRAINT_REJECTION,
                     backend=FORWARD_DUBINS_NAVIGATION_GATE,
@@ -334,7 +376,8 @@ def validate_transition_candidates(
                 )
             elif item.status == "LOCAL_FORWARD_MAP_EVIDENCE_INSUFFICIENT":
                 results[connector_id] = _base_result(
-                    binding, candidate,
+                    binding,
+                    candidate,
                     status=UNRESOLVED,
                     proof_scope=MAP_EVIDENCE_INSUFFICIENT,
                     backend=FORWARD_DUBINS_NAVIGATION_GATE,
@@ -344,7 +387,8 @@ def validate_transition_candidates(
                 )
             elif item.status == "LOCAL_FORWARD_MIXED_EVIDENCE":
                 results[connector_id] = _base_result(
-                    binding, candidate,
+                    binding,
+                    candidate,
                     status=UNRESOLVED,
                     proof_scope=MIXED_EVIDENCE_REQUIRES_REVIEW,
                     backend=FORWARD_DUBINS_NAVIGATION_GATE,
@@ -354,7 +398,8 @@ def validate_transition_candidates(
                 )
             elif item.status == "NO_FORWARD_DUBINS_CANDIDATE":
                 results[connector_id] = _base_result(
-                    binding, candidate,
+                    binding,
+                    candidate,
                     status=REJECTED,
                     proof_scope=PROVEN_HARD_CONSTRAINT_REJECTION,
                     backend=FORWARD_DUBINS_NAVIGATION_GATE,
@@ -362,13 +407,16 @@ def validate_transition_candidates(
                     reason=item.reason,
                     forward_evidence=forward_evidence,
                 )
-            elif item.status == "LOCAL_FORWARD_OCCUPANCY_BLOCKED":
-                occupancy_ids.append(connector_id)
-            elif item.status == "FORWARD_PREVIEW_FREE":
-                raise ValueError(f"forward gate/audit disagreement for {connector_id}")
+            elif item.status in {
+                "LOCAL_FORWARD_OCCUPANCY_BLOCKED",
+                "LOCAL_FORWARD_PATH_SITE_BOUNDARY_CONFLICT",
+                "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT",
+            }:
+                r6a_ids.append(connector_id)
             else:
                 results[connector_id] = _base_result(
-                    binding, candidate,
+                    binding,
+                    candidate,
                     status=UNRESOLVED,
                     proof_scope=POLICY_REVIEW_REQUIRED,
                     backend=FORWARD_DUBINS_NAVIGATION_GATE,
@@ -377,140 +425,213 @@ def validate_transition_candidates(
                     forward_evidence=forward_evidence,
                 )
 
-        if occupancy_ids:
+        reverse_ids: list[str] = []
+        admission_by_id = {}
+        if r6a_ids:
             admission = derive_reverse_fallback_admission(
                 audit,
-                ReverseFallbackAdmissionConfig(operator_approved_mixed_connector_ids=()),
-                source={"acceptance_stage": "v25_12g_a3"},
-            )
-            admission_by_id = {str(item.connector_id): item for item in admission.items}
-            admitted = set(admission.eligible_connector_ids)
-            expected_admitted = set(occupancy_ids)
-            if not expected_admitted.issubset(admitted):
-                missing = sorted(expected_admitted - admitted)
-                raise ValueError("R6A failed to admit occupancy-blocked connector ids: " + ", ".join(missing))
-            reverse_requests = tuple(request_by_id[item] for item in sorted(expected_admitted))
-            reverse_plan = derive_reverse_primitive_connector_plan(
-                reverse_requests,
-                admission,
-                turn_zones,
-                navigation,
-                vehicle,
-                ReversePrimitiveConnectorConfig(
-                    preview_footprint_padding_m=config.preview_footprint_padding_m,
+                ReverseFallbackAdmissionConfig(
+                    operator_approved_mixed_connector_ids=()
                 ),
-                site_boundary=site_boundary,
                 source={"acceptance_stage": "v25_12g_a3"},
             )
-            reverse_by_id = {str(item.connector_id): item for item in reverse_plan.connectors}
-            missing_reverse = sorted(expected_admitted - set(reverse_by_id))
-            if missing_reverse:
-                raise ValueError("R6B dropped admitted connector ids: " + ", ".join(missing_reverse))
+            admission_by_id = {
+                str(item.connector_id): item for item in admission.items
+            }
+            missing_admission = sorted(set(r6a_ids) - set(admission_by_id))
+            if missing_admission:
+                raise ValueError(
+                    "R6A dropped connector ids: " + ", ".join(missing_admission)
+                )
 
-            local_footprint = _preview_local_footprint(
-                vehicle,
-                config.preview_footprint_padding_m,
-            )
-            for connector_id in sorted(expected_admitted):
-                candidate = candidates[connector_id]
+            for connector_id in sorted(r6a_ids):
+                audit_item = audit_by_id[connector_id]
+                admission_item = admission_by_id[connector_id]
                 binding = bindings[connector_id]
-                reverse = reverse_by_id[connector_id]
-                admission_item = admission_by_id.get(connector_id)
+                candidate = candidates[connector_id]
+                forward_evidence = _forward_audit_evidence(audit_item)
                 admission_evidence = {
-                    "decision": getattr(admission_item, "decision", "ELIGIBLE_REVERSE_FALLBACK"),
-                    "reason": getattr(admission_item, "reason", ""),
+                    "decision": str(admission_item.decision),
+                    "reason": str(admission_item.reason),
                 }
-                forward_evidence = {
-                    "audit_status": audit_by_id[connector_id].status,
-                    "reason": audit_by_id[connector_id].reason,
-                }
-                if reverse.status in {
-                    "REVERSE_PRIMITIVE_PREVIEW_FREE",
-                    "FORWARD_PRIMITIVE_PREVIEW_FREE",
-                }:
+
+                if audit_item.status == "CONNECTOR_ENDPOINT_SITE_BOUNDARY_CONFLICT":
+                    if admission_item.decision != "REJECT_HARD_CONSTRAINT":
+                        raise ValueError(
+                            "R6A must hard-reject connector endpoint Site Boundary conflict"
+                        )
                     results[connector_id] = _base_result(
-                        binding, candidate,
-                        status=EXECUTABLE,
-                        proof_scope=LOCAL_MOTION_EXECUTABLE,
-                        backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
-                        backend_status=reverse.status,
-                        reason=reverse.reason,
-                        path_length_m=float(reverse.path_length_m or 0.0),
-                        forward_distance_m=float(reverse.forward_distance_m),
-                        reverse_distance_m=float(reverse.reverse_distance_m),
-                        cusp_count=int(reverse.cusp_count),
-                        search_expansions=int(reverse.search_expansions),
-                        samples=_motion_samples(reverse.samples),
-                        forward_evidence=forward_evidence,
-                        reverse_admission_evidence=admission_evidence,
-                    )
-                elif reverse.status == "SITE_BOUNDARY_CONFLICT":
-                    results[connector_id] = _base_result(
-                        binding, candidate,
+                        binding,
+                        candidate,
                         status=REJECTED,
                         proof_scope=PROVEN_HARD_CONSTRAINT_REJECTION,
-                        backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
-                        backend_status=reverse.status,
-                        reason=reverse.reason,
-                        search_expansions=int(reverse.search_expansions),
+                        backend=FORWARD_DUBINS_NAVIGATION_GATE,
+                        backend_status=audit_item.status,
+                        reason=admission_item.reason,
                         forward_evidence=forward_evidence,
                         reverse_admission_evidence=admission_evidence,
                     )
-                elif reverse.status == "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION":
-                    reason = str(reverse.reason).replace("global infeasibility", "infeasibility")
-                    results[connector_id] = _base_result(
-                        binding, candidate,
-                        status=REJECTED,
-                        proof_scope=BOUNDED_SEARCH_NO_SOLUTION,
-                        backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
-                        backend_status=reverse.status,
-                        reason=reason,
-                        search_expansions=int(reverse.search_expansions),
-                        forward_evidence=forward_evidence,
-                        reverse_admission_evidence=admission_evidence,
+                    continue
+
+                if admission_item.decision != "ELIGIBLE_REVERSE_FALLBACK":
+                    raise ValueError(
+                        f"R6A failed to admit connector {connector_id} with "
+                        f"forward audit status {audit_item.status}"
                     )
-                elif reverse.status == "R6B_START_FOOTPRINT_NOT_FREE":
-                    request = request_by_id[connector_id]
-                    probe = (
-                        ForwardConnectorSample(
-                            x=float(request.start_pose[0]),
-                            y=float(request.start_pose[1]),
-                            z=float(request.start_pose[2]),
-                            yaw=float(request.start_pose[3]),
-                        ),
+                reverse_ids.append(connector_id)
+
+            admitted = set(admission.eligible_connector_ids)
+            expected_admitted = set(reverse_ids)
+            if not expected_admitted.issubset(admitted):
+                missing = sorted(expected_admitted - admitted)
+                raise ValueError(
+                    "R6A eligible ids omit admitted connector ids: " + ", ".join(missing)
+                )
+
+            if reverse_ids:
+                reverse_requests = tuple(
+                    request_by_id[connector_id]
+                    for connector_id in sorted(reverse_ids)
+                )
+                reverse_plan = derive_reverse_primitive_connector_plan(
+                    reverse_requests,
+                    admission,
+                    turn_zones,
+                    navigation,
+                    vehicle,
+                    ReversePrimitiveConnectorConfig(
+                        preview_footprint_padding_m=config.preview_footprint_padding_m,
+                    ),
+                    site_boundary=site_boundary,
+                    source={"acceptance_stage": "v25_12g_a3"},
+                )
+                reverse_by_id = {
+                    str(item.connector_id): item for item in reverse_plan.connectors
+                }
+                missing_reverse = sorted(set(reverse_ids) - set(reverse_by_id))
+                if missing_reverse:
+                    raise ValueError(
+                        "R6B dropped admitted connector ids: "
+                        + ", ".join(missing_reverse)
                     )
-                    _center, footprint = _evaluate_candidate(probe, navigation, local_footprint)
-                    if footprint.occupied_fraction > 0.0:
-                        status = REJECTED
-                        proof_scope = PROVEN_HARD_CONSTRAINT_REJECTION
+
+                for connector_id in sorted(reverse_ids):
+                    candidate = candidates[connector_id]
+                    binding = bindings[connector_id]
+                    reverse = reverse_by_id[connector_id]
+                    admission_item = admission_by_id[connector_id]
+                    audit_item = audit_by_id[connector_id]
+                    admission_evidence = {
+                        "decision": str(admission_item.decision),
+                        "reason": str(admission_item.reason),
+                    }
+                    forward_evidence = _forward_audit_evidence(audit_item)
+
+                    if reverse.status in {
+                        "REVERSE_PRIMITIVE_PREVIEW_FREE",
+                        "FORWARD_PRIMITIVE_PREVIEW_FREE",
+                    }:
+                        results[connector_id] = _base_result(
+                            binding,
+                            candidate,
+                            status=EXECUTABLE,
+                            proof_scope=LOCAL_MOTION_EXECUTABLE,
+                            backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
+                            backend_status=reverse.status,
+                            reason=reverse.reason,
+                            path_length_m=float(reverse.path_length_m or 0.0),
+                            forward_distance_m=float(reverse.forward_distance_m),
+                            reverse_distance_m=float(reverse.reverse_distance_m),
+                            cusp_count=int(reverse.cusp_count),
+                            search_expansions=int(reverse.search_expansions),
+                            samples=_motion_samples(reverse.samples),
+                            forward_evidence=forward_evidence,
+                            reverse_admission_evidence=admission_evidence,
+                        )
+                    elif reverse.status == "SITE_BOUNDARY_CONFLICT":
+                        results[connector_id] = _base_result(
+                            binding,
+                            candidate,
+                            status=REJECTED,
+                            proof_scope=PROVEN_HARD_CONSTRAINT_REJECTION,
+                            backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
+                            backend_status=reverse.status,
+                            reason=reverse.reason,
+                            search_expansions=int(reverse.search_expansions),
+                            forward_evidence=forward_evidence,
+                            reverse_admission_evidence=admission_evidence,
+                        )
+                    elif reverse.status == "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION":
+                        reason = str(reverse.reason).replace(
+                            "global infeasibility", "infeasibility"
+                        )
+                        results[connector_id] = _base_result(
+                            binding,
+                            candidate,
+                            status=REJECTED,
+                            proof_scope=BOUNDED_SEARCH_NO_SOLUTION,
+                            backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
+                            backend_status=reverse.status,
+                            reason=reason,
+                            search_expansions=int(reverse.search_expansions),
+                            forward_evidence=forward_evidence,
+                            reverse_admission_evidence=admission_evidence,
+                        )
+                    elif reverse.status == "R6B_START_FOOTPRINT_NOT_FREE":
+                        request = request_by_id[connector_id]
+                        probe = (
+                            ForwardConnectorSample(
+                                x=float(request.start_pose[0]),
+                                y=float(request.start_pose[1]),
+                                z=float(request.start_pose[2]),
+                                yaw=float(request.start_pose[3]),
+                            ),
+                        )
+                        local_footprint = _preview_local_footprint(
+                            vehicle,
+                            config.preview_footprint_padding_m,
+                        )
+                        _center, footprint = _evaluate_candidate(
+                            probe,
+                            navigation,
+                            local_footprint,
+                        )
+                        if footprint.occupied_fraction > 0.0:
+                            status = REJECTED
+                            proof_scope = PROVEN_HARD_CONSTRAINT_REJECTION
+                        else:
+                            status = UNRESOLVED
+                            proof_scope = MAP_EVIDENCE_INSUFFICIENT
+                        results[connector_id] = _base_result(
+                            binding,
+                            candidate,
+                            status=status,
+                            proof_scope=proof_scope,
+                            backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
+                            backend_status=reverse.status,
+                            reason=reverse.reason,
+                            search_expansions=int(reverse.search_expansions),
+                            forward_evidence=forward_evidence,
+                            reverse_admission_evidence=admission_evidence,
+                        )
                     else:
-                        status = UNRESOLVED
-                        proof_scope = MAP_EVIDENCE_INSUFFICIENT
-                    results[connector_id] = _base_result(
-                        binding, candidate,
-                        status=status,
-                        proof_scope=proof_scope,
-                        backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
-                        backend_status=reverse.status,
-                        reason=reverse.reason,
-                        search_expansions=int(reverse.search_expansions),
-                        forward_evidence=forward_evidence,
-                        reverse_admission_evidence=admission_evidence,
-                    )
-                else:
-                    results[connector_id] = _base_result(
-                        binding, candidate,
-                        status=UNRESOLVED,
-                        proof_scope=POLICY_REVIEW_REQUIRED,
-                        backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
-                        backend_status=str(reverse.status),
-                        reason=str(reverse.reason),
-                        search_expansions=int(reverse.search_expansions),
-                        forward_evidence=forward_evidence,
-                        reverse_admission_evidence=admission_evidence,
-                    )
+                        results[connector_id] = _base_result(
+                            binding,
+                            candidate,
+                            status=UNRESOLVED,
+                            proof_scope=POLICY_REVIEW_REQUIRED,
+                            backend=BOUNDED_REVERSE_PRIMITIVE_SEARCH,
+                            backend_status=str(reverse.status),
+                            reason=str(reverse.reason),
+                            search_expansions=int(reverse.search_expansions),
+                            forward_evidence=forward_evidence,
+                            reverse_admission_evidence=admission_evidence,
+                        )
 
     missing_results = sorted(set(request_by_id) - set(results))
     if missing_results:
-        raise ValueError("A3 transition validation dropped connector ids: " + ", ".join(missing_results))
+        raise ValueError(
+            "A3 transition validation dropped connector ids: "
+            + ", ".join(missing_results)
+        )
     return tuple(results[connector_id] for connector_id in sorted(results))
