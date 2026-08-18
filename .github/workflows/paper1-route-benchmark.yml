@@ -31,10 +31,13 @@ jobs:
           python-version: '3.10'
       - name: Install test dependencies
         run: python -m pip install --upgrade pip pytest PyYAML numpy matplotlib pillow shapely
-      - name: Run real-map freeze offline-assets contract
+      - name: Run real-map freeze offline-assets contracts
         env:
           PYTHONPATH: src/agt_offline_assets
-        run: python -m pytest -q src/agt_offline_assets/test/test_navigation_map_freeze_export.py
+        run: >-
+          python -m pytest -q
+          src/agt_offline_assets/test/test_navigation_map_freeze_export.py
+          src/agt_offline_assets/test/test_navigation_map_derivation.py
       - name: Run formal Workbench override metadata contract
         env:
           PYTHONPATH: src/agt_map_workbench:src/agt_offline_assets
@@ -51,3 +54,5 @@ jobs:
           src/agt_route_benchmark/scripts
           src/agt_offline_assets/agt_offline_assets
           src/agt_map_workbench/agt_map_workbench/navigation_override_metadata.py
+          src/agt_map_workbench/agt_map_workbench/paper1_workbench.py
+          src/agt_map_workbench/scripts/paper1_map_workbench_launcher.py
