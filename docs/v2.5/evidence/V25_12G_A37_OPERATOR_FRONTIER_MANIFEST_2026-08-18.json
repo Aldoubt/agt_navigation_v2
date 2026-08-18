@@ -1,0 +1,302 @@
+{
+  "schema": "agt_v25_12g_a37_operator_frontier_manifest/v1",
+  "validation_scope": "A37_OPERATOR_SUPPLIED_FRONTIER_EVIDENCE_NOT_ORIGINAL_JSON_NOT_PLANNER_RERUN_NOT_ROUTE_READY",
+  "provenance": {
+    "kind": "OPERATOR_SUPPLIED_A37_CONSOLE_EVIDENCE",
+    "original_a35_json_available": false,
+    "original_a36_json_available": false,
+    "original_a37_json_available": false,
+    "reconstructed_from_console_output": true,
+    "reconstruction_policy": "ONLY_FIELDS_EXPLICITLY_PRESENT_IN_OPERATOR_SUPPLIED_A37_CONSOLE_OUTPUT"
+  },
+  "summary": {
+    "frontier_candidate_count": 6,
+    "current_a4_entry_gate_passed": false,
+    "frontier_candidate_ids": [
+      "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_019.segment_003.dead_end_forward_in_reverse_out",
+      "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_019.segment_003.service_high_to_low",
+      "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_020.segment_001.service_high_to_low",
+      "headland.turn_high_u.aisle_019.segment_003.dead_end_forward_in_reverse_out.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+      "headland.turn_high_u.aisle_019.segment_003.service_low_to_high.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+      "headland.turn_high_u.aisle_020.segment_001.service_low_to_high.to.aisle_016.segment_003.dead_end_forward_in_reverse_out"
+    ]
+  },
+  "frontier_candidates": [
+    {
+      "candidate_connector_id": "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_019.segment_003.dead_end_forward_in_reverse_out",
+      "from_service_state_id": "aisle_017.segment_005.dead_end_forward_in_reverse_out",
+      "to_service_state_id": "aisle_019.segment_003.dead_end_forward_in_reverse_out",
+      "from_segment_id": "aisle_017.segment_005",
+      "to_segment_id": "aisle_019.segment_003",
+      "side": "HIGH_U",
+      "turn_zone_id": "turn_high_u",
+      "a36_evidence": {
+        "status": "REJECTED",
+        "backend_status": "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+        "search_expansions": 14828,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "MIXED_LIMITATION"
+      },
+      "hypothetical_witnesses": [
+        {
+          "position": "SUCCESSOR_FROM_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_019.segment_003.dead_end_forward_in_reverse_out"
+          ],
+          "service_state_ids": [
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.dead_end_forward_in_reverse_out",
+            "aisle_019.segment_003.dead_end_forward_in_reverse_out"
+          ],
+          "segment_ids": [
+            "aisle_016.segment_003",
+            "aisle_017.segment_005",
+            "aisle_019.segment_003"
+          ],
+          "aisle_ids": ["aisle_016", "aisle_017", "aisle_019"]
+        }
+      ]
+    },
+    {
+      "candidate_connector_id": "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_019.segment_003.service_high_to_low",
+      "from_service_state_id": "aisle_017.segment_005.dead_end_forward_in_reverse_out",
+      "to_service_state_id": "aisle_019.segment_003.service_high_to_low",
+      "from_segment_id": "aisle_017.segment_005",
+      "to_segment_id": "aisle_019.segment_003",
+      "side": "HIGH_U",
+      "turn_zone_id": "turn_high_u",
+      "a36_evidence": {
+        "status": "REJECTED",
+        "backend_status": "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+        "search_expansions": 14828,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "MIXED_LIMITATION"
+      },
+      "hypothetical_witnesses": [
+        {
+          "position": "SUCCESSOR_FROM_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_019.segment_003.service_high_to_low"
+          ],
+          "service_state_ids": [
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.dead_end_forward_in_reverse_out",
+            "aisle_019.segment_003.service_high_to_low"
+          ],
+          "segment_ids": [
+            "aisle_016.segment_003",
+            "aisle_017.segment_005",
+            "aisle_019.segment_003"
+          ],
+          "aisle_ids": ["aisle_016", "aisle_017", "aisle_019"]
+        }
+      ]
+    },
+    {
+      "candidate_connector_id": "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_020.segment_001.service_high_to_low",
+      "from_service_state_id": "aisle_017.segment_005.dead_end_forward_in_reverse_out",
+      "to_service_state_id": "aisle_020.segment_001.service_high_to_low",
+      "from_segment_id": "aisle_017.segment_005",
+      "to_segment_id": "aisle_020.segment_001",
+      "side": "HIGH_U",
+      "turn_zone_id": "turn_high_u",
+      "a36_evidence": {
+        "status": "REJECTED",
+        "backend_status": "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+        "search_expansions": 14912,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "MIXED_LIMITATION"
+      },
+      "hypothetical_witnesses": [
+        {
+          "position": "SUCCESSOR_FROM_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_020.segment_001.service_high_to_low"
+          ],
+          "service_state_ids": [
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.dead_end_forward_in_reverse_out",
+            "aisle_020.segment_001.service_high_to_low"
+          ],
+          "segment_ids": [
+            "aisle_016.segment_003",
+            "aisle_017.segment_005",
+            "aisle_020.segment_001"
+          ],
+          "aisle_ids": ["aisle_016", "aisle_017", "aisle_020"]
+        }
+      ]
+    },
+    {
+      "candidate_connector_id": "headland.turn_high_u.aisle_019.segment_003.dead_end_forward_in_reverse_out.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+      "from_service_state_id": "aisle_019.segment_003.dead_end_forward_in_reverse_out",
+      "to_service_state_id": "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+      "from_segment_id": "aisle_019.segment_003",
+      "to_segment_id": "aisle_016.segment_003",
+      "side": "HIGH_U",
+      "turn_zone_id": "turn_high_u",
+      "a36_evidence": {
+        "status": "REJECTED",
+        "backend_status": "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+        "search_expansions": 202,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "INCONCLUSIVE"
+      },
+      "hypothetical_witnesses": [
+        {
+          "position": "PREDECESSOR_TO_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_019.segment_003.dead_end_forward_in_reverse_out.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.dead_end_forward_in_reverse_out"
+          ],
+          "service_state_ids": [
+            "aisle_019.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.dead_end_forward_in_reverse_out"
+          ],
+          "segment_ids": [
+            "aisle_019.segment_003",
+            "aisle_016.segment_003",
+            "aisle_017.segment_005"
+          ],
+          "aisle_ids": ["aisle_019", "aisle_016", "aisle_017"]
+        },
+        {
+          "position": "PREDECESSOR_TO_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_019.segment_003.dead_end_forward_in_reverse_out.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.service_high_to_low"
+          ],
+          "service_state_ids": [
+            "aisle_019.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.service_high_to_low"
+          ],
+          "segment_ids": [
+            "aisle_019.segment_003",
+            "aisle_016.segment_003",
+            "aisle_017.segment_005"
+          ],
+          "aisle_ids": ["aisle_019", "aisle_016", "aisle_017"]
+        }
+      ]
+    },
+    {
+      "candidate_connector_id": "headland.turn_high_u.aisle_019.segment_003.service_low_to_high.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+      "from_service_state_id": "aisle_019.segment_003.service_low_to_high",
+      "to_service_state_id": "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+      "from_segment_id": "aisle_019.segment_003",
+      "to_segment_id": "aisle_016.segment_003",
+      "side": "HIGH_U",
+      "turn_zone_id": "turn_high_u",
+      "a36_evidence": {
+        "status": "REJECTED",
+        "backend_status": "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+        "search_expansions": 125,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "MIXED_LIMITATION"
+      },
+      "hypothetical_witnesses": [
+        {
+          "position": "PREDECESSOR_TO_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_019.segment_003.service_low_to_high.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.dead_end_forward_in_reverse_out"
+          ],
+          "service_state_ids": [
+            "aisle_019.segment_003.service_low_to_high",
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.dead_end_forward_in_reverse_out"
+          ],
+          "segment_ids": [
+            "aisle_019.segment_003",
+            "aisle_016.segment_003",
+            "aisle_017.segment_005"
+          ],
+          "aisle_ids": ["aisle_019", "aisle_016", "aisle_017"]
+        },
+        {
+          "position": "PREDECESSOR_TO_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_019.segment_003.service_low_to_high.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.service_high_to_low"
+          ],
+          "service_state_ids": [
+            "aisle_019.segment_003.service_low_to_high",
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.service_high_to_low"
+          ],
+          "segment_ids": [
+            "aisle_019.segment_003",
+            "aisle_016.segment_003",
+            "aisle_017.segment_005"
+          ],
+          "aisle_ids": ["aisle_019", "aisle_016", "aisle_017"]
+        }
+      ]
+    },
+    {
+      "candidate_connector_id": "headland.turn_high_u.aisle_020.segment_001.service_low_to_high.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+      "from_service_state_id": "aisle_020.segment_001.service_low_to_high",
+      "to_service_state_id": "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+      "from_segment_id": "aisle_020.segment_001",
+      "to_segment_id": "aisle_016.segment_003",
+      "side": "HIGH_U",
+      "turn_zone_id": "turn_high_u",
+      "a36_evidence": {
+        "status": "REJECTED",
+        "backend_status": "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+        "search_expansions": 301,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "INCONCLUSIVE"
+      },
+      "hypothetical_witnesses": [
+        {
+          "position": "PREDECESSOR_TO_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_020.segment_001.service_low_to_high.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.dead_end_forward_in_reverse_out"
+          ],
+          "service_state_ids": [
+            "aisle_020.segment_001.service_low_to_high",
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.dead_end_forward_in_reverse_out"
+          ],
+          "segment_ids": [
+            "aisle_020.segment_001",
+            "aisle_016.segment_003",
+            "aisle_017.segment_005"
+          ],
+          "aisle_ids": ["aisle_020", "aisle_016", "aisle_017"]
+        },
+        {
+          "position": "PREDECESSOR_TO_EXECUTABLE",
+          "connector_candidate_ids": [
+            "headland.turn_high_u.aisle_020.segment_001.service_low_to_high.to.aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "headland.turn_high_u.aisle_016.segment_003.dead_end_forward_in_reverse_out.to.aisle_017.segment_005.service_high_to_low"
+          ],
+          "service_state_ids": [
+            "aisle_020.segment_001.service_low_to_high",
+            "aisle_016.segment_003.dead_end_forward_in_reverse_out",
+            "aisle_017.segment_005.service_high_to_low"
+          ],
+          "segment_ids": [
+            "aisle_020.segment_001",
+            "aisle_016.segment_003",
+            "aisle_017.segment_005"
+          ],
+          "aisle_ids": ["aisle_020", "aisle_016", "aisle_017"]
+        }
+      ]
+    }
+  ]
+}
