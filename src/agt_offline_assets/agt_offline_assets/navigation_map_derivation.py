@@ -464,22 +464,13 @@ def _write_pgm(path: Path, image: np.ndarray) -> None:
     path.write_bytes(header.encode("ascii") + image.tobytes(order="C"))
 
 
-def write_navigation_map_derivation(
+def _write_nav2_map_files(
     result: NavigationMapResult,
-    output_dir: str | Path,
-    *,
-    source_asset: str | None = None,
-    frame_id: str = "map",
-    overrides: Iterable[Mapping] | None = None,
-) -> Path:
-    """Write one immutable reviewable derivation directory."""
-    output_dir = Path(output_dir)
-    if output_dir.exists():
-        raise FileExistsError(f"navigation derivation output already exists: {output_dir}")
-    output_dir.mkdir(parents=True)
+    output_dir: Path,
+) -> dict[str, object]:
+    output_dir.mkdir(parents=True, exist_ok=True)
     pgm_path = output_dir / "navigation_map.pgm"
     yaml_path = output_dir / "navigation_map.yaml"
-    derivation_path = output_dir / "derivation.yaml"
     _write_pgm(pgm_path, result.pgm_image())
     nav_yaml = {
         "image": pgm_path.name,
@@ -493,6 +484,31 @@ def write_navigation_map_derivation(
     yaml_path.write_text(
         yaml.safe_dump(nav_yaml, sort_keys=False), encoding="utf-8"
     )
+    return {
+        "pgm_path": pgm_path,
+        "yaml_path": yaml_path,
+        "pgm_sha256": sha256_file(pgm_path),
+        "yaml_sha256": sha256_file(yaml_path),
+    }
+
+
+def write_navigation_map_derivation(
+    result: NavigationMapResult,
+    output_dir: str | Path,
+    *,
+    source_asset: str | None = None,
+    frame_id: str = "map",
+    overrides: Iterable[Mapping] | None = None,
+) -> Path:
+    """Write one immutable reviewable derivation directory."""
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        raise FileExistsError(f"navigation derivation output already exists: {output_dir}")
+    output_dir.mkdir(parents=True)
+    written = _write_nav2_map_files(result, output_dir)
+    pgm_path = written["pgm_path"]
+    yaml_path = written["yaml_path"]
+    derivation_path = output_dir / "derivation.yaml"
     np.save(output_dir / "ground_height.npy", result.ground_height_m)
     np.save(output_dir / "slope_deg.npy", result.slope_deg)
     np.save(output_dir / "step_m.npy", result.step_m)
@@ -516,11 +532,89 @@ def write_navigation_map_derivation(
         "outputs": {
             "pgm": pgm_path.name,
             "yaml": yaml_path.name,
-            "pgm_sha256": sha256_file(pgm_path),
-            "yaml_sha256": sha256_file(yaml_path),
+            "pgm_sha256": written["pgm_sha256"],
+            "yaml_sha256": written["yaml_sha256"],
         },
     }
     derivation_path.write_text(
         yaml.safe_dump(record, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+    return output_dir
+
+
+def write_navigation_map_freeze_bundle(
+    base_result: NavigationMapResult,
+    output_dir: str | Path,
+    *,
+    source_asset: str | None = None,
+    frame_id: str = "map",
+    overrides: Iterable[Mapping] | None = None,
+) -> Path:
+    """Write one immutable pre/post-override navigation-map revision.
+
+    The accepted map is always derived from ``base_result`` using the canonical
+    ``apply_navigation_overrides`` rasterization rule. Both products therefore
+    share one grid geometry while remaining independently hashable for audit.
+    """
+    output_dir = Path(output_dir)
+    if output_dir.exists():
+        raise FileExistsError(f"navigation freeze output already exists: {output_dir}")
+    output_dir.mkdir(parents=True)
+
+    ordered_overrides = list(overrides or [])
+    accepted_occupancy = apply_navigation_overrides(base_result, ordered_overrides)
+    accepted_result = NavigationMapResult(
+        **{**base_result.__dict__, "occupancy": accepted_occupancy}
+    )
+
+    generated = _write_nav2_map_files(base_result, output_dir / "generated")
+    accepted = _write_nav2_map_files(accepted_result, output_dir / "accepted")
+
+    np.save(output_dir / "ground_height.npy", base_result.ground_height_m)
+    np.save(output_dir / "slope_deg.npy", base_result.slope_deg)
+    np.save(output_dir / "step_m.npy", base_result.step_m)
+    np.save(output_dir / "obstacle_count.npy", base_result.obstacle_count)
+    np.save(output_dir / "ground_support_count.npy", base_result.ground_support_count)
+
+    record = {
+        "schema": NAVIGATION_DERIVATION_SCHEMA,
+        "revision_kind": "generated_plus_accepted_override_revision",
+        "frame_id": str(frame_id),
+        "source_asset": source_asset,
+        "config": asdict(base_result.config),
+        "grid": {
+            "resolution_m": float(base_result.resolution_m),
+            "origin_xy_m": [
+                float(base_result.origin_x_m),
+                float(base_result.origin_y_m),
+            ],
+            "width": int(base_result.width),
+            "height": int(base_result.height),
+            "bounds_m": [float(v) for v in base_result.bounds_m()],
+        },
+        "counts": {
+            "generated": base_result.counts(),
+            "accepted": accepted_result.counts(),
+        },
+        "ground_seeds": base_result.ground_seed_counts(),
+        "overrides": ordered_overrides,
+        "outputs": {
+            "generated": {
+                "pgm": "generated/navigation_map.pgm",
+                "yaml": "generated/navigation_map.yaml",
+                "pgm_sha256": generated["pgm_sha256"],
+                "yaml_sha256": generated["yaml_sha256"],
+            },
+            "accepted": {
+                "pgm": "accepted/navigation_map.pgm",
+                "yaml": "accepted/navigation_map.yaml",
+                "pgm_sha256": accepted["pgm_sha256"],
+                "yaml_sha256": accepted["yaml_sha256"],
+            },
+        },
+    }
+    (output_dir / "derivation.yaml").write_text(
+        yaml.safe_dump(record, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
     )
     return output_dir
