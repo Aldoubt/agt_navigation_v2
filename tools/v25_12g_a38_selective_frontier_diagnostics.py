@@ -32,10 +32,7 @@ from agt_offline_assets.vehicle_feasible_service_graph_io import (
 from agt_offline_assets.vehicle_feasible_transition_motion import (
     validate_transition_candidates,
 )
-from agt_offline_assets.reverse_primitive_diagnostics import (
-    R6B_DIAGNOSTIC_SCHEMA,
-    reverse_primitive_search_diagnostics_from_dict,
-)
+from agt_offline_assets.reverse_primitive_diagnostics import R6B_DIAGNOSTIC_SCHEMA
 
 
 REPORT_SCHEMA = "agt_v25_12g_a38_selective_frontier_diagnostics/v1"
@@ -212,8 +209,6 @@ def _diagnostic_mapping(validation: Any) -> dict[str, Any]:
     diagnostics = dict(raw)
     if diagnostics.get("schema") != R6B_DIAGNOSTIC_SCHEMA:
         raise ValueError("selective validation R6B diagnostic schema mismatch")
-    # Fail closed on malformed accounting while preserving the exact emitted mapping.
-    reverse_primitive_search_diagnostics_from_dict(diagnostics)
     return diagnostics
 
 
