@@ -1,9 +1,10 @@
 schema_version: "1.0"
 site_id: greenhouse_01
 
-# Set these only after visually/quantitatively checking the actual assets.
+# Set these only after visually/quantitatively checking the actual frozen assets.
 map_reliability_accepted: false
 semantic_correctness_accepted: false
+platform_geometry_accepted: false
 
 # Human audit trail for the frozen site revision.
 accepted_by: ""
