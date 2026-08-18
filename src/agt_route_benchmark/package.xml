@@ -29,6 +29,7 @@
   <exec_depend>rviz2</exec_depend>
   <exec_depend>agt_navigation</exec_depend>
   <exec_depend>agt_coverage_planning</exec_depend>
+  <exec_depend>agt_offline_assets</exec_depend>
   <exec_depend>diagnostic_msgs</exec_depend>
   <exec_depend>std_msgs</exec_depend>
   <exec_depend>std_srvs</exec_depend>
