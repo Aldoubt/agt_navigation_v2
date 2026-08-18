@@ -4,10 +4,12 @@ from dataclasses import dataclass
 import hashlib
 import json
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import yaml
 from shapely.geometry import Polygon
+
+from .map_quality import audit_map_revision
 
 
 _ALLOWED_EDIT_TYPES = {"FORCE_FREE", "FORCE_OCCUPIED"}
@@ -137,6 +139,7 @@ def build_map_curation_manifest(
     semantic_map: Path | str,
     platform_profile: Path | str,
 ) -> dict[str, object]:
+    """Legacy/general curation manifest retained for non-formal V25 workflows."""
     site_id = str(site_id).strip()
     if not site_id:
         raise ValueError("site_id must be non-empty")
@@ -161,23 +164,113 @@ def build_map_curation_manifest(
         },
         "override_ids": [record.override_id for record in records],
         "assets": {
-            "source_pcd": {
-                "path": str(source_pcd_path),
-                "sha256": _sha256(source_pcd_path),
-            },
+            "source_pcd": {"path": str(source_pcd_path), "sha256": _sha256(source_pcd_path)},
             "generated_map": _map_bundle(generated_map_yaml),
-            "override_geojson": {
-                "path": str(override_path),
-                "sha256": _sha256(override_path),
-            },
+            "override_geojson": {"path": str(override_path), "sha256": _sha256(override_path)},
             "accepted_map": _map_bundle(accepted_map_yaml),
-            "semantic_map": {
-                "path": str(semantic_path),
-                "sha256": _sha256(semantic_path),
-            },
-            "platform_profile": {
-                "path": str(platform_path),
-                "sha256": _sha256(platform_path),
-            },
+            "semantic_map": {"path": str(semantic_path), "sha256": _sha256(semantic_path)},
+            "platform_profile": {"path": str(platform_path), "sha256": _sha256(platform_path)},
+        },
+    }
+
+
+def build_formal_map_curation_manifest(
+    *,
+    site_id: str,
+    source_pcd: Path | str,
+    generated_map_yaml: Path | str,
+    accepted_map_yaml: Path | str,
+    derivation_yaml: Path | str,
+    override_geojson: Path | str,
+    qa_report: Path | str,
+    qa_figures: Sequence[Path | str],
+    semantic_map: Path | str,
+    platform_profile: Path | str,
+) -> dict[str, object]:
+    """Build Paper I curation evidence only after a fresh clean replay audit."""
+    site_id = str(site_id).strip()
+    if not site_id:
+        raise ValueError("site_id must be non-empty")
+
+    source_pcd_path = _require_file(source_pcd, "source PCD")
+    derivation_path = _require_file(derivation_yaml, "navigation derivation")
+    override_path = _require_file(override_geojson, "override GeoJSON")
+    qa_report_path = _require_file(qa_report, "map QA report")
+    semantic_path = _require_file(semantic_map, "semantic map")
+    platform_path = _require_file(platform_profile, "platform profile")
+    figure_paths = tuple(_require_file(path, "map QA figure") for path in qa_figures)
+    if not figure_paths:
+        raise ValueError("formal curation requires at least one map QA figure")
+
+    override_document = json.loads(override_path.read_text(encoding="utf-8"))
+    records = validate_override_document(override_document)
+    stored_qa = json.loads(qa_report_path.read_text(encoding="utf-8"))
+    if not isinstance(stored_qa, Mapping):
+        raise ValueError("map QA report must be a JSON object")
+
+    fresh_qa = audit_map_revision(
+        generated_map_yaml,
+        accepted_map_yaml,
+        derivation_path,
+    )
+    core_keys = (
+        "accepted_matches_replay",
+        "unexplained_changed_cell_count",
+        "replay_mismatch_cell_count",
+        "changed_cell_count",
+        "force_free_changed_cell_count",
+        "force_occupied_changed_cell_count",
+        "override_ids",
+    )
+    for key in core_keys:
+        if stored_qa.get(key) != fresh_qa.get(key):
+            raise ValueError(f"map QA report is stale or inconsistent for {key}")
+    if fresh_qa["accepted_matches_replay"] is not True:
+        raise ValueError("formal curation rejected: accepted map does not match override replay")
+    if int(fresh_qa["unexplained_changed_cell_count"]) != 0:
+        raise ValueError("formal curation rejected: unexplained changed map cells remain")
+
+    override_ids = [record.override_id for record in records]
+    if override_ids != list(fresh_qa["override_ids"]):
+        raise ValueError("override GeoJSON does not match derivation override order")
+
+    force_free_count = sum(record.edit_type == "FORCE_FREE" for record in records)
+    force_occupied_count = sum(record.edit_type == "FORCE_OCCUPIED" for record in records)
+    return {
+        "schema_version": "2.0",
+        "site_id": site_id,
+        "curation_policy": "planner_independent",
+        "curation_gate": "ACCEPTED_REPLAY_CLEAN",
+        "override_summary": {
+            "count": len(records),
+            "force_free_count": force_free_count,
+            "force_occupied_count": force_occupied_count,
+        },
+        "override_ids": override_ids,
+        "qa_summary": {
+            key: fresh_qa[key]
+            for key in (
+                "accepted_matches_replay",
+                "unexplained_changed_cell_count",
+                "replay_mismatch_cell_count",
+                "changed_cell_count",
+                "changed_area_m2",
+                "changed_fraction",
+                "force_free_changed_cell_count",
+                "force_occupied_changed_cell_count",
+            )
+        },
+        "assets": {
+            "source_pcd": {"path": str(source_pcd_path), "sha256": _sha256(source_pcd_path)},
+            "generated_map": _map_bundle(generated_map_yaml),
+            "accepted_map": _map_bundle(accepted_map_yaml),
+            "derivation": {"path": str(derivation_path), "sha256": _sha256(derivation_path)},
+            "override_geojson": {"path": str(override_path), "sha256": _sha256(override_path)},
+            "qa_report": {"path": str(qa_report_path), "sha256": _sha256(qa_report_path)},
+            "qa_figures": [
+                {"path": str(path), "sha256": _sha256(path)} for path in figure_paths
+            ],
+            "semantic_map": {"path": str(semantic_path), "sha256": _sha256(semantic_path)},
+            "platform_profile": {"path": str(platform_path), "sha256": _sha256(platform_path)},
         },
     }
