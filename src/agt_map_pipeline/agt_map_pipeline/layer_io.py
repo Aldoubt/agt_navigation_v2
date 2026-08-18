@@ -14,6 +14,9 @@ def _save(root, name, value):
 def write_prepare_layers(project_dir, navigation, structure=None, corridor=None, aisle_graph=None):
     root = Path(project_dir) / "layers"
     out = {}
+    nav2 = write_navigation_map_files(navigation, root / "navigation")
+    out["navigation.nav2_pgm"] = {"path": str(Path("layers") / "navigation" / "navigation_map.pgm"), "sha256": str(nav2["pgm_sha256"]).removeprefix("sha256:")}
+    out["navigation.nav2_yaml"] = {"path": str(Path("layers") / "navigation" / "navigation_map.yaml"), "sha256": str(nav2["yaml_sha256"]).removeprefix("sha256:")}
     for key, value in {"terrain/ground_height.npy": navigation.ground_height_m, "terrain/ground_valid.npy": navigation.ground_valid, "terrain/ground_confidence.npy": getattr(structure, "ground_confidence", navigation.ground_valid.astype(float)), "terrain/slope_deg.npy": navigation.slope_deg, "terrain/step_m.npy": navigation.step_m, "obstacle/obstacle_count.npy": navigation.obstacle_count, "obstacle/obstacle_mask.npy": navigation.obstacle_count >= navigation.config.minimum_obstacle_points, "navigation/occupancy.npy": navigation.occupancy}.items():
         rec = _save(root, key, value); out[key.rsplit("/", 1)[0] + "." + Path(key).stem] = {"path": str(Path("layers") / key), "sha256": rec["sha256"]}
     if structure is not None:

@@ -45,6 +45,7 @@ def prepare_project(pcd_path, *, preset_name, output_dir, declared_frame_id="map
         nav = derive_ground_relative_navigation_map(cloud, preset.navigation_config)
         layers = write_prepare_layers(output, nav)
         _register_outputs(doc, {"navigation.raw_occupancy": layers["navigation.occupancy"], "terrain.ground_height": layers["terrain.ground_height"], "terrain.ground_valid": layers["terrain.ground_valid"], "terrain.slope": layers["terrain.slope_deg"], "terrain.step": layers["terrain.step_m"], "obstacle.count": layers["obstacle.obstacle_count"]}, "navigation")
+        _register_outputs(doc, {"navigation.nav2_pgm": layers["navigation.nav2_pgm"], "navigation.nav2_yaml": layers["navigation.nav2_yaml"]}, "navigation")
         register_stage(doc, "navigation", status="READY", inputs_sha256=source["sha256"], outputs=[], message="ground-relative navigation derived"); completed.append("navigation")
         structure = derive_navigation_structure(nav, preset.structure_config)
         layers = write_prepare_layers(output, nav, structure)

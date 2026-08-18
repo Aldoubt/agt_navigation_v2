@@ -10,6 +10,12 @@ def build_project_status(project_dir):
     try:
         if file_sha256(source["absolute_path"]) != source["sha256"]:
             effective, block = "BLOCKED", "BLOCKED_SOURCE_HASH_MISMATCH"
+        else:
+            for layer_id, layer in doc.get("layers", {}).items():
+                artifact = root / layer["path"]
+                if not artifact.is_file() or (layer["sha256"] and file_sha256(artifact) != layer["sha256"]):
+                    effective, block = "BLOCKED", "BLOCKED_LAYER_HASH_MISMATCH"
+                    break
     except OSError:
         effective, block = "BLOCKED", "BLOCKED_SOURCE_MISSING"
     layers = {k: v["status"] for k, v in doc.get("layers", {}).items()}
