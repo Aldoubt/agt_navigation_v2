@@ -50,9 +50,18 @@ def _counts(occupancy: np.ndarray) -> dict[str, int]:
     }
 
 
+def _nav2_mode(nav_map: Nav2Map) -> str:
+    document = yaml.safe_load(nav_map.yaml_path.read_text(encoding="utf-8"))
+    if not isinstance(document, Mapping):
+        raise ValueError("Nav2 map YAML must be a mapping")
+    return str(document.get("mode", "trinary"))
+
+
 def _assert_compatible(generated: Nav2Map, accepted: Nav2Map) -> None:
     if generated.image.shape[:2] != accepted.image.shape[:2]:
         raise ValueError("generated/accepted map size mismatch")
+    if _nav2_mode(generated) != _nav2_mode(accepted):
+        raise ValueError("generated/accepted map mode mismatch")
     if not math.isclose(generated.resolution_m, accepted.resolution_m, abs_tol=1e-12):
         raise ValueError("generated/accepted map resolution mismatch")
     if any(
@@ -294,8 +303,13 @@ def write_map_quality_evidence(
         (axes[1], accepted, "Accepted (post-override)"),
     ):
         axis.imshow(
-            _display_values(occupancy), origin="lower", extent=extent,
-            cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest"
+            _display_values(occupancy),
+            origin="lower",
+            extent=extent,
+            cmap="gray",
+            vmin=0.0,
+            vmax=1.0,
+            interpolation="nearest",
         )
         axis.set_title(title)
         axis.set_aspect("equal")
@@ -303,18 +317,34 @@ def write_map_quality_evidence(
         axis.set_ylabel("map y [m]")
 
     axes[2].imshow(
-        _display_values(accepted), origin="lower", extent=extent,
-        cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest", alpha=0.65
+        _display_values(accepted),
+        origin="lower",
+        extent=extent,
+        cmap="gray",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        alpha=0.65,
     )
     axes[2].imshow(
         np.ma.masked_where(~changed, changed.astype(float)),
-        origin="lower", extent=extent, cmap="autumn", vmin=0.0, vmax=1.0,
-        interpolation="nearest", alpha=0.75,
+        origin="lower",
+        extent=extent,
+        cmap="autumn",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        alpha=0.75,
     )
     axes[2].imshow(
         np.ma.masked_where(~mismatch, mismatch.astype(float)),
-        origin="lower", extent=extent, cmap="Reds", vmin=0.0, vmax=1.0,
-        interpolation="nearest", alpha=0.95,
+        origin="lower",
+        extent=extent,
+        cmap="Reds",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        alpha=0.95,
     )
     for record in overrides:
         axes[2].add_patch(
