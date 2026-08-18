@@ -16,6 +16,7 @@ from agt_route_benchmark.adapters.v25_route_asset import V25RouteAssetAdapter
 from agt_route_benchmark.contracts import ExperimentSpec, PathPoint
 from agt_route_benchmark.coverage_bridge import collect_coverage_components_live
 from agt_route_benchmark.experiment import ExperimentRunner
+from agt_route_benchmark.formal_snapshot import validate_formal_site_snapshot
 from agt_route_benchmark.graph_io import load_agricultural_graph
 from agt_route_benchmark.manual_waypoint_io import load_manual_waypoint_plan
 from agt_route_benchmark.path_io import read_path_csv
@@ -134,6 +135,11 @@ def main() -> int:
     snapshot = None
     if args.site_snapshot is not None:
         snapshot = load_site_snapshot(args.site_snapshot, verify_assets=True)
+        if args.formal:
+            try:
+                validate_formal_site_snapshot(snapshot)
+            except ValueError as exc:
+                raise SystemExit(str(exc)) from exc
         if snapshot["site_id"] != args.site:
             raise SystemExit("site snapshot site_id does not match --site")
         selected_profile_sha = hashlib.sha256(args.platform_profile.read_bytes()).hexdigest()
