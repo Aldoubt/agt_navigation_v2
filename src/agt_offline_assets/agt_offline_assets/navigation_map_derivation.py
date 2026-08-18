@@ -491,6 +491,8 @@ def _write_nav2_map_files(
         "yaml_sha256": sha256_file(yaml_path),
     }
 
+write_navigation_map_files = _write_nav2_map_files
+
 
 def write_navigation_map_derivation(
     result: NavigationMapResult,
