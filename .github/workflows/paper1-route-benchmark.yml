@@ -9,6 +9,7 @@ on:
       - 'src/agt_coverage_planning/**'
       - 'src/agt_offline_assets/**'
       - 'src/agt_map_workbench/**'
+      - 'src/agt_map_pipeline/**'
       - 'profiles/platforms/mk_mini.yaml'
       - '.github/workflows/paper1-route-benchmark.yml'
   pull_request:
@@ -17,6 +18,7 @@ on:
       - 'src/agt_coverage_planning/**'
       - 'src/agt_offline_assets/**'
       - 'src/agt_map_workbench/**'
+      - 'src/agt_map_pipeline/**'
       - 'profiles/platforms/mk_mini.yaml'
       - '.github/workflows/paper1-route-benchmark.yml'
 
@@ -42,6 +44,10 @@ jobs:
         env:
           PYTHONPATH: src/agt_map_workbench:src/agt_offline_assets
         run: python -m pytest -q src/agt_map_workbench/test/test_navigation_override_metadata.py
+      - name: Run map pipeline contracts
+        env:
+          PYTHONPATH: src/agt_map_pipeline:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
+        run: python -m pytest -q src/agt_map_pipeline/test
       - name: Run Paper I benchmark unit tests
         env:
           MPLBACKEND: Agg
@@ -55,4 +61,6 @@ jobs:
           src/agt_offline_assets/agt_offline_assets
           src/agt_map_workbench/agt_map_workbench/navigation_override_metadata.py
           src/agt_map_workbench/agt_map_workbench/paper1_workbench.py
+          src/agt_map_pipeline/agt_map_pipeline
+          src/agt_map_pipeline/scripts
           src/agt_map_workbench/scripts/paper1_map_workbench_launcher.py
