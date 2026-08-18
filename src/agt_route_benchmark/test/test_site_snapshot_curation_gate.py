@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from agt_route_benchmark.formal_snapshot import validate_formal_site_snapshot
 from agt_route_benchmark.site_snapshot import create_site_snapshot, load_site_snapshot
 
 
@@ -25,10 +26,8 @@ def _fixture(root: Path, *, platform_ok=True):
     )
     semantic = root / "semantic.geojson"
     semantic.write_text(
-        json.dumps({
-            "type": "FeatureCollection", "schema_version": "1.0",
-            "map_id": "greenhouse_01", "frame_id": "map", "features": [],
-        }), encoding="utf-8",
+        json.dumps({"type":"FeatureCollection","schema_version":"1.0","map_id":"greenhouse_01","frame_id":"map","features":[]}),
+        encoding="utf-8",
     )
     coverage = root / "coverage.yaml"
     coverage.write_text(
@@ -60,10 +59,7 @@ def _fixture(root: Path, *, platform_ok=True):
             "qa_summary": {"accepted_matches_replay": True, "unexplained_changed_cell_count": 0},
             "assets": {
                 "source_pcd": {"path": str(pcd), "sha256": _sha(pcd)},
-                "accepted_map": {
-                    "yaml_path": str(map_yaml), "yaml_sha256": _sha(map_yaml),
-                    "image_path": str(image), "image_sha256": _sha(image),
-                },
+                "accepted_map": {"yaml_path": str(map_yaml), "yaml_sha256": _sha(map_yaml), "image_path": str(image), "image_sha256": _sha(image)},
                 "semantic_map": {"path": str(semantic), "sha256": _sha(semantic)},
                 "platform_profile": {"path": str(profile), "sha256": _sha(profile)},
             },
@@ -82,7 +78,8 @@ def test_snapshot_binds_replay_clean_curation_manifest_and_platform_acceptance(t
     assert snapshot["acceptance"]["platform_geometry_accepted"] is True
     assert snapshot["assets"]["curation_manifest"]["sha256"] == _sha(curation)
     assert snapshot["curation_gate"] == "ACCEPTED_REPLAY_CLEAN"
-    assert load_site_snapshot(output, require_formal_curation=True)["snapshot_sha256"] == snapshot["snapshot_sha256"]
+    loaded = load_site_snapshot(output, verify_assets=True)
+    assert validate_formal_site_snapshot(loaded)["snapshot_sha256"] == snapshot["snapshot_sha256"]
 
 
 def test_snapshot_rejects_unaccepted_platform_geometry(tmp_path: Path):
@@ -106,7 +103,7 @@ def test_snapshot_rejects_curation_asset_hash_mismatch(tmp_path: Path):
         )
 
 
-def test_formal_load_rejects_legacy_snapshot_without_curation(tmp_path: Path):
+def test_formal_validator_rejects_legacy_snapshot_without_curation(tmp_path: Path):
     pcd, map_yaml, semantic, coverage, profile, acceptance, _curation = _fixture(tmp_path)
     output = tmp_path / "legacy_snapshot.json"
     create_site_snapshot(
@@ -114,4 +111,4 @@ def test_formal_load_rejects_legacy_snapshot_without_curation(tmp_path: Path):
         output_path=output,
     )
     with pytest.raises(ValueError, match="formal curation"):
-        load_site_snapshot(output, require_formal_curation=True)
+        validate_formal_site_snapshot(load_site_snapshot(output))
