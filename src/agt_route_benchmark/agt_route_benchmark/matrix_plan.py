@@ -7,6 +7,7 @@ import shlex
 from typing import Iterable
 
 from .batch import canonical_expected_cells
+from .formal_snapshot import validate_formal_site_snapshot
 
 
 SCENARIO_FILE_BY_ID = {
@@ -40,7 +41,10 @@ def _snapshot_identity(path: Path | None) -> str | None:
     if path is None or not path.is_file():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
-    value = str(data.get("snapshot_sha256", "")) if isinstance(data, dict) else ""
+    if not isinstance(data, dict):
+        raise ValueError("site snapshot must be a JSON object")
+    validate_formal_site_snapshot(data)
+    value = str(data.get("snapshot_sha256", ""))
     if len(value) != 64 or any(char not in "0123456789abcdef" for char in value):
         raise ValueError("site snapshot must contain a valid 64-hex snapshot_sha256")
     return value
@@ -157,10 +161,8 @@ def build_execution_plan(
         elif planner_id == "manual_waypoints_best_p2p":
             runtime_kind = "manual_waypoints"
             required = [
-                ("scenario", scenario),
-                ("map_yaml", map_yaml),
-                ("platform_profile", platform_profile),
-                ("manual_waypoints", manual_waypoints),
+                ("scenario", scenario), ("map_yaml", map_yaml),
+                ("platform_profile", platform_profile), ("manual_waypoints", manual_waypoints),
             ]
             if formal:
                 required.append(("site_snapshot", site_snapshot))
@@ -186,10 +188,8 @@ def build_execution_plan(
         elif planner_id == "fields2cover":
             runtime_kind = "fields2cover"
             required = [
-                ("scenario", scenario),
-                ("map_yaml", map_yaml),
-                ("platform_profile", platform_profile),
-                ("semantic_map", semantic_map),
+                ("scenario", scenario), ("map_yaml", map_yaml),
+                ("platform_profile", platform_profile), ("semantic_map", semantic_map),
             ]
             if formal:
                 required.append(("site_snapshot", site_snapshot))
@@ -213,10 +213,8 @@ def build_execution_plan(
         else:
             runtime_kind = "v25_route_asset"
             required = [
-                ("scenario", scenario),
-                ("map_yaml", map_yaml),
-                ("platform_profile", platform_profile),
-                ("semantic_map", semantic_map),
+                ("scenario", scenario), ("map_yaml", map_yaml),
+                ("platform_profile", platform_profile), ("semantic_map", semantic_map),
                 ("ours_route_csv", ours_route_csv),
             ]
             if formal:
