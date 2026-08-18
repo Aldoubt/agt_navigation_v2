@@ -174,25 +174,21 @@ def audit_map_revision(
     accepted_map_yaml: Path | str,
     derivation_yaml: Path | str,
 ) -> dict[str, object]:
-    """Replay a formal override sequence and compare it to the accepted map."""
     generated_map = load_nav2_map(generated_map_yaml)
     accepted_map = load_nav2_map(accepted_map_yaml)
     _assert_compatible(generated_map, accepted_map)
-
     generated = _occupancy_classes(generated_map)
     accepted = _occupancy_classes(accepted_map)
     overrides = _load_overrides(derivation_yaml)
     replay, force_free_changed, force_occupied_changed = _replay(
         generated_map, generated, overrides
     )
-
     changed_mask = generated != accepted
     replay_mismatch = accepted != replay
     unexplained_changed = changed_mask & replay_mismatch
     changed_count = int(np.count_nonzero(changed_mask))
     total = int(generated.size)
     cell_area = float(generated_map.resolution_m) ** 2
-
     return {
         "schema_version": "1.0",
         "generated_map_yaml": str(Path(generated_map_yaml).expanduser().resolve()),
@@ -223,6 +219,37 @@ def _display_values(occupancy: np.ndarray) -> np.ndarray:
     return display
 
 
+def _override_geojson(overrides: tuple[dict[str, object], ...]) -> dict[str, object]:
+    features = []
+    for record in overrides:
+        ring = [list(point) for point in record["polygon_xy"]]
+        if ring[0] != ring[-1]:
+            ring.append(list(ring[0]))
+        features.append(
+            {
+                "type": "Feature",
+                "properties": {
+                    "id": record["id"],
+                    "feature_type": "map_override",
+                    "edit_type": (
+                        "FORCE_FREE"
+                        if record["mode"] == "force_free"
+                        else "FORCE_OCCUPIED"
+                    ),
+                    "reason": record["reason"],
+                    "evidence_category": record["evidence_category"],
+                },
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+            }
+        )
+    return {
+        "type": "FeatureCollection",
+        "schema_version": "1.0",
+        "frame_id": "map",
+        "features": features,
+    }
+
+
 def write_map_quality_evidence(
     generated_map_yaml: Path | str,
     accepted_map_yaml: Path | str,
@@ -230,15 +257,9 @@ def write_map_quality_evidence(
     *,
     output_dir: Path | str,
 ) -> dict[str, object]:
-    """Write planner-independent real-map audit JSON and review figures."""
     output = Path(output_dir).expanduser().resolve()
     output.mkdir(parents=True, exist_ok=True)
-
-    report = audit_map_revision(
-        generated_map_yaml,
-        accepted_map_yaml,
-        derivation_yaml,
-    )
+    report = audit_map_revision(generated_map_yaml, accepted_map_yaml, derivation_yaml)
     (output / "map_qa_report.json").write_text(
         json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
@@ -249,6 +270,16 @@ def write_map_quality_evidence(
     generated = _occupancy_classes(generated_map)
     accepted = _occupancy_classes(accepted_map)
     overrides = _load_overrides(derivation_yaml)
+    (output / "overrides.geojson").write_text(
+        json.dumps(
+            _override_geojson(overrides),
+            indent=2,
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     replay, _, _ = _replay(generated_map, generated, overrides)
     changed = generated != accepted
     mismatch = accepted != replay
@@ -258,19 +289,13 @@ def write_map_quality_evidence(
 
     extent = generated_map.extent
     fig, axes = plt.subplots(1, 3, figsize=(13.5, 5.0), constrained_layout=True)
-    panels = (
+    for axis, occupancy, title in (
         (axes[0], generated, "Generated (pre-override)"),
         (axes[1], accepted, "Accepted (post-override)"),
-    )
-    for axis, occupancy, title in panels:
+    ):
         axis.imshow(
-            _display_values(occupancy),
-            origin="lower",
-            extent=extent,
-            cmap="gray",
-            vmin=0.0,
-            vmax=1.0,
-            interpolation="nearest",
+            _display_values(occupancy), origin="lower", extent=extent,
+            cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest"
         )
         axis.set_title(title)
         axis.set_aspect("equal")
@@ -278,52 +303,36 @@ def write_map_quality_evidence(
         axis.set_ylabel("map y [m]")
 
     axes[2].imshow(
-        _display_values(accepted),
-        origin="lower",
-        extent=extent,
-        cmap="gray",
-        vmin=0.0,
-        vmax=1.0,
-        interpolation="nearest",
-        alpha=0.65,
-    )
-    changed_overlay = np.ma.masked_where(~changed, changed.astype(float))
-    mismatch_overlay = np.ma.masked_where(~mismatch, mismatch.astype(float))
-    axes[2].imshow(
-        changed_overlay,
-        origin="lower",
-        extent=extent,
-        cmap="autumn",
-        vmin=0.0,
-        vmax=1.0,
-        interpolation="nearest",
-        alpha=0.75,
+        _display_values(accepted), origin="lower", extent=extent,
+        cmap="gray", vmin=0.0, vmax=1.0, interpolation="nearest", alpha=0.65
     )
     axes[2].imshow(
-        mismatch_overlay,
-        origin="lower",
-        extent=extent,
-        cmap="Reds",
-        vmin=0.0,
-        vmax=1.0,
-        interpolation="nearest",
-        alpha=0.95,
+        np.ma.masked_where(~changed, changed.astype(float)),
+        origin="lower", extent=extent, cmap="autumn", vmin=0.0, vmax=1.0,
+        interpolation="nearest", alpha=0.75,
+    )
+    axes[2].imshow(
+        np.ma.masked_where(~mismatch, mismatch.astype(float)),
+        origin="lower", extent=extent, cmap="Reds", vmin=0.0, vmax=1.0,
+        interpolation="nearest", alpha=0.95,
     )
     for record in overrides:
-        polygon = PolygonPatch(
-            np.asarray(record["polygon_xy"], dtype=float),
-            closed=True,
-            fill=False,
-            linewidth=1.2,
-            linestyle="--",
-            edgecolor=("tab:blue" if record["mode"] == "force_free" else "tab:red"),
+        axes[2].add_patch(
+            PolygonPatch(
+                np.asarray(record["polygon_xy"], dtype=float),
+                closed=True,
+                fill=False,
+                linewidth=1.2,
+                linestyle="--",
+                edgecolor=(
+                    "tab:blue" if record["mode"] == "force_free" else "tab:red"
+                ),
+            )
         )
-        axes[2].add_patch(polygon)
     axes[2].set_title("Changed cells + recorded overrides")
     axes[2].set_aspect("equal")
     axes[2].set_xlabel("map x [m]")
     axes[2].set_ylabel("map y [m]")
-
     status = "PASS" if report["accepted_matches_replay"] else "FAIL"
     fig.suptitle(
         "Planner-independent map curation QA | "
