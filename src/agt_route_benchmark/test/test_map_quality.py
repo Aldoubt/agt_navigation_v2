@@ -1,10 +1,14 @@
 from pathlib import Path
 
+import json
 import numpy as np
 import pytest
 import yaml
 
-from agt_route_benchmark.map_quality import audit_map_revision
+from agt_route_benchmark.map_quality import (
+    audit_map_revision,
+    write_map_quality_evidence,
+)
 
 
 FREE = 254
@@ -105,3 +109,28 @@ def test_audit_rejects_map_geometry_or_threshold_mismatch(tmp_path: Path):
 
     with pytest.raises(ValueError, match="resolution"):
         audit_map_revision(generated_yaml, accepted_yaml, derivation)
+
+
+def test_quality_evidence_writes_report_and_three_figure_formats(tmp_path: Path):
+    generated = np.full((3, 3), FREE, dtype=np.uint8)
+    accepted = generated.copy()
+    accepted[0, 0] = OCCUPIED
+    generated_yaml = _write_map(tmp_path / "generated", "map", generated)
+    accepted_yaml = _write_map(tmp_path / "accepted", "map", accepted)
+    derivation = _derivation(tmp_path / "derivation.yaml")
+    output = tmp_path / "qa"
+
+    report = write_map_quality_evidence(
+        generated_yaml,
+        accepted_yaml,
+        derivation,
+        output_dir=output,
+    )
+
+    assert report["accepted_matches_replay"] is True
+    stored = json.loads((output / "map_qa_report.json").read_text(encoding="utf-8"))
+    assert stored["changed_cell_count"] == 1
+    assert stored["unexplained_changed_cell_count"] == 0
+    for suffix in ("svg", "pdf", "png"):
+        assert (output / f"map_curation_qa.{suffix}").is_file()
+        assert (output / f"map_curation_qa.{suffix}").stat().st_size > 0
