@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from agt_route_benchmark.site_snapshot import create_site_snapshot
+from agt_route_benchmark.site_snapshot import create_site_snapshot, load_site_snapshot
 
 
 def _sha(path: Path) -> str:
@@ -26,13 +26,9 @@ def _fixture(root: Path, *, platform_ok=True):
     semantic = root / "semantic.geojson"
     semantic.write_text(
         json.dumps({
-            "type": "FeatureCollection",
-            "schema_version": "1.0",
-            "map_id": "greenhouse_01",
-            "frame_id": "map",
-            "features": [],
-        }),
-        encoding="utf-8",
+            "type": "FeatureCollection", "schema_version": "1.0",
+            "map_id": "greenhouse_01", "frame_id": "map", "features": [],
+        }), encoding="utf-8",
     )
     coverage = root / "coverage.yaml"
     coverage.write_text(
@@ -59,55 +55,41 @@ def _fixture(root: Path, *, platform_ok=True):
     curation = root / "map_curation_manifest.json"
     curation.write_text(
         json.dumps({
-            "schema_version": "2.0",
-            "site_id": "greenhouse_01",
+            "schema_version": "2.0", "site_id": "greenhouse_01",
             "curation_gate": "ACCEPTED_REPLAY_CLEAN",
-            "qa_summary": {
-                "accepted_matches_replay": True,
-                "unexplained_changed_cell_count": 0,
-            },
+            "qa_summary": {"accepted_matches_replay": True, "unexplained_changed_cell_count": 0},
             "assets": {
                 "source_pcd": {"path": str(pcd), "sha256": _sha(pcd)},
                 "accepted_map": {
-                    "yaml_path": str(map_yaml),
-                    "yaml_sha256": _sha(map_yaml),
-                    "image_path": str(image),
-                    "image_sha256": _sha(image),
+                    "yaml_path": str(map_yaml), "yaml_sha256": _sha(map_yaml),
+                    "image_path": str(image), "image_sha256": _sha(image),
                 },
                 "semantic_map": {"path": str(semantic), "sha256": _sha(semantic)},
                 "platform_profile": {"path": str(profile), "sha256": _sha(profile)},
             },
-        }, sort_keys=True),
-        encoding="utf-8",
+        }, sort_keys=True), encoding="utf-8",
     )
     return pcd, map_yaml, semantic, coverage, profile, acceptance, curation
 
 
 def test_snapshot_binds_replay_clean_curation_manifest_and_platform_acceptance(tmp_path: Path):
     pcd, map_yaml, semantic, coverage, profile, acceptance, curation = _fixture(tmp_path)
+    output = tmp_path / "site_snapshot.json"
     snapshot = create_site_snapshot(
-        "greenhouse_01",
-        pcd,
-        map_yaml,
-        semantic,
-        coverage,
-        profile,
-        acceptance,
-        curation_manifest_path=curation,
-        output_path=tmp_path / "site_snapshot.json",
+        "greenhouse_01", pcd, map_yaml, semantic, coverage, profile, acceptance,
+        curation_manifest_path=curation, output_path=output,
     )
     assert snapshot["acceptance"]["platform_geometry_accepted"] is True
     assert snapshot["assets"]["curation_manifest"]["sha256"] == _sha(curation)
     assert snapshot["curation_gate"] == "ACCEPTED_REPLAY_CLEAN"
+    assert load_site_snapshot(output, require_formal_curation=True)["snapshot_sha256"] == snapshot["snapshot_sha256"]
 
 
 def test_snapshot_rejects_unaccepted_platform_geometry(tmp_path: Path):
     paths = _fixture(tmp_path, platform_ok=False)
     with pytest.raises(ValueError, match="platform_geometry_accepted"):
         create_site_snapshot(
-            "greenhouse_01",
-            *paths[:-1],
-            curation_manifest_path=paths[-1],
+            "greenhouse_01", *paths[:-1], curation_manifest_path=paths[-1],
             output_path=tmp_path / "site_snapshot.json",
         )
 
@@ -119,13 +101,17 @@ def test_snapshot_rejects_curation_asset_hash_mismatch(tmp_path: Path):
     curation.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="curation.*semantic"):
         create_site_snapshot(
-            "greenhouse_01",
-            pcd,
-            map_yaml,
-            semantic,
-            coverage,
-            profile,
-            acceptance,
-            curation_manifest_path=curation,
-            output_path=tmp_path / "site_snapshot.json",
+            "greenhouse_01", pcd, map_yaml, semantic, coverage, profile, acceptance,
+            curation_manifest_path=curation, output_path=tmp_path / "site_snapshot.json",
         )
+
+
+def test_formal_load_rejects_legacy_snapshot_without_curation(tmp_path: Path):
+    pcd, map_yaml, semantic, coverage, profile, acceptance, _curation = _fixture(tmp_path)
+    output = tmp_path / "legacy_snapshot.json"
+    create_site_snapshot(
+        "greenhouse_01", pcd, map_yaml, semantic, coverage, profile, acceptance,
+        output_path=output,
+    )
+    with pytest.raises(ValueError, match="formal curation"):
+        load_site_snapshot(output, require_formal_curation=True)
