@@ -89,7 +89,7 @@ def test_audit_fails_closed_on_unexplained_accepted_map_edit(tmp_path: Path):
     generated = np.full((3, 3), FREE, dtype=np.uint8)
     accepted = generated.copy()
     accepted[0, 0] = OCCUPIED
-    accepted[2, 2] = OCCUPIED  # not covered by the recorded override
+    accepted[2, 2] = OCCUPIED
     generated_yaml = _write_map(tmp_path / "generated", "map", generated)
     accepted_yaml = _write_map(tmp_path / "accepted", "map", accepted)
     derivation = _derivation(tmp_path / "derivation.yaml")
@@ -111,7 +111,7 @@ def test_audit_rejects_map_geometry_or_threshold_mismatch(tmp_path: Path):
         audit_map_revision(generated_yaml, accepted_yaml, derivation)
 
 
-def test_quality_evidence_writes_report_and_three_figure_formats(tmp_path: Path):
+def test_quality_evidence_writes_report_figures_and_override_geojson(tmp_path: Path):
     generated = np.full((3, 3), FREE, dtype=np.uint8)
     accepted = generated.copy()
     accepted[0, 0] = OCCUPIED
@@ -131,6 +131,12 @@ def test_quality_evidence_writes_report_and_three_figure_formats(tmp_path: Path)
     stored = json.loads((output / "map_qa_report.json").read_text(encoding="utf-8"))
     assert stored["changed_cell_count"] == 1
     assert stored["unexplained_changed_cell_count"] == 0
+    overlay = json.loads((output / "overrides.geojson").read_text(encoding="utf-8"))
+    assert overlay["type"] == "FeatureCollection"
+    assert overlay["frame_id"] == "map"
+    assert overlay["features"][0]["properties"]["id"] == "ovr_0001"
+    assert overlay["features"][0]["properties"]["edit_type"] == "FORCE_OCCUPIED"
+    assert overlay["features"][0]["properties"]["reason"] == "Measured permanent support post."
     for suffix in ("svg", "pdf", "png"):
         assert (output / f"map_curation_qa.{suffix}").is_file()
         assert (output / f"map_curation_qa.{suffix}").stat().st_size > 0
