@@ -15,7 +15,14 @@ FREE = 254
 OCCUPIED = 0
 
 
-def _write_map(root: Path, name: str, occupancy_bottom_up: np.ndarray, *, resolution=1.0):
+def _write_map(
+    root: Path,
+    name: str,
+    occupancy_bottom_up: np.ndarray,
+    *,
+    resolution=1.0,
+    mode="trinary",
+):
     root.mkdir(parents=True, exist_ok=True)
     image = np.flipud(np.asarray(occupancy_bottom_up, dtype=np.uint8))
     pgm = root / f"{name}.pgm"
@@ -31,7 +38,7 @@ def _write_map(root: Path, name: str, occupancy_bottom_up: np.ndarray, *, resolu
         yaml.safe_dump(
             {
                 "image": pgm.name,
-                "mode": "trinary",
+                "mode": mode,
                 "resolution": resolution,
                 "origin": [0.0, 0.0, 0.0],
                 "negate": 0,
@@ -108,6 +115,16 @@ def test_audit_rejects_map_geometry_or_threshold_mismatch(tmp_path: Path):
     derivation = _derivation(tmp_path / "derivation.yaml")
 
     with pytest.raises(ValueError, match="resolution"):
+        audit_map_revision(generated_yaml, accepted_yaml, derivation)
+
+
+def test_audit_rejects_nav2_mode_mismatch(tmp_path: Path):
+    occupancy = np.full((3, 3), FREE, dtype=np.uint8)
+    generated_yaml = _write_map(tmp_path / "generated", "map", occupancy, mode="trinary")
+    accepted_yaml = _write_map(tmp_path / "accepted", "map", occupancy, mode="raw")
+    derivation = _derivation(tmp_path / "derivation.yaml")
+
+    with pytest.raises(ValueError, match="mode"):
         audit_map_revision(generated_yaml, accepted_yaml, derivation)
 
 
