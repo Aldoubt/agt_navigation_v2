@@ -26,8 +26,58 @@ def _asset(path: Path) -> dict[str, str]:
 
 
 def _canonical_hash(payload: dict[str, Any]) -> str:
-    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")
+    raw = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
     return hashlib.sha256(raw).hexdigest()
+
+
+def _verify_curation_manifest(
+    path: Path,
+    *,
+    site_id: str,
+    pcd: Path,
+    map_yaml: Path,
+    map_image: Path,
+    semantic: Path,
+    profile: Path,
+) -> dict[str, Any]:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict) or str(document.get("schema_version", "")) != "2.0":
+        raise ValueError("formal curation manifest must use schema_version 2.0")
+    if str(document.get("site_id", "")) != site_id:
+        raise ValueError("curation manifest site_id mismatch")
+    if str(document.get("curation_gate", "")) != "ACCEPTED_REPLAY_CLEAN":
+        raise ValueError("curation manifest gate is not replay-clean")
+    qa = document.get("qa_summary") or {}
+    if qa.get("accepted_matches_replay") is not True:
+        raise ValueError("curation QA accepted_matches_replay must be true")
+    if int(qa.get("unexplained_changed_cell_count", -1)) != 0:
+        raise ValueError("curation QA contains unexplained changed cells")
+
+    assets = document.get("assets") or {}
+    checks = {
+        "source PCD": (assets.get("source_pcd") or {}).get("sha256"),
+        "accepted map YAML": (assets.get("accepted_map") or {}).get("yaml_sha256"),
+        "accepted map image": (assets.get("accepted_map") or {}).get("image_sha256"),
+        "semantic map": (assets.get("semantic_map") or {}).get("sha256"),
+        "platform profile": (assets.get("platform_profile") or {}).get("sha256"),
+    }
+    actual = {
+        "source PCD": _sha256(pcd),
+        "accepted map YAML": _sha256(map_yaml),
+        "accepted map image": _sha256(map_image),
+        "semantic map": _sha256(semantic),
+        "platform profile": _sha256(profile),
+    }
+    for label, expected in checks.items():
+        if str(expected or "") != actual[label]:
+            raise ValueError(f"curation {label} hash does not match selected asset")
+    return document
 
 
 def create_site_snapshot(
@@ -40,6 +90,7 @@ def create_site_snapshot(
     acceptance_path: Path | str,
     *,
     output_path: Path | str,
+    curation_manifest_path: Path | str | None = None,
 ) -> dict[str, Any]:
     pcd = Path(pcd_path)
     map_yaml = Path(map_yaml_path)
@@ -106,6 +157,24 @@ def create_site_snapshot(
     if profile.name != "mk_mini":
         raise ValueError("Paper I platform profile must be mk_mini")
 
+    curation_file = None
+    curation_document = None
+    if curation_manifest_path is not None:
+        if acceptance.get("platform_geometry_accepted") is not True:
+            raise ValueError("platform_geometry_accepted must be true before formal snapshot")
+        curation_file = Path(curation_manifest_path)
+        if not curation_file.is_file():
+            raise ValueError(f"curation manifest does not exist: {curation_file}")
+        curation_document = _verify_curation_manifest(
+            curation_file,
+            site_id=site_id,
+            pcd=pcd,
+            map_yaml=map_yaml,
+            map_image=image_path,
+            semantic=semantic,
+            profile=profile_path,
+        )
+
     assets = {
         "pcd": _asset(pcd),
         "map_yaml": {"path": str(map_yaml), "sha256": map_sha},
@@ -115,12 +184,20 @@ def create_site_snapshot(
         "platform_profile": _asset(profile_path),
         "acceptance": _asset(acceptance_file),
     }
+    if curation_file is not None:
+        assets["curation_manifest"] = _asset(curation_file)
+
     acceptance_record = {
         "map_reliability_accepted": True,
         "semantic_correctness_accepted": True,
         "accepted_by": str(acceptance["accepted_by"]),
         "accepted_at": str(acceptance["accepted_at"]),
     }
+    curation_gate = None
+    if curation_document is not None:
+        acceptance_record["platform_geometry_accepted"] = True
+        curation_gate = str(curation_document["curation_gate"])
+
     identity = {
         "schema_version": "1.0",
         "site_id": site_id,
@@ -128,6 +205,9 @@ def create_site_snapshot(
         "acceptance": acceptance_record,
         "semantic_feature_ids": sorted(feature_ids),
     }
+    if curation_gate is not None:
+        identity["curation_gate"] = curation_gate
+
     snapshot = {
         "schema_version": "1.0",
         "site_id": site_id,
@@ -141,8 +221,10 @@ def create_site_snapshot(
             "min_turning_radius_m": profile.min_turning_radius_m,
             "execution_ready": profile.execution_ready,
         },
-        "snapshot_sha256": _canonical_hash(identity),
     }
+    if curation_gate is not None:
+        snapshot["curation_gate"] = curation_gate
+    snapshot["snapshot_sha256"] = _canonical_hash(identity)
     write_json_atomic(snapshot, output_path)
     return snapshot
 
@@ -160,6 +242,8 @@ def load_site_snapshot(path: Path | str, *, verify_assets: bool = False) -> dict
         "acceptance": acceptance,
         "semantic_feature_ids": sorted(data.get("semantic_feature_ids") or []),
     }
+    if "curation_gate" in data:
+        identity["curation_gate"] = data.get("curation_gate")
     expected = _canonical_hash(identity)
     if data.get("snapshot_sha256") != expected:
         raise ValueError("site snapshot checksum mismatch")
