@@ -8,13 +8,20 @@ from agt_route_benchmark.site_snapshot import create_site_snapshot
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Freeze an accepted greenhouse site snapshot for Paper I formal experiments")
+    parser = argparse.ArgumentParser(
+        description="Freeze an accepted greenhouse site snapshot for Paper I formal experiments"
+    )
     parser.add_argument("--site", default="greenhouse_01")
     parser.add_argument("--pcd", required=True, type=Path)
     parser.add_argument("--map-yaml", required=True, type=Path)
     parser.add_argument("--semantic-map", required=True, type=Path)
     parser.add_argument("--coverage-yaml", required=True, type=Path)
-    parser.add_argument("--platform-profile", type=Path, default=Path("profiles/platforms/mk_mini.yaml"))
+    parser.add_argument(
+        "--platform-profile",
+        type=Path,
+        default=Path("profiles/platforms/mk_mini.yaml"),
+    )
+    parser.add_argument("--curation-manifest", required=True, type=Path)
     parser.add_argument("--acceptance", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
@@ -27,6 +34,7 @@ def main() -> int:
         args.coverage_yaml,
         args.platform_profile,
         args.acceptance,
+        curation_manifest_path=args.curation_manifest,
         output_path=args.output,
     )
     print(args.output)
