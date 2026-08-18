@@ -111,6 +111,11 @@ class ValidationReport:
     worst_curvature_chord: float = 0.0
     worst_curvature_ratio_to_limit: float | None = None
     worst_curvature_is_direction_transition: bool = False
+    direction_transition_count: int = 0
+    valid_cusp_count: int = 0
+    ambiguous_direction_transition_count: int = 0
+    direction_transition_feasible: bool = True
+    direction_transition_status: str = "NONE"
     required_min_turning_radius: float = 0.0
     sample_count: int = 0
     in_place_rotation_count: int = 0
@@ -141,6 +146,11 @@ class ValidationReport:
             "worst_curvature_chord_m": self.worst_curvature_chord,
             "worst_curvature_ratio_to_limit": self.worst_curvature_ratio_to_limit,
             "worst_curvature_is_direction_transition": self.worst_curvature_is_direction_transition,
+            "direction_transition_count": self.direction_transition_count,
+            "valid_cusp_count": self.valid_cusp_count,
+            "ambiguous_direction_transition_count": self.ambiguous_direction_transition_count,
+            "direction_transition_feasible": self.direction_transition_feasible,
+            "direction_transition_status": self.direction_transition_status,
             "required_min_turning_radius": self.required_min_turning_radius,
             "sample_count": self.sample_count,
             "in_place_rotation_count": self.in_place_rotation_count,
@@ -229,6 +239,9 @@ def validate_path(
     maximum_curvature = 0.0
     worst_curvature = None
     in_place_rotations = 0
+    direction_transition_count = 0
+    valid_cusp_count = 0
+    ambiguous_direction_transition_count = 0
     curvature_limit = math.inf if required_radius <= EPSILON else 1.0 / required_radius
     # Curvature uses supplied pose pairs. Interpolated collision samples are
     # straight-chord geometry and would bias finite-angle circular arcs.
@@ -238,6 +251,19 @@ def validate_path(
             current.y - previous.y,
         )
         angle = abs(_angle_difference(current.yaw, previous.yaw))
+        direction_transition = {previous.direction, current.direction} == {"F", "R"}
+        if direction_transition:
+            direction_transition_count += 1
+            if distance <= 1e-9 and angle <= 1e-6:
+                valid_cusp_count += 1
+            else:
+                ambiguous_direction_transition_count += 1
+                invalid_segments.add(segment_index)
+                invalid_samples.append(SampledPose(current, segment_index))
+                error_codes.add("ambiguous_direction_transition")
+            # Direction changes are independent velocity-sign events. Their
+            # chord is never a continuous forward/reverse motion primitive.
+            continue
         curvature = _chord_curvature(angle, distance)
         maximum_curvature = max(maximum_curvature, curvature)
         direction = _direction_label(previous.direction, current.direction)
@@ -292,6 +318,15 @@ def validate_path(
         worst_curvature_chord=_stable_float(worst_curvature["chord"]),
         worst_curvature_ratio_to_limit=(_stable_float(ratio) if ratio is not None else None),
         worst_curvature_is_direction_transition=bool(worst_curvature["transition"]),
+        direction_transition_count=direction_transition_count,
+        valid_cusp_count=valid_cusp_count,
+        ambiguous_direction_transition_count=ambiguous_direction_transition_count,
+        direction_transition_feasible=ambiguous_direction_transition_count == 0,
+        direction_transition_status=(
+            "AMBIGUOUS_DIRECTION_TRANSITION"
+            if ambiguous_direction_transition_count
+            else ("VALID_CUSP" if valid_cusp_count else "NONE")
+        ),
         required_min_turning_radius=_stable_float(required_radius),
         sample_count=len(samples),
         in_place_rotation_count=in_place_rotations,

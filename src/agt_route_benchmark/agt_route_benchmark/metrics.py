@@ -5,6 +5,10 @@ from typing import Sequence
 from .contracts import PathPoint
 
 
+_POSITION_CONTINUITY_EPS = 1e-9
+_HEADING_CONTINUITY_EPS = 1e-6
+
+
 def _distance(a: PathPoint, b: PathPoint) -> float:
     return math.hypot(b.x_m - a.x_m, b.y_m - a.y_m)
 
@@ -46,6 +50,9 @@ def compute_path_metrics(
     max_curvature = 0.0
     zero_length_segments = 0
     in_reverse = False
+    direction_transition_count = 0
+    valid_cusp_count = 0
+    ambiguous_direction_transition_count = 0
     worst: dict[str, object] | None = None
     for a, b in zip(points, points[1:]):
         ds = _distance(a, b)
@@ -63,6 +70,16 @@ def compute_path_metrics(
     for segment_index, (a, b) in enumerate(zip(points, points[1:])):
         chord = _distance(a, b)
         delta_yaw = _angle_delta(a.yaw_rad, b.yaw_rad)
+        direction_transition = {a.direction, b.direction} == {"F", "R"}
+        if direction_transition:
+            direction_transition_count += 1
+            if chord <= _POSITION_CONTINUITY_EPS and abs(delta_yaw) <= _HEADING_CONTINUITY_EPS:
+                valid_cusp_count += 1
+            else:
+                ambiguous_direction_transition_count += 1
+            # A cusp is a velocity-sign event, not a continuous motion
+            # primitive. Never fold its chord into curvature evaluation.
+            continue
         curvature = _chord_curvature(delta_yaw, chord)
         if curvature > max_curvature:
             max_curvature = curvature
@@ -100,6 +117,19 @@ def compute_path_metrics(
         "worst_curvature_chord_m": worst["chord_m"],
         "worst_curvature_ratio_to_limit": ratio,
         "worst_curvature_is_direction_transition": worst["is_direction_transition"],
+        "direction_transition_count": direction_transition_count,
+        "valid_cusp_count": valid_cusp_count,
+        "ambiguous_direction_transition_count": ambiguous_direction_transition_count,
+        "direction_transition_feasible": ambiguous_direction_transition_count == 0,
+        "direction_transition_status": (
+            "AMBIGUOUS_DIRECTION_TRANSITION"
+            if ambiguous_direction_transition_count
+            else ("VALID_CUSP" if valid_cusp_count else "NONE")
+        ),
+        "validation_error_codes": (
+            ["ambiguous_direction_transition"]
+            if ambiguous_direction_transition_count else []
+        ),
         "zero_length_segment_count": zero_length_segments,
         "min_clearance_m": min_clearance_m,
         "footprint_collision_count": footprint_collision_count,

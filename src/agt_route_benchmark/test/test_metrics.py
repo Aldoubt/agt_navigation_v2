@@ -28,7 +28,10 @@ def test_length_reverse_and_curvature_metrics():
     assert abs(m["path_length_m"] - 2.0) < 1e-9
     assert m["reverse_segment_count"] == 1
     assert abs(m["reverse_distance_m"] - 1.0) < 1e-9
-    assert abs(m["max_abs_curvature_1pm"] - 2.0 * math.sin(math.pi / 8.0)) < 1e-9
+    assert m["max_abs_curvature_1pm"] == 0.0
+    assert m["direction_transition_count"] == 1
+    assert m["ambiguous_direction_transition_count"] == 1
+    assert m["direction_transition_feasible"] is False
 
 
 def test_circular_arc_curvature_uses_chord_invariant_relation():
@@ -77,6 +80,36 @@ def test_true_rotate_in_place_is_diagnosed_as_curvature_failure():
     ])
     assert metrics["max_abs_curvature_1pm"] == math.inf
     assert metrics["worst_curvature_chord_m"] == 0.0
+
+
+def test_direction_transition_is_separate_event_and_ambiguous_transition_fails_closed():
+    metrics = compute_path_metrics([
+        PathPoint(0.0, 0.0, 0.0, "F", "TURN", ""),
+        PathPoint(1.0, 0.0, 0.0, "R", "TURN", ""),
+        PathPoint(1.1, 0.0, 0.0, "F", "TURN", ""),
+    ], curvature_limit_1pm=1.0 / 1.5)
+    assert metrics["max_abs_curvature_1pm"] == 0.0
+    assert metrics["direction_transition_count"] == 2
+    assert metrics["valid_cusp_count"] == 0
+    assert metrics["ambiguous_direction_transition_count"] == 2
+    assert metrics["direction_transition_feasible"] is False
+    assert metrics["direction_transition_status"] == "AMBIGUOUS_DIRECTION_TRANSITION"
+    assert "ambiguous_direction_transition" in metrics["validation_error_codes"]
+
+
+def test_explicit_continuous_cusp_is_valid_but_not_curvature():
+    metrics = compute_path_metrics([
+        PathPoint(0.0, 0.0, 0.0, "F", "TURN", ""),
+        PathPoint(1.0, 0.0, 0.0, "F", "TURN", ""),
+        PathPoint(1.0, 0.0, 0.0, "R", "TURN", ""),
+        PathPoint(0.0, 0.0, 0.0, "R", "TURN", ""),
+    ], curvature_limit_1pm=1.0 / 1.5)
+    assert metrics["direction_transition_count"] == 1
+    assert metrics["valid_cusp_count"] == 1
+    assert metrics["ambiguous_direction_transition_count"] == 0
+    assert metrics["direction_transition_feasible"] is True
+    assert metrics["direction_transition_status"] == "VALID_CUSP"
+    assert metrics["max_abs_curvature_1pm"] == 0.0
 
 
 def test_reverse_segment_count_means_contiguous_reverse_maneuvers():

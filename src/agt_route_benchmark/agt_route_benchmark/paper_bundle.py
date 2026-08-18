@@ -189,7 +189,9 @@ def _metric_text(run: Mapping[str, Any]) -> str:
         f"κlimit={fmt(metrics.get('required_max_curvature_1pm'))} 1/m\nκ/limit={fmt(metrics.get('worst_curvature_ratio_to_limit'))}\n"
         f"Δgoal={fmt(metrics.get('goal_pose_deviation_m'))} m\nΔψgoal={fmt(metrics.get('goal_heading_deviation_rad'))} rad\n"
         f"execution={feasible_text}\nR={fmt(metrics.get('reverse_distance_m'))} m / reverse segments={metrics.get('reverse_segment_count', 'N/A')}\n"
-        f"worst direction={metrics.get('worst_curvature_direction', 'N/A')} / cusp={bool(metrics.get('worst_curvature_is_direction_transition', False))}"
+        f"worst direction={metrics.get('worst_curvature_direction', 'N/A')} / cusp={bool(metrics.get('worst_curvature_is_direction_transition', False))}\n"
+        f"direction transitions={metrics.get('direction_transition_count', 'N/A')} / valid cusps={metrics.get('valid_cusp_count', 'N/A')}\n"
+        f"transition status={metrics.get('direction_transition_status', 'N/A')} / ambiguous={metrics.get('ambiguous_direction_transition_count', 'N/A')}"
     )
 
 
@@ -299,12 +301,12 @@ def build_paper_bundle(results_root: Path | str, output_dir: Path | str, *, map_
         if not scenario_runs: continue
         figures[figure_id] = {
             "scenario_id": scenario, "source_runs": _comparison_figure(scenario, scenario_runs, output_dir / figure_id, nav_map),
-            "metrics_used": ["success", "path_length_m", "max_abs_curvature_1pm", "required_max_curvature_1pm", "worst_curvature_x_m", "worst_curvature_y_m", "worst_curvature_ratio_to_limit", "goal_pose_deviation_m", "goal_heading_deviation_rad", "reverse_distance_m", "reverse_segment_count", "collision_free", "kinematic_feasible", "execution_feasible"],
+            "metrics_used": ["success", "path_length_m", "max_abs_curvature_1pm", "required_max_curvature_1pm", "worst_curvature_x_m", "worst_curvature_y_m", "worst_curvature_ratio_to_limit", "direction_transition_count", "valid_cusp_count", "ambiguous_direction_transition_count", "direction_transition_status", "goal_pose_deviation_m", "goal_heading_deviation_rad", "reverse_distance_m", "reverse_segment_count", "collision_free", "kinematic_feasible", "execution_feasible"],
             "pose_annotations": dict(_POSE_ANNOTATIONS), "formats": ["svg", "pdf", "png"],
         }
     evidence_runs = [run for run in runs if run["scenario_id"] in _DIAGNOSTIC_SCENARIOS]
     if evidence_runs:
-        figures["D4_feasibility_matrix"] = {"source_runs": _feasibility_matrix(evidence_runs, output_dir / "D4_feasibility_matrix"), "metrics_used": ["success", "collision_free", "kinematic_feasible", "execution_feasible", "max_abs_curvature_1pm", "required_max_curvature_1pm", "worst_curvature_ratio_to_limit"], "formats": ["svg", "pdf", "png"]}
+        figures["D4_feasibility_matrix"] = {"source_runs": _feasibility_matrix(evidence_runs, output_dir / "D4_feasibility_matrix"), "metrics_used": ["success", "collision_free", "kinematic_feasible", "execution_feasible", "max_abs_curvature_1pm", "required_max_curvature_1pm", "worst_curvature_ratio_to_limit", "direction_transition_status", "ambiguous_direction_transition_count"], "formats": ["svg", "pdf", "png"]}
     source_files: dict[str, str] = {}
     for run in runs:
         for key in ("manifest_path", "planner_report_path", "metrics_path", "path_csv"):

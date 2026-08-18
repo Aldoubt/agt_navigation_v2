@@ -234,6 +234,40 @@ def test_true_rotate_in_place_still_fails():
     assert result.report.in_place_rotation_count > 0
 
 
+def test_ambiguous_direction_transition_fails_closed_and_is_not_curvature():
+    result = validate_path(
+        [
+            Pose2D(4.0, 4.0, 0.0, "F"),
+            Pose2D(5.0, 4.0, 0.0, "R"),
+            Pose2D(5.1, 4.0, 0.0, "F"),
+        ], "map", _grid(), SMALL_FOOTPRINT, 1.5,
+    )
+    assert not result.report.valid
+    assert result.report.maximum_curvature == 0.0
+    assert result.report.direction_transition_count == 2
+    assert result.report.valid_cusp_count == 0
+    assert result.report.ambiguous_direction_transition_count == 2
+    assert result.report.direction_transition_status == "AMBIGUOUS_DIRECTION_TRANSITION"
+    assert "ambiguous_direction_transition" in result.report.error_codes
+
+
+def test_explicit_cusp_is_separate_valid_event():
+    result = validate_path(
+        [
+            Pose2D(4.0, 4.0, 0.0, "F"),
+            Pose2D(5.0, 4.0, 0.0, "F"),
+            Pose2D(5.0, 4.0, 0.0, "R"),
+            Pose2D(4.0, 4.0, 0.0, "R"),
+        ], "map", _grid(), SMALL_FOOTPRINT, 1.5,
+    )
+    assert result.report.valid
+    assert result.report.direction_transition_count == 1
+    assert result.report.valid_cusp_count == 1
+    assert result.report.ambiguous_direction_transition_count == 0
+    assert result.report.direction_transition_status == "VALID_CUSP"
+    assert result.report.maximum_curvature == 0.0
+
+
 def test_curvature_report_contains_worst_segment_diagnostics():
     result = validate_path(
         _circular_arc(1.5, 10.0, 2), "map", _grid(), SMALL_FOOTPRINT, 1.5

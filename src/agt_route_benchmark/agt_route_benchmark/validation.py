@@ -67,7 +67,10 @@ def evaluate_normalized_path(
         and "footprint_outside_costmap" not in error_set
         and "unknown_space_collision" not in error_set
     )
-    kinematic_feasible = "minimum_turning_radius_violation" not in error_set
+    kinematic_feasible = (
+        "minimum_turning_radius_violation" not in error_set
+        and "ambiguous_direction_transition" not in error_set
+    )
 
     metrics = {
         "execution_feasible": bool(report.valid),
@@ -90,6 +93,11 @@ def evaluate_normalized_path(
         "worst_curvature_chord_m": getattr(report, "worst_curvature_chord", 0.0),
         "worst_curvature_ratio_to_limit": getattr(report, "worst_curvature_ratio_to_limit", None),
         "worst_curvature_is_direction_transition": getattr(report, "worst_curvature_is_direction_transition", False),
+        "direction_transition_count": getattr(report, "direction_transition_count", 0),
+        "valid_cusp_count": getattr(report, "valid_cusp_count", 0),
+        "ambiguous_direction_transition_count": getattr(report, "ambiguous_direction_transition_count", 0),
+        "direction_transition_feasible": getattr(report, "direction_transition_feasible", True),
+        "direction_transition_status": getattr(report, "direction_transition_status", "NONE"),
     }
     if semantic_map_path is not None:
         semantic_metrics = evaluate_semantic_path(
