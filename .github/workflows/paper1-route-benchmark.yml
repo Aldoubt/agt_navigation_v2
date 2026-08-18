@@ -8,6 +8,7 @@ on:
       - 'src/agt_route_benchmark/**'
       - 'src/agt_coverage_planning/**'
       - 'src/agt_offline_assets/**'
+      - 'src/agt_map_workbench/**'
       - 'profiles/platforms/mk_mini.yaml'
       - '.github/workflows/paper1-route-benchmark.yml'
   pull_request:
@@ -15,6 +16,7 @@ on:
       - 'src/agt_route_benchmark/**'
       - 'src/agt_coverage_planning/**'
       - 'src/agt_offline_assets/**'
+      - 'src/agt_map_workbench/**'
       - 'profiles/platforms/mk_mini.yaml'
       - '.github/workflows/paper1-route-benchmark.yml'
 
@@ -33,10 +35,19 @@ jobs:
         env:
           PYTHONPATH: src/agt_offline_assets
         run: python -m pytest -q src/agt_offline_assets/test/test_navigation_map_freeze_export.py
+      - name: Run formal Workbench override metadata contract
+        env:
+          PYTHONPATH: src/agt_map_workbench:src/agt_offline_assets
+        run: python -m pytest -q src/agt_map_workbench/test/test_navigation_override_metadata.py
       - name: Run Paper I benchmark unit tests
         env:
           MPLBACKEND: Agg
           PYTHONPATH: src/agt_route_benchmark:src/agt_coverage_planning:src/agt_offline_assets
         run: python -m pytest -q src/agt_route_benchmark/test
-      - name: Compile benchmark Python sources
-        run: python -m compileall -q src/agt_route_benchmark/agt_route_benchmark src/agt_route_benchmark/scripts
+      - name: Compile changed Python sources
+        run: >-
+          python -m compileall -q
+          src/agt_route_benchmark/agt_route_benchmark
+          src/agt_route_benchmark/scripts
+          src/agt_offline_assets/agt_offline_assets
+          src/agt_map_workbench/agt_map_workbench/navigation_override_metadata.py
