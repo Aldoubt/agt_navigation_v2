@@ -148,20 +148,11 @@ def _navigation_result(nav_map: Nav2Map, occupancy: np.ndarray) -> NavigationMap
     )
 
 
-def audit_map_revision(
-    generated_map_yaml: Path | str,
-    accepted_map_yaml: Path | str,
-    derivation_yaml: Path | str,
-) -> dict[str, object]:
-    """Replay a formal override sequence and compare it to the accepted map."""
-    generated_map = load_nav2_map(generated_map_yaml)
-    accepted_map = load_nav2_map(accepted_map_yaml)
-    _assert_compatible(generated_map, accepted_map)
-
-    generated = _occupancy_classes(generated_map)
-    accepted = _occupancy_classes(accepted_map)
-    overrides = _load_overrides(derivation_yaml)
-
+def _replay(
+    generated_map: Nav2Map,
+    generated: np.ndarray,
+    overrides: tuple[dict[str, object], ...],
+) -> tuple[np.ndarray, int, int]:
     current = generated.copy()
     force_free_changed = 0
     force_occupied_changed = 0
@@ -175,8 +166,26 @@ def audit_map_revision(
             force_free_changed += changed
         else:
             force_occupied_changed += changed
+    return current, force_free_changed, force_occupied_changed
 
-    replay = current
+
+def audit_map_revision(
+    generated_map_yaml: Path | str,
+    accepted_map_yaml: Path | str,
+    derivation_yaml: Path | str,
+) -> dict[str, object]:
+    """Replay a formal override sequence and compare it to the accepted map."""
+    generated_map = load_nav2_map(generated_map_yaml)
+    accepted_map = load_nav2_map(accepted_map_yaml)
+    _assert_compatible(generated_map, accepted_map)
+
+    generated = _occupancy_classes(generated_map)
+    accepted = _occupancy_classes(accepted_map)
+    overrides = _load_overrides(derivation_yaml)
+    replay, force_free_changed, force_occupied_changed = _replay(
+        generated_map, generated, overrides
+    )
+
     changed_mask = generated != accepted
     replay_mismatch = accepted != replay
     unexplained_changed = changed_mask & replay_mismatch
@@ -205,3 +214,123 @@ def audit_map_revision(
         "unexplained_changed_cell_count": int(np.count_nonzero(unexplained_changed)),
         "accepted_matches_replay": bool(np.array_equal(accepted, replay)),
     }
+
+
+def _display_values(occupancy: np.ndarray) -> np.ndarray:
+    display = np.full(occupancy.shape, 0.5, dtype=np.float64)
+    display[occupancy == FREE] = 1.0
+    display[occupancy == OCCUPIED] = 0.0
+    return display
+
+
+def write_map_quality_evidence(
+    generated_map_yaml: Path | str,
+    accepted_map_yaml: Path | str,
+    derivation_yaml: Path | str,
+    *,
+    output_dir: Path | str,
+) -> dict[str, object]:
+    """Write planner-independent real-map audit JSON and review figures."""
+    output = Path(output_dir).expanduser().resolve()
+    output.mkdir(parents=True, exist_ok=True)
+
+    report = audit_map_revision(
+        generated_map_yaml,
+        accepted_map_yaml,
+        derivation_yaml,
+    )
+    (output / "map_qa_report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    generated_map = load_nav2_map(generated_map_yaml)
+    accepted_map = load_nav2_map(accepted_map_yaml)
+    generated = _occupancy_classes(generated_map)
+    accepted = _occupancy_classes(accepted_map)
+    overrides = _load_overrides(derivation_yaml)
+    replay, _, _ = _replay(generated_map, generated, overrides)
+    changed = generated != accepted
+    mismatch = accepted != replay
+
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Polygon as PolygonPatch
+
+    extent = generated_map.extent
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 5.0), constrained_layout=True)
+    panels = (
+        (axes[0], generated, "Generated (pre-override)"),
+        (axes[1], accepted, "Accepted (post-override)"),
+    )
+    for axis, occupancy, title in panels:
+        axis.imshow(
+            _display_values(occupancy),
+            origin="lower",
+            extent=extent,
+            cmap="gray",
+            vmin=0.0,
+            vmax=1.0,
+            interpolation="nearest",
+        )
+        axis.set_title(title)
+        axis.set_aspect("equal")
+        axis.set_xlabel("map x [m]")
+        axis.set_ylabel("map y [m]")
+
+    axes[2].imshow(
+        _display_values(accepted),
+        origin="lower",
+        extent=extent,
+        cmap="gray",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        alpha=0.65,
+    )
+    changed_overlay = np.ma.masked_where(~changed, changed.astype(float))
+    mismatch_overlay = np.ma.masked_where(~mismatch, mismatch.astype(float))
+    axes[2].imshow(
+        changed_overlay,
+        origin="lower",
+        extent=extent,
+        cmap="autumn",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        alpha=0.75,
+    )
+    axes[2].imshow(
+        mismatch_overlay,
+        origin="lower",
+        extent=extent,
+        cmap="Reds",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        alpha=0.95,
+    )
+    for record in overrides:
+        polygon = PolygonPatch(
+            np.asarray(record["polygon_xy"], dtype=float),
+            closed=True,
+            fill=False,
+            linewidth=1.2,
+            linestyle="--",
+            edgecolor=("tab:blue" if record["mode"] == "force_free" else "tab:red"),
+        )
+        axes[2].add_patch(polygon)
+    axes[2].set_title("Changed cells + recorded overrides")
+    axes[2].set_aspect("equal")
+    axes[2].set_xlabel("map x [m]")
+    axes[2].set_ylabel("map y [m]")
+
+    status = "PASS" if report["accepted_matches_replay"] else "FAIL"
+    fig.suptitle(
+        "Planner-independent map curation QA | "
+        f"replay={status} | changed={report['changed_cell_count']} | "
+        f"unexplained={report['unexplained_changed_cell_count']}"
+    )
+    for suffix in ("svg", "pdf", "png"):
+        fig.savefig(output / f"map_curation_qa.{suffix}", dpi=180)
+    plt.close(fig)
+    return report
