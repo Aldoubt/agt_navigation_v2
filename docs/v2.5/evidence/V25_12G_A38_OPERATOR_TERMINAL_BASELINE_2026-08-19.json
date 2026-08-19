@@ -1,0 +1,118 @@
+{
+  "schema": "agt_v25_12g_a38_operator_terminal_baseline/v1",
+  "validation_scope": "A38_OPERATOR_SUPPLIED_TERMINAL_BASELINE_FOR_A39_DIAGNOSTIC_ONLY_NOT_PLANNER_AMENDMENT_NOT_ROUTE_READY",
+  "provenance": {
+    "kind": "OPERATOR_SUPPLIED_A38_CONSOLE_EVIDENCE",
+    "original_a38_json_available_in_repository": false,
+    "reconstructed_from_console_output": true,
+    "reconstruction_policy": "ONLY_FIELDS_EXPLICITLY_PRESENT_IN_OPERATOR_SUPPLIED_A38_CONSOLE_OUTPUT",
+    "source_date": "2026-08-19"
+  },
+  "a38_summary": {
+    "frontier_candidate_count": 6,
+    "queue_exhausted_count": 6,
+    "expansion_budget_reached_count": 0,
+    "failure_class_counts": {
+      "INCONCLUSIVE": 2,
+      "MIXED_LIMITATION": 4
+    },
+    "current_outcomes_match_operator_frozen_a36_evidence": true,
+    "protected_input_hashes_unchanged": true
+  },
+  "targets": [
+    {
+      "role": "PRIMARY",
+      "candidate_connector_id": "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_019.segment_003.dead_end_forward_in_reverse_out",
+      "a36_outcome": {
+        "status": "REJECTED",
+        "backend_status": "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+        "search_expansions": 14828,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "MIXED_LIMITATION"
+      },
+      "r6b_diagnostics": {
+        "search_started": true,
+        "search_expansions": 14828,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "MIXED_LIMITATION",
+        "start_goal_position_error_m": 3.9080046059338267,
+        "best_goal_position_error_m": 0.2841610882524546,
+        "best_goal_yaw_error_rad": 1.0,
+        "best_goal_distance_state_direction": "FORWARD",
+        "best_goal_distance_cusp_count": 2,
+        "nodes_popped": 16238,
+        "stale_nodes_skipped": 1410,
+        "primitive_edges_considered": 74140,
+        "primitive_edges_rejected_search_envelope": 509,
+        "primitive_edges_rejected_site_boundary": 9600,
+        "primitive_edges_rejected_navigation_grid": 12677,
+        "primitive_edges_rejected_path_length": 0,
+        "primitive_edges_rejected_state_dominance": 36173,
+        "primitive_edges_enqueued": 15181,
+        "cusp_switches_considered": 2971,
+        "cusp_switches_rejected_state_dominance": 1915,
+        "cusp_switches_enqueued": 1056,
+        "nodes_at_max_cusps": 11857,
+        "goal_tolerance_checks": 14828,
+        "goal_tolerance_successes": 0,
+        "goal_shot_attempts": 3188,
+        "goal_shot_reverse_direction_blocked": 372,
+        "goal_shot_candidates_considered": 14217,
+        "goal_shot_rejected_path_length": 9732,
+        "goal_shot_rejected_search_envelope": 0,
+        "goal_shot_rejected_site_boundary": 1393,
+        "goal_shot_rejected_navigation_grid": 3092,
+        "goal_shot_successes": 0
+      }
+    },
+    {
+      "role": "CONTROL",
+      "candidate_connector_id": "headland.turn_high_u.aisle_017.segment_005.dead_end_forward_in_reverse_out.to.aisle_020.segment_001.service_high_to_low",
+      "a36_outcome": {
+        "status": "REJECTED",
+        "backend_status": "NO_REVERSE_PRIMITIVE_PREVIEW_SOLUTION",
+        "search_expansions": 14912,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "MIXED_LIMITATION"
+      },
+      "r6b_diagnostics": {
+        "search_started": true,
+        "search_expansions": 14912,
+        "queue_exhausted": true,
+        "expansion_budget_reached": false,
+        "failure_class": "MIXED_LIMITATION",
+        "start_goal_position_error_m": 5.894064811316549,
+        "best_goal_position_error_m": 2.044166629780251,
+        "best_goal_yaw_error_rad": 1.3999999999999968,
+        "best_goal_distance_state_direction": "FORWARD",
+        "best_goal_distance_cusp_count": 2,
+        "nodes_popped": 16357,
+        "stale_nodes_skipped": 1445,
+        "primitive_edges_considered": 74560,
+        "primitive_edges_rejected_search_envelope": 509,
+        "primitive_edges_rejected_site_boundary": 9598,
+        "primitive_edges_rejected_navigation_grid": 12889,
+        "primitive_edges_rejected_path_length": 0,
+        "primitive_edges_rejected_state_dominance": 36277,
+        "primitive_edges_enqueued": 15287,
+        "cusp_switches_considered": 2987,
+        "cusp_switches_rejected_state_dominance": 1918,
+        "cusp_switches_enqueued": 1069,
+        "nodes_at_max_cusps": 11925,
+        "goal_tolerance_checks": 14912,
+        "goal_tolerance_successes": 0,
+        "goal_shot_attempts": 818,
+        "goal_shot_reverse_direction_blocked": 147,
+        "goal_shot_candidates_considered": 3479,
+        "goal_shot_rejected_path_length": 2997,
+        "goal_shot_rejected_search_envelope": 0,
+        "goal_shot_rejected_site_boundary": 157,
+        "goal_shot_rejected_navigation_grid": 325,
+        "goal_shot_successes": 0
+      }
+    }
+  ]
+}
