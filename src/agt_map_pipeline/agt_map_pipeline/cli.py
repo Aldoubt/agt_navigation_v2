@@ -6,7 +6,7 @@ from .status import build_project_status
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="agt-map"); sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("prepare"); p.add_argument("pcd"); p.add_argument("--preset", required=True); p.add_argument("--output", required=True); p.add_argument("--frame-id", default="map"); p.add_argument("--site-id"); p.add_argument("--profile"); p.add_argument("--resume", action="store_true"); p.add_argument("--alignment"); p.add_argument("--canonical-map-yaml")
+    p = sub.add_parser("prepare"); p.add_argument("pcd"); p.add_argument("--preset", required=True); p.add_argument("--output", required=True); p.add_argument("--frame-id", default="map"); p.add_argument("--site-id"); p.add_argument("--profile"); p.add_argument("--resume", action="store_true"); p.add_argument("--alignment"); p.add_argument("--canonical-map-yaml"); p.add_argument("--v25-map-revision")
     s = sub.add_parser("status"); s.add_argument("project"); s.add_argument("--json", action="store_true")
     v = sub.add_parser("verify-frame"); v.add_argument("project"); v.add_argument("--route-csv"); v.add_argument("--semantic-map")
     args = parser.parse_args(argv)
@@ -32,6 +32,7 @@ def main(argv=None):
             resume=args.resume,
             alignment_path=args.alignment,
             canonical_map_yaml=args.canonical_map_yaml,
+            v25_map_revision=args.v25_map_revision,
         )
         print(f"Project : {result.project_dir}\nState   : {result.project_state}\nNext    : agt-map review {result.project_dir}")
         return 2 if result.human_required else 0
