@@ -37,6 +37,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_navigation_map_derivation test/test_navigation_map_derivation.py)
   ament_add_pytest_test(test_navigation_grid test/test_navigation_grid.py)
   ament_add_pytest_test(test_navigation_structure test/test_navigation_structure.py)
+  ament_add_pytest_test(test_terrain_morphology test/test_terrain_morphology.py)
+  ament_add_pytest_test(test_navigation_row_tracks test/test_navigation_row_tracks.py)
   ament_add_pytest_test(test_navigation_corridor test/test_navigation_corridor.py)
   ament_add_pytest_test(
     test_navigation_corridor_boundary_candidates
