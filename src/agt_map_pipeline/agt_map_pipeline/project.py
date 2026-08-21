@@ -4,6 +4,8 @@ from typing import Mapping
 import os, tempfile, uuid
 import yaml
 
+from .map_authority import MapAuthorityError, validate_map_authority_document
+
 PROJECT_SCHEMA = "agt_map_project/v1"
 PROJECT_STATES = {"NEW", "PREPARING", "WAITING_HUMAN_REVIEW", "REVIEW_IN_PROGRESS", "READY_TO_FREEZE", "FROZEN", "BLOCKED", "FAILED"}
 STAGE_STATUSES = {"READY", "CANDIDATE", "HUMAN_REQUIRED", "BLOCKED", "FAILED", "FROZEN"}
@@ -28,7 +30,7 @@ def write_project(project_dir: Path | str, document: Mapping[str, object]) -> Pa
 
 def create_project(project_dir: Path, *, source: dict, preset: dict, declared_frame_id: str, site_id: str | None) -> dict:
     _dirs(project_dir)
-    doc = {"schema": PROJECT_SCHEMA, "project_id": str(uuid.uuid4()), "site_id": site_id, "project_state": "NEW", "source": source, "preset": preset, "frame": {"declared_frame_id": declared_frame_id, "verification": "UNVERIFIED"}, "stages": {}, "layers": {}, "human_review": {"required": ["frame", "navigation_overrides", "site_boundary", "row_aisle_candidates", "semantic_features"]}, "accepted_revision": None}
+    doc = {"schema": PROJECT_SCHEMA, "project_id": str(uuid.uuid4()), "site_id": site_id, "project_state": "NEW", "source": source, "preset": preset, "frame": {"declared_frame_id": declared_frame_id, "verification": "UNVERIFIED"}, "map_authority": None, "stages": {}, "layers": {}, "human_review": {"required": ["frame", "navigation_overrides", "site_boundary", "row_aisle_candidates", "semantic_features"]}, "accepted_revision": None}
     write_project(project_dir, doc)
     return doc
 
@@ -37,6 +39,14 @@ def validate_project_document(document: Mapping[str, object]) -> None:
     if document.get("project_state") not in PROJECT_STATES: raise ValueError("invalid project state")
     frame = document.get("frame")
     if not isinstance(frame, Mapping) or frame.get("verification") not in {"UNVERIFIED", "VERIFIED"}: raise ValueError("invalid frame verification")
+    map_authority = document.get("map_authority")
+    if map_authority is not None:
+        if not isinstance(map_authority, Mapping):
+            raise ValueError("invalid map authority binding")
+        try:
+            validate_map_authority_document(map_authority)
+        except MapAuthorityError as exc:
+            raise ValueError(f"invalid map authority binding: {exc}") from exc
     for name, stage in document.get("stages", {}).items():
         if stage.get("status") not in STAGE_STATUSES: raise ValueError(f"invalid stage status: {name}")
     for layer_id, layer in document.get("layers", {}).items():
