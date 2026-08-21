@@ -41,6 +41,9 @@ def _navigation(*, width=140, height=100, resolution=0.10):
 
 def _structure(navigation, evidence):
     shape = navigation.occupancy.shape
+    navigation.obstacle_count[:] = np.rint(
+        np.clip(np.asarray(evidence, dtype=np.float64), 0.0, 1.0) * 10.0
+    ).astype(np.int32)
     return NavigationStructureResult(
         ground_confidence=np.ones(shape, dtype=np.float64),
         robust_slope_deg=np.zeros(shape, dtype=np.float64),
@@ -56,10 +59,6 @@ def _structure(navigation, evidence):
             support_fraction=(),
         ),
         config=NavigationStructureConfig(row_direction_mode="provided"),
-        hybrid_row_evidence=np.asarray(evidence, dtype=np.float64),
-        terrain_ridge_evidence=np.zeros(shape, dtype=np.float64),
-        terrain_depression_evidence=np.zeros(shape, dtype=np.float64),
-        terrain_step_evidence=np.zeros(shape, dtype=np.float64),
     )
 
 
@@ -170,10 +169,9 @@ def test_bounded_one_window_dropout_is_bridged_into_one_track():
         _config(maximum_missed_windows=2),
         row_direction_xy=(1.0, 0.0),
     )
-    centers = _track_centers(result)
-    assert centers.size == 1
-    assert np.min(np.abs(centers - 3.0)) < 0.20
-    assert result.tracks[0].u_max_m - result.tracks[0].u_min_m > 9.0
+    assert len(result.tracks) == 1
+    assert abs(result.tracks[0].representative_v_m - 3.0) < 0.20
+    assert result.tracks[0].longitudinal_span_m > 9.0
 
 
 def test_short_isolated_row_observation_fails_track_span_gate():
