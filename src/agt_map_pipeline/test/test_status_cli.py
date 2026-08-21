@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 import pytest
 from agt_map_pipeline.prepare import prepare_project
 from agt_map_pipeline.status import build_project_status
@@ -10,6 +11,16 @@ def greenhouse_pcd(tmp_path):
     pts = [(x*.1,y*.1,0.0) for x in range(20) for y in range(20)] + [(x*.1,y*.1,.3) for x in range(2,18) for y in (4,10,16)]
     p.write_text("\n".join(["VERSION 0.7", "FIELDS x y z", "SIZE 4 4 4", "TYPE F F F", "COUNT 1 1 1", f"WIDTH {len(pts)}", "HEIGHT 1", f"POINTS {len(pts)}", "DATA ascii"] + [f"{x} {y} {z}" for x,y,z in pts]) + "\n")
     return p
+
+def _v25_revision(tmp_path: Path):
+    revision = tmp_path / "v25_revision"
+    for name in ("generated", "accepted"):
+        directory = revision / name
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "navigation_map.pgm").write_bytes(b"P5\n30 30\n255\n" + bytes([205]) * 900)
+        (directory / "navigation_map.yaml").write_text("image: navigation_map.pgm\nresolution: 0.1\norigin: [-0.5, -0.5, 0.0]\n")
+    (revision / "derivation.yaml").write_text("schema: agt_ground_relative_navigation_map/v1\nframe_id: map\n")
+    return revision
 
 def test_status_json_is_agent_oriented(tmp_path, greenhouse_pcd, capsys):
     project = tmp_path / "project"; prepare_project(greenhouse_pcd, preset_name="greenhouse", output_dir=project)
@@ -27,3 +38,21 @@ def test_status_json_exits_zero(tmp_path, greenhouse_pcd, capsys):
 
 def test_prepare_returns_two(tmp_path, greenhouse_pcd):
     assert main(["prepare", str(greenhouse_pcd), "--preset", "greenhouse", "--output", str(tmp_path / "project")]) == 2
+
+def test_formal_status_exposes_v25_map_authority(tmp_path, greenhouse_pcd):
+    project = tmp_path / "project"
+    prepare_project(greenhouse_pcd, preset_name="greenhouse", output_dir=project, v25_map_revision=_v25_revision(tmp_path))
+    status = build_project_status(project)
+    assert status["map_authority"] == {"authority": "V25_MAP_WORKBENCH", "status": "BOUND_VERIFIED"}
+    assert status["layers"]["evidence.navigation_occupancy"] == "CANDIDATE_EVIDENCE"
+    assert "navigation.nav2_yaml" not in status["layers"]
+
+def test_status_blocks_when_bound_v25_asset_hash_changes(tmp_path, greenhouse_pcd):
+    project = tmp_path / "project"
+    revision = _v25_revision(tmp_path)
+    prepare_project(greenhouse_pcd, preset_name="greenhouse", output_dir=project, v25_map_revision=revision)
+    (revision / "accepted" / "navigation_map.yaml").write_text("changed\n")
+    status = build_project_status(project)
+    assert status["project_state"] == "BLOCKED"
+    assert status["block_code"] == "BLOCKED_V25_MAP_HASH_MISMATCH"
+    assert status["next_action"]["command"] is None
