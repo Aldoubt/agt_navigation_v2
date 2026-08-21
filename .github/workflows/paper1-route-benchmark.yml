@@ -50,10 +50,15 @@ jobs:
           src/agt_offline_assets/test/test_navigation_row_tracks.py
           src/agt_offline_assets/test/test_navigation_corridor.py
           src/agt_offline_assets/test/test_navigation_corridor_boundary_candidates.py
-      - name: Run formal Workbench override metadata contract
+      - name: Run Workbench formal-map and resource-bundle contracts
         env:
+          QT_QPA_PLATFORM: offscreen
           PYTHONPATH: src/agt_map_workbench:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
-        run: python -m pytest -q src/agt_map_workbench/test/test_navigation_override_metadata.py
+        run: >-
+          python -m pytest -q
+          src/agt_map_workbench/test/test_navigation_override_metadata.py
+          src/agt_map_workbench/test/test_resource_bundle.py
+          src/agt_map_workbench/test/test_paper1_resource_bundle_integration.py
       - name: Run map pipeline contracts
         env:
           PYTHONPATH: src/agt_map_pipeline:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
@@ -69,8 +74,7 @@ jobs:
           src/agt_route_benchmark/agt_route_benchmark
           src/agt_route_benchmark/scripts
           src/agt_offline_assets/agt_offline_assets
-          src/agt_map_workbench/agt_map_workbench/navigation_override_metadata.py
-          src/agt_map_workbench/agt_map_workbench/paper1_workbench.py
+          src/agt_map_workbench/agt_map_workbench
           src/agt_map_pipeline/agt_map_pipeline
           src/agt_map_pipeline/scripts
           src/agt_map_workbench/scripts/paper1_map_workbench_launcher.py
