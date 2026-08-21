@@ -38,6 +38,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_navigation_grid test/test_navigation_grid.py)
   ament_add_pytest_test(test_navigation_structure test/test_navigation_structure.py)
   ament_add_pytest_test(test_navigation_corridor test/test_navigation_corridor.py)
+  ament_add_pytest_test(
+    test_navigation_corridor_boundary_candidates
+    test/test_navigation_corridor_boundary_candidates.py
+  )
   ament_add_pytest_test(test_vehicle_corridor test/test_vehicle_corridor.py)
   ament_add_pytest_test(test_agricultural_aisle_graph test/test_agricultural_aisle_graph.py)
   ament_add_pytest_test(test_turn_zones test/test_turn_zones.py)

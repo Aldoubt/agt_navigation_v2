@@ -29,6 +29,10 @@ class NavigationStructureConfig:
     row_profile_smoothing_m: float = 0.20
     row_minimum_spacing_m: float = 0.55
     row_minimum_prominence_ratio: float = 0.12
+    # Optional physical consolidation of multiple profile peaks produced by one
+    # canopy/ridge. Zero preserves the historical V2.5 behaviour; site presets
+    # may enable it after the agricultural frame has been verified.
+    row_hypothesis_merge_distance_m: float = 0.0
     row_half_width_m: float = 0.22
     row_max_gap_m: float = 0.60
     row_minimum_segment_length_m: float = 1.50
@@ -62,6 +66,8 @@ class NavigationStructureConfig:
             raise ValueError("row_minimum_spacing_m must be > 0")
         if not 0.0 <= self.row_minimum_prominence_ratio <= 1.0:
             raise ValueError("row_minimum_prominence_ratio must be in [0, 1]")
+        if self.row_hypothesis_merge_distance_m < 0.0:
+            raise ValueError("row_hypothesis_merge_distance_m must be >= 0")
         if self.row_half_width_m <= 0.0:
             raise ValueError("row_half_width_m must be > 0")
         if self.row_max_gap_m < 0.0:
@@ -190,7 +196,11 @@ def _robust_local_plane_slope(
     stable = determinant > 1e-9
     coefficients = np.full((indices.size, 3), np.nan, dtype=np.float64)
     if np.any(stable):
-        coefficients[stable] = np.linalg.solve(matrices[stable], vectors[stable])
+        # NumPy 2 treats a stacked (..., M) RHS as a matrix stack instead of a
+        # vector stack. Make the vector axis explicit and squeeze it back out.
+        coefficients[stable] = np.linalg.solve(
+            matrices[stable], vectors[stable][..., None]
+        )[..., 0]
     a = coefficients[:, 0]
     b = coefficients[:, 1]
     slope_values = np.degrees(np.arctan(np.hypot(a, b)))
@@ -261,6 +271,8 @@ def _hybrid_row_evidence(
     config: NavigationStructureConfig,
 ) -> np.ndarray:
     obstacle = np.log1p(np.asarray(result.obstacle_count, dtype=np.float64))
+    observed = np.asarray(result.point_count) > 0
+    obstacle[~observed] = 0.0
     obstacle_max = float(np.max(obstacle)) if obstacle.size else 0.0
     if obstacle_max > 0.0:
         obstacle /= obstacle_max
@@ -271,6 +283,7 @@ def _hybrid_row_evidence(
         obstacle_weight * obstacle
         + terrain_weight * np.asarray(terrain_ridge_evidence, dtype=np.float64)
     ) / total
+    hybrid[~observed] = 0.0
     return np.clip(hybrid, 0.0, 1.0)
 
 
@@ -348,6 +361,31 @@ def _remove_short_true_runs(mask: np.ndarray, minimum_bins: int) -> np.ndarray:
     return output
 
 
+def _group_row_peaks(
+    peaks: np.ndarray,
+    centers: np.ndarray,
+    *,
+    merge_distance_m: float,
+) -> tuple[np.ndarray, ...]:
+    """Group nearby profile peaks without assuming a row count or period."""
+    ordered = np.asarray(peaks, dtype=np.int64)
+    if ordered.size == 0:
+        return ()
+    ordered = ordered[np.argsort(centers[ordered])]
+    if merge_distance_m <= 0.0:
+        return tuple(np.asarray([peak], dtype=np.int64) for peak in ordered)
+
+    groups: list[list[int]] = [[int(ordered[0])]]
+    for peak in ordered[1:]:
+        current = int(peak)
+        previous = groups[-1][-1]
+        if float(centers[current] - centers[previous]) <= merge_distance_m:
+            groups[-1].append(current)
+        else:
+            groups.append([current])
+    return tuple(np.asarray(group, dtype=np.int64) for group in groups)
+
+
 def _row_structure(
     result: NavigationMapResult,
     config: NavigationStructureConfig,
@@ -397,6 +435,11 @@ def _row_structure(
         prominence=prominence,
     )
     centers = 0.5 * (edges[:-1] + edges[1:])
+    peak_groups = _group_row_peaks(
+        peaks,
+        centers,
+        merge_distance_m=float(config.row_hypothesis_merge_distance_m),
+    )
 
     u_min = float(np.min(uu))
     u_max = float(np.max(uu))
@@ -416,10 +459,21 @@ def _row_structure(
     all_u_index = np.floor((uu - u_min) / u_bin_m).astype(np.int64)
     all_u_index = np.clip(all_u_index, 0, u_bins - 1)
 
-    for peak in peaks:
-        center_v = float(centers[int(peak)])
-        band = np.abs(vv - center_v) <= float(config.row_half_width_m)
-        raw = band & evidence
+    for group in peak_groups:
+        peak_weights = np.maximum(smooth_profile[group], 1e-9)
+        center_v = float(np.average(centers[group], weights=peak_weights))
+        nominal_band = np.abs(vv - center_v) <= float(config.row_half_width_m)
+
+        # When a single canopy forms two parallel profile edges, use both edge
+        # neighborhoods only to establish longitudinal support. The produced row
+        # remains one nominal structural band at the consolidated center.
+        evidence_band = np.zeros(result.occupancy.shape, dtype=bool)
+        for peak in group:
+            evidence_band |= (
+                np.abs(vv - float(centers[int(peak)]))
+                <= float(config.row_half_width_m)
+            )
+        raw = evidence_band & evidence
         if not np.any(raw):
             continue
         u_index = np.floor((uu[raw] - u_min) / u_bin_m).astype(np.int64)
@@ -430,12 +484,14 @@ def _row_structure(
             continue
         repaired = _fill_short_gaps_1d(u_support, max_gap_bins)
         repaired = _remove_short_true_runs(repaired, minimum_segment_bins)
-        mask = band & repaired[all_u_index]
+        mask = nominal_band & repaired[all_u_index]
         if not np.any(mask):
             continue
         row_regularized |= mask
-        peak_score = float(smooth_profile[int(peak)] / profile_max)
-        row_support[band] = np.maximum(row_support[band], peak_score)
+        peak_score = float(np.max(smooth_profile[group]) / profile_max)
+        row_support[nominal_band] = np.maximum(
+            row_support[nominal_band], peak_score
+        )
         accepted_centers.append(center_v)
         support_fractions.append(support_fraction)
 

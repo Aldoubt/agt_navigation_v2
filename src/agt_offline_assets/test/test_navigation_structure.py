@@ -149,3 +149,54 @@ def test_aisle_candidate_requires_confident_ground_and_no_row_or_raw_obstacle():
     assert np.any(structure.aisle_candidate[20:25, 35:55])
     assert not np.any(structure.aisle_candidate[14:17, 20:60])
     assert not np.any(structure.aisle_candidate[10:18, 10:18])
+
+
+def test_unobserved_obstacle_evidence_cannot_create_crop_row_hypothesis():
+    result = _result(width=100, height=70)
+    # A real observed crop row and a fake obstacle stripe in an unobserved area.
+    result.obstacle_count[25, 8:92] = 5
+    result.obstacle_count[55, 8:92] = 5
+    result.point_count[50:60, :] = 0
+    result.ground_support_count[50:60, :] = 0
+    result.ground_valid[50:60, :] = False
+
+    structure = derive_navigation_structure(
+        result,
+        NavigationStructureConfig(
+            row_direction_mode="provided",
+            row_minimum_spacing_m=0.50,
+            row_minimum_prominence_ratio=0.04,
+        ),
+        row_direction_xy=(1.0, 0.0),
+    )
+    centers = np.asarray(structure.row_model.centers_v_m, dtype=np.float64)
+    assert np.min(np.abs(centers - 2.55)) < 0.25
+    assert np.all(np.abs(centers - 5.55) > 0.35)
+
+
+def test_double_edge_canopy_peaks_consolidate_to_one_row_hypothesis():
+    result = _result(width=120, height=100)
+    result.obstacle_count[:] = 0
+    true_rows_m = (2.0, 4.0, 6.0, 8.0)
+    # Each physical canopy has two strong longitudinal edges 0.60 m apart.
+    # The row hypothesis should represent the structure once, near its center.
+    for center_m in true_rows_m:
+        center_row = int(round(center_m / result.resolution_m - 0.5))
+        for edge_row in (center_row - 3, center_row + 3):
+            result.obstacle_count[edge_row, 8:112] = 6
+
+    structure = derive_navigation_structure(
+        result,
+        NavigationStructureConfig(
+            row_direction_mode="provided",
+            row_profile_smoothing_m=0.08,
+            row_minimum_spacing_m=0.45,
+            row_minimum_prominence_ratio=0.03,
+            row_hypothesis_merge_distance_m=0.80,
+        ),
+        row_direction_xy=(1.0, 0.0),
+    )
+    centers = np.asarray(structure.row_model.centers_v_m, dtype=np.float64)
+    assert centers.size == len(true_rows_m)
+    for expected in true_rows_m:
+        assert np.min(np.abs(centers - expected)) < 0.20

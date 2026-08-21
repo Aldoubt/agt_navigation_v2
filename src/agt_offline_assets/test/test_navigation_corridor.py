@@ -216,3 +216,38 @@ def test_explicit_boundary_aisles_connect_wall_anchor_to_nearest_crop_row():
     assert all(diagnostic.status == "ACCEPTED" for diagnostic in boundary_diagnostics)
     assert all(diagnostic.safe_cell_count > 0 for diagnostic in boundary_diagnostics)
     assert all(diagnostic.centerline_cell_count > 0 for diagnostic in boundary_diagnostics)
+
+
+def test_corridor_defensively_merges_close_row_hypotheses_before_aisle_pairs():
+    navigation, structure = _fixture()
+    # Replace the structure model with three physical rows represented by close
+    # double-edge hypotheses. The corridor layer must not create fake aisles
+    # inside one canopy envelope.
+    duplicate_centers = (0.95, 1.45, 2.45, 2.95, 3.95, 4.45)
+    structure = NavigationStructureResult(
+        ground_confidence=structure.ground_confidence,
+        robust_slope_deg=structure.robust_slope_deg,
+        robust_plane_residual_m=structure.robust_plane_residual_m,
+        row_support=structure.row_support,
+        row_regularized_obstacle=structure.row_regularized_obstacle,
+        aisle_candidate=structure.aisle_candidate,
+        row_model=RowModel(
+            direction_xy=structure.row_model.direction_xy,
+            angle_deg=structure.row_model.angle_deg,
+            centers_v_m=duplicate_centers,
+            half_width_m=structure.row_model.half_width_m,
+            support_fraction=tuple(0.8 for _ in duplicate_centers),
+        ),
+        config=structure.config,
+    )
+    result = derive_corridor_refinement(
+        navigation,
+        structure,
+        _feasible_config(
+            boundary_exclusion_m=0.20,
+            row_hypothesis_merge_distance_m=0.60,
+        ),
+    )
+    assert len(result.accepted_row_centers_v_m) == 3
+    assert len(result.aisle_pair_diagnostics) == 2
+    assert all(d.pair_kind == "ROW_ROW" for d in result.aisle_pair_diagnostics)

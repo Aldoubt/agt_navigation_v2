@@ -35,6 +35,10 @@ class CorridorRefinementConfig:
     aisle_minimum_width_m: float = 0.45
     aisle_centerline_half_width_m: float = 0.06
     spacing_tolerance_ratio: float = 0.38
+    # Defensive consolidation of close row hypotheses before spacing and aisle
+    # pairing. Zero preserves historical behaviour unless a reviewed site preset
+    # explicitly enables same-row peak merging.
+    row_hypothesis_merge_distance_m: float = 0.0
     minimum_row_longitudinal_span_m: float = 1.50
     minimum_ground_confidence: float = 0.30
 
@@ -61,6 +65,8 @@ class CorridorRefinementConfig:
             raise ValueError("aisle_centerline_half_width_m must be > 0")
         if not 0.0 <= self.spacing_tolerance_ratio < 1.0:
             raise ValueError("spacing_tolerance_ratio must be in [0, 1)")
+        if self.row_hypothesis_merge_distance_m < 0.0:
+            raise ValueError("row_hypothesis_merge_distance_m must be >= 0")
         if self.minimum_row_longitudinal_span_m <= 0.0:
             raise ValueError("minimum_row_longitudinal_span_m must be > 0")
         if not 0.0 <= self.minimum_ground_confidence <= 1.0:
@@ -136,6 +142,46 @@ def _normalize_direction(direction_xy: Iterable[float]) -> np.ndarray:
     return direction / norm
 
 
+def _merge_close_centers(
+    centers: np.ndarray,
+    *,
+    maximum_distance_m: float,
+) -> np.ndarray:
+    """Merge same-row center hypotheses without imposing a periodic row model."""
+    values = np.sort(np.asarray(centers, dtype=np.float64))
+    if values.size < 2 or maximum_distance_m <= 0.0:
+        return values
+    groups: list[list[float]] = [[float(values[0])]]
+    for value in values[1:]:
+        current = float(value)
+        if current - groups[-1][-1] <= maximum_distance_m:
+            groups[-1].append(current)
+        else:
+            groups.append([current])
+    return np.asarray([float(np.mean(group)) for group in groups], dtype=np.float64)
+
+
+def _boundary_candidate_centers(
+    centers: np.ndarray,
+    *,
+    v_min: float,
+    v_max: float,
+    boundary_exclusion_m: float,
+) -> np.ndarray:
+    """Return only row-like peaks that lie inside the geometric boundary band.
+
+    Boundary aisle anchors must come from explicit edge evidence.  In
+    particular, members of a merged interior canopy hypothesis are not eligible
+    merely because they sit on one side of the merged representative center.
+    """
+    values = np.sort(np.asarray(centers, dtype=np.float64))
+    margin = float(boundary_exclusion_m)
+    return values[
+        (values <= float(v_min) + margin)
+        | (values >= float(v_max) - margin)
+    ]
+
+
 def _filter_row_centers(
     centers: np.ndarray,
     *,
@@ -143,6 +189,7 @@ def _filter_row_centers(
     v_max: float,
     boundary_exclusion_m: float,
     spacing_tolerance_ratio: float,
+    row_hypothesis_merge_distance_m: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, float | None]:
     if centers.size == 0:
         return centers, centers, None
@@ -151,7 +198,10 @@ def _filter_row_centers(
         (centers >= v_min + boundary_exclusion_m)
         & (centers <= v_max - boundary_exclusion_m)
     )
-    interior_centers = centers[interior]
+    interior_centers = _merge_close_centers(
+        centers[interior],
+        maximum_distance_m=float(row_hypothesis_merge_distance_m),
+    )
     rejected = list(centers[~interior])
     if interior_centers.size < 3:
         return interior_centers, np.asarray(rejected, dtype=np.float64), None
@@ -306,6 +356,7 @@ def derive_corridor_refinement(
         v_max=v_max,
         boundary_exclusion_m=float(cfg.boundary_exclusion_m),
         spacing_tolerance_ratio=float(cfg.spacing_tolerance_ratio),
+        row_hypothesis_merge_distance_m=float(cfg.row_hypothesis_merge_distance_m),
     )
 
     raw_obstacle = (
@@ -497,13 +548,19 @@ def derive_corridor_refinement(
 
     if cfg.enable_boundary_aisles and accepted.size > 0:
         boundary_source = raw_obstacle | source_rows
+        boundary_centers = _boundary_candidate_centers(
+            centers,
+            v_min=v_min,
+            v_max=v_max,
+            boundary_exclusion_m=float(cfg.boundary_exclusion_m),
+        )
         wall_support_half_width = max(
             float(cfg.boundary_wall_half_width_m) + float(cfg.raw_obstacle_clearance_m),
             2.0 * float(navigation.resolution_m),
         )
 
         low_anchor = _boundary_anchor(
-            centers,
+            boundary_centers,
             side="low",
             first_row=float(accepted[0]),
             last_row=float(accepted[-1]),
@@ -554,7 +611,7 @@ def derive_corridor_refinement(
             boundary_aisle_centerline |= centerline
 
         high_anchor = _boundary_anchor(
-            centers,
+            boundary_centers,
             side="high",
             first_row=float(accepted[0]),
             last_row=float(accepted[-1]),
