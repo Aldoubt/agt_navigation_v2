@@ -69,10 +69,16 @@ def test_transform_cloud_applies_rigid_transform_and_crops_to_grid(tmp_path: Pat
     alignment.write_text("status: PASS\nmethod: TEST\nsource_frame: session\nmap_frame: map\ntransform:\n  yaw_rad: 0.0\n  translation_xyz_m: [1.0, 2.0, 0.0]\n")
     spec = load_alignment_spec(alignment)
     grid = NavigationGridSpec("map", 0.1, 1.0, 2.0, 10, 10)
-    transformed = transform_cloud_to_map(_cloud([(0.1, 0.1, 0.0), (10.0, 10.0, 0.0)]), spec, grid)
+    transformed = transform_cloud_to_map(
+        _cloud([(0.1, 0.1, 0.0), (0.2, 0.1, 0.0), (0.1, 0.2, 0.0), (10.0, 10.0, 0.0)]),
+        spec,
+        grid,
+    )
     xyz = transformed.xyz()
-    assert xyz.shape == (1, 3)
+    assert xyz.shape == (3, 3)
     assert np.allclose(xyz[0], [1.1, 2.1, 0.0])
+    assert np.all(xyz[:, 0] < 2.0)
+    assert np.all(xyz[:, 1] < 3.0)
 
 
 def test_regrid_navigation_result_preserves_cells_and_fills_uncovered_unknown():
