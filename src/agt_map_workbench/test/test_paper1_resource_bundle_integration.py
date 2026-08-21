@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from agt_map_workbench import paper1_workbench as module
 
@@ -6,10 +7,11 @@ from agt_map_workbench import paper1_workbench as module
 def test_12f_bundle_writer_freezes_boundary_and_does_not_assume_formal_map_selected(
     tmp_path: Path, monkeypatch
 ):
-    window = module.Paper1MapWorkbenchWindow.__new__(module.Paper1MapWorkbenchWindow)
-    window._traversability_evidence = object()
-    window._navigation_result = object()
-    window._site_boundary = object()
+    window = SimpleNamespace(
+        _traversability_evidence=object(),
+        _navigation_result=object(),
+        _site_boundary=object(),
+    )
 
     calls = {}
 
@@ -40,7 +42,7 @@ def test_12f_bundle_writer_freezes_boundary_and_does_not_assume_formal_map_selec
     monkeypatch.setattr(module, "write_site_boundary", write_boundary)
     monkeypatch.setattr(module, "write_traversability_candidate", write_candidate)
 
-    writer = window._traversability_writer()
+    writer = module.Paper1MapWorkbenchWindow._traversability_writer(window)
     writer(tmp_path)
 
     assert calls["boundary"] == tmp_path / "layers" / "traversability" / "site_boundary.yaml"
