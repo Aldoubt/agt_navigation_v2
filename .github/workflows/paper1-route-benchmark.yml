@@ -35,21 +35,21 @@ jobs:
         run: python -m pip install --upgrade pip pytest PyYAML numpy scipy matplotlib pillow shapely
       - name: Run real-map freeze offline-assets contracts
         env:
-          PYTHONPATH: src/agt_offline_assets:src/agt_ui_bridge
+          PYTHONPATH: src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
         run: >-
           python -m pytest -q
           src/agt_offline_assets/test/test_navigation_map_freeze_export.py
           src/agt_offline_assets/test/test_navigation_map_derivation.py
       - name: Run agricultural structure and corridor regressions
         env:
-          PYTHONPATH: src/agt_offline_assets:src/agt_ui_bridge
+          PYTHONPATH: src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
         run: >-
           python -m pytest -q
           src/agt_offline_assets/test/test_navigation_structure.py
           src/agt_offline_assets/test/test_navigation_corridor.py
       - name: Run formal Workbench override metadata contract
         env:
-          PYTHONPATH: src/agt_map_workbench:src/agt_offline_assets:src/agt_ui_bridge
+          PYTHONPATH: src/agt_map_workbench:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
         run: python -m pytest -q src/agt_map_workbench/test/test_navigation_override_metadata.py
       - name: Run map pipeline contracts
         env:
