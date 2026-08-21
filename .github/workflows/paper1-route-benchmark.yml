@@ -47,6 +47,7 @@ jobs:
           python -m pytest -q
           src/agt_offline_assets/test/test_navigation_structure.py
           src/agt_offline_assets/test/test_navigation_corridor.py
+          src/agt_offline_assets/test/test_navigation_corridor_boundary_candidates.py
       - name: Run formal Workbench override metadata contract
         env:
           PYTHONPATH: src/agt_map_workbench:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
