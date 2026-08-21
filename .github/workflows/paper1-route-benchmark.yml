@@ -40,12 +40,14 @@ jobs:
           python -m pytest -q
           src/agt_offline_assets/test/test_navigation_map_freeze_export.py
           src/agt_offline_assets/test/test_navigation_map_derivation.py
-      - name: Run agricultural structure and corridor regressions
+      - name: Run agricultural terrain, structure, row-track and corridor regressions
         env:
           PYTHONPATH: src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
         run: >-
           python -m pytest -q
+          src/agt_offline_assets/test/test_terrain_morphology.py
           src/agt_offline_assets/test/test_navigation_structure.py
+          src/agt_offline_assets/test/test_navigation_row_tracks.py
           src/agt_offline_assets/test/test_navigation_corridor.py
           src/agt_offline_assets/test/test_navigation_corridor_boundary_candidates.py
       - name: Run formal Workbench override metadata contract
