@@ -60,7 +60,7 @@ def test_positive_ridge_and_negative_depression_are_separated():
     depression_y = 5.5
     ridge = 0.16 * np.exp(-((yy - ridge_y) ** 2) / (2.0 * 0.14**2))
     depression = -0.14 * np.exp(-((yy - depression_y) ** 2) / (2.0 * 0.18**2))
-    result.ground_height_m += ridge[:, None] + depression[:, None]
+    result.ground_height_m[:] += ridge[:, None] + depression[:, None]
 
     morphology = derive_terrain_morphology(
         result, np.ones(result.ground_height_m.shape), _config()
