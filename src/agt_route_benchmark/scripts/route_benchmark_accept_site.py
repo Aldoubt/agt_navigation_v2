@@ -14,6 +14,7 @@ def main() -> int:
     parser.add_argument("--site", default="greenhouse_01")
     parser.add_argument("--pcd", required=True, type=Path)
     parser.add_argument("--map-yaml", required=True, type=Path)
+    parser.add_argument("--map-project", required=True, type=Path)
     parser.add_argument("--semantic-map", required=True, type=Path)
     parser.add_argument("--coverage-yaml", required=True, type=Path)
     parser.add_argument(
@@ -35,6 +36,7 @@ def main() -> int:
         args.platform_profile,
         args.acceptance,
         curation_manifest_path=args.curation_manifest,
+        map_project_path=args.map_project,
         output_path=args.output,
     )
     print(args.output)
