@@ -9,10 +9,10 @@ from .map_authority import MapAuthorityError, validate_map_authority_document
 PROJECT_SCHEMA = "agt_map_project/v1"
 PROJECT_STATES = {"NEW", "PREPARING", "WAITING_HUMAN_REVIEW", "REVIEW_IN_PROGRESS", "READY_TO_FREEZE", "FROZEN", "BLOCKED", "FAILED"}
 STAGE_STATUSES = {"READY", "CANDIDATE", "HUMAN_REQUIRED", "BLOCKED", "FAILED", "FROZEN"}
-LAYER_STATUSES = STAGE_STATUSES | {"CANDIDATE_UNBOUNDED", "BLOCKED_NO_ROWS"}
+LAYER_STATUSES = STAGE_STATUSES | {"CANDIDATE_UNBOUNDED", "CANDIDATE_EVIDENCE", "BLOCKED_NO_ROWS"}
 
 def _dirs(root: Path) -> None:
-    for rel in ("source", "config", "layers/terrain", "layers/obstacle", "layers/navigation", "layers/structure", "layers/traversability", "evidence", "review", "revisions"):
+    for rel in ("source", "config", "layers/terrain", "layers/obstacle", "layers/navigation", "layers/evidence", "layers/structure", "layers/traversability", "evidence", "review", "revisions"):
         (root / rel).mkdir(parents=True, exist_ok=True)
 
 def write_project(project_dir: Path | str, document: Mapping[str, object]) -> Path:
