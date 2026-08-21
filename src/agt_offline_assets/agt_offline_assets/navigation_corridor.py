@@ -161,6 +161,27 @@ def _merge_close_centers(
     return np.asarray([float(np.mean(group)) for group in groups], dtype=np.float64)
 
 
+def _boundary_candidate_centers(
+    centers: np.ndarray,
+    *,
+    v_min: float,
+    v_max: float,
+    boundary_exclusion_m: float,
+) -> np.ndarray:
+    """Return only row-like peaks that lie inside the geometric boundary band.
+
+    Boundary aisle anchors must come from explicit edge evidence.  In
+    particular, members of a merged interior canopy hypothesis are not eligible
+    merely because they sit on one side of the merged representative center.
+    """
+    values = np.sort(np.asarray(centers, dtype=np.float64))
+    margin = float(boundary_exclusion_m)
+    return values[
+        (values <= float(v_min) + margin)
+        | (values >= float(v_max) - margin)
+    ]
+
+
 def _filter_row_centers(
     centers: np.ndarray,
     *,
@@ -527,13 +548,19 @@ def derive_corridor_refinement(
 
     if cfg.enable_boundary_aisles and accepted.size > 0:
         boundary_source = raw_obstacle | source_rows
+        boundary_centers = _boundary_candidate_centers(
+            centers,
+            v_min=v_min,
+            v_max=v_max,
+            boundary_exclusion_m=float(cfg.boundary_exclusion_m),
+        )
         wall_support_half_width = max(
             float(cfg.boundary_wall_half_width_m) + float(cfg.raw_obstacle_clearance_m),
             2.0 * float(navigation.resolution_m),
         )
 
         low_anchor = _boundary_anchor(
-            centers,
+            boundary_centers,
             side="low",
             first_row=float(accepted[0]),
             last_row=float(accepted[-1]),
@@ -584,7 +611,7 @@ def derive_corridor_refinement(
             boundary_aisle_centerline |= centerline
 
         high_anchor = _boundary_anchor(
-            centers,
+            boundary_centers,
             side="high",
             first_row=float(accepted[0]),
             last_row=float(accepted[-1]),
