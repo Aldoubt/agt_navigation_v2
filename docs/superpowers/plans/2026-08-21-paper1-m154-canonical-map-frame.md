@@ -4,7 +4,7 @@
 
 **Goal:** Bind Paper I map derivation to the accepted V25 site alignment and Nav2 grid, then produce a fail-closed frame alignment report without modifying route geometry.
 
-**Architecture:** Add a small canonical-frame contract in `agt_map_pipeline`, add a reusable `NavigationGridSpec` input to the existing navigation derivation, thread alignment/grid inputs through `prepare_project`, and add an independent verification report. Existing development preparation remains backward compatible and unverified.
+**Architecture:** Keep `agt_offline_assets` math unchanged. Add a focused canonical-frame boundary in `agt_map_pipeline` that loads the V25 alignment/grid, transforms and crops the source cloud, regrids the existing navigation result to the canonical Nav2 grid, records lineage, and verifies route/semantic bounds.
 
 **Tech Stack:** ROS2 Humble, Python 3.10, NumPy, PyYAML, existing `agt_offline_assets`, pytest/ament_cmake_pytest.
 
@@ -15,6 +15,7 @@
 - Work only on `feat/paper1-m154-canonical-map-frame`.
 - Do not modify V25 accepted map or Route Asset files.
 - Do not add renderer/path offsets.
+- Do not modify `agt_offline_assets` classification math.
 - Do not tune row-track or planner parameters.
 - Canonical preparation requires both alignment and accepted map YAML.
 - Canonical target frame is exactly `map`.
@@ -23,25 +24,24 @@
 
 ---
 
-### Task 1: Canonical alignment and grid contracts
+### Task 1: Canonical alignment, grid, transform and regrid contracts
 
 **Files:**
 - Create: `src/agt_map_pipeline/agt_map_pipeline/canonical_frame.py`
-- Modify: `src/agt_offline_assets/agt_offline_assets/navigation_map_derivation.py`
-- Modify: `src/agt_offline_assets/agt_offline_assets/__init__.py`
 - Create: `src/agt_map_pipeline/test/test_canonical_frame.py`
 
 **Interfaces:**
 - Produces `AlignmentSpec` and `load_alignment_spec(path)`.
-- Produces `load_nav2_grid_spec(path)`.
-- Produces `NavigationGridSpec(frame_id, resolution_m, origin_x_m, origin_y_m, width, height)`.
-- Extends `derive_ground_relative_navigation_map(..., grid_spec=None)`.
+- Produces `NavigationGridSpec` and `load_nav2_grid_spec(path)`.
+- Produces `transform_cloud_to_map(cloud, alignment, grid)`.
+- Produces `regrid_navigation_result(result, grid)`.
 
-- [ ] Write tests that load a PASS V25-style alignment artifact, reject non-PASS/non-map artifacts, parse PGM dimensions from Nav2 YAML, and assert the resulting `NavigationGridSpec`.
-- [ ] Run the focused tests and verify RED because the new module/type does not exist.
-- [ ] Implement canonical-frame loading and `NavigationGridSpec`.
-- [ ] Add canonical-grid derivation behavior: require resolution equality and ignore out-of-grid transformed points instead of clipping them.
-- [ ] Run the focused tests and existing navigation-derivation tests GREEN.
+- [ ] Write tests that load a PASS V25-style alignment artifact, reject non-PASS/non-map artifacts, parse PGM dimensions, transform/crop a PCD, and regrid a synthetic `NavigationMapResult` without changing cell semantics.
+- [ ] Run focused tests and verify RED because `canonical_frame` does not exist.
+- [ ] Implement the contracts with SHA256 identity recording.
+- [ ] Regrid only equal-resolution grids whose origin delta is cell-aligned; otherwise fail closed.
+- [ ] Fill uncovered target cells with UNKNOWN/NaN/zero according to layer semantics.
+- [ ] Run focused tests GREEN.
 - [ ] Commit `feat(map-pipeline): add canonical frame and grid contracts`.
 
 ### Task 2: Thread canonical inputs through map preparation
@@ -58,7 +58,8 @@
 
 - [ ] Add tests proving one-sided canonical input is rejected and canonical preparation records `VERIFIED`, transform identity, grid identity, and exact canonical grid geometry.
 - [ ] Run focused prepare tests and verify RED.
-- [ ] Implement the smallest prepare/project/CLI changes that pass alignment rotation/translation and grid spec into derivation.
+- [ ] Transform/crop before the existing navigation derivation and regrid immediately afterward.
+- [ ] Ensure all subsequent structure/corridor/aisle candidate layers consume the regridded result.
 - [ ] Keep legacy prepare output `UNVERIFIED` when canonical inputs are absent.
 - [ ] Run map-pipeline prepare/project/CLI tests GREEN.
 - [ ] Commit `feat(map-pipeline): bind prepare to canonical V25 frame`.
@@ -85,12 +86,12 @@
 
 **Files:**
 - Modify: `src/agt_map_pipeline/CMakeLists.txt`
-- Modify: `.github/workflows/paper1-route-benchmark.yml` only if the package is not already included by existing CI.
+- Modify: `.github/workflows/paper1-route-benchmark.yml` only if required by existing CI scope.
 
 - [ ] Register the new pytest files with ament.
-- [ ] Run all `agt_map_pipeline` tests plus focused `agt_offline_assets` navigation derivation tests.
+- [ ] Run all `agt_map_pipeline` tests.
 - [ ] Run `colcon build --packages-select agt_offline_assets agt_map_pipeline` when ROS2 dependencies are available.
-- [ ] Inspect git diff to ensure no route-offset, planner, or row-track tuning changes entered the branch.
+- [ ] Inspect the diff to ensure no route-offset, planner, row-track tuning, or `agt_offline_assets` math changes entered the branch.
 - [ ] Commit `test(paper1): gate canonical map frame alignment`.
 
 ### Task 5: Real-site freeze handoff
