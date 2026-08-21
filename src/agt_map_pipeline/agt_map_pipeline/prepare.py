@@ -2,12 +2,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 import yaml
+
+from .canonical_frame import (
+    file_sha256 as canonical_file_sha256,
+    load_alignment_spec,
+    load_nav2_grid_spec,
+    regrid_navigation_result,
+    transform_cloud_to_map,
+)
 from .hashing import file_sha256
 from .presets import resolve_preset, write_resolved_preset
 from .project import create_project, load_project, write_project, register_stage, register_layer
 from .layer_io import write_prepare_layers
 from .traversability_preview import derive_unbounded_traversability_preview
-from agt_offline_assets import read_pcd, summarize_pointcloud, derive_ground_relative_navigation_map, derive_navigation_structure, derive_corridor_refinement, derive_agricultural_aisle_graph, aisle_graph_to_dict
+from agt_offline_assets import read_pcd, derive_ground_relative_navigation_map, derive_navigation_structure, derive_corridor_refinement, derive_agricultural_aisle_graph, aisle_graph_to_dict
 
 class SourceIdentityError(ValueError): pass
 class PrepareRuntimeError(RuntimeError): pass
@@ -23,30 +31,90 @@ class PrepareResult:
 def _register_outputs(doc, layers, stage, status="READY"):
     for layer_id, rec in layers.items(): register_layer(doc, layer_id, status=status, path=rec["path"], sha256=rec["sha256"], stage=stage, parents=[])
 
-def prepare_project(pcd_path, *, preset_name, output_dir, declared_frame_id="map", site_id=None, profile_path=None, resume=False):
+def _canonical_pair(alignment_path, canonical_map_yaml):
+    if (alignment_path is None) != (canonical_map_yaml is None):
+        raise ValueError("alignment_path and canonical_map_yaml must be supplied together")
+    if alignment_path is None:
+        return None, None
+    return load_alignment_spec(alignment_path), load_nav2_grid_spec(canonical_map_yaml)
+
+def _record_verified_frame(doc, *, alignment, grid, canonical_map_yaml):
+    doc["frame"] = {
+        "declared_frame_id": "map",
+        "verification": "VERIFIED",
+        "source_frame_id": alignment.source_frame_id,
+        "canonical_frame_id": alignment.target_frame_id,
+        "alignment_method": alignment.method,
+        "alignment_sha256": alignment.source_sha256,
+        "transform": {
+            "yaw_rad": float(alignment.yaw_rad),
+            "translation_xyz_m": [float(v) for v in alignment.translation_xyz_m],
+            "rmse_m": alignment.rmse_m,
+            "max_residual_m": alignment.max_residual_m,
+        },
+        "grid": {
+            "resolution_m": float(grid.resolution_m),
+            "origin_xy_m": [float(grid.origin_x_m), float(grid.origin_y_m)],
+            "width": int(grid.width),
+            "height": int(grid.height),
+            "map_yaml_sha256": canonical_file_sha256(canonical_map_yaml),
+        },
+    }
+
+def prepare_project(
+    pcd_path,
+    *,
+    preset_name,
+    output_dir,
+    declared_frame_id="map",
+    site_id=None,
+    profile_path=None,
+    resume=False,
+    alignment_path=None,
+    canonical_map_yaml=None,
+):
+    alignment, canonical_grid = _canonical_pair(alignment_path, canonical_map_yaml)
+    if alignment is not None and declared_frame_id != "map":
+        raise ValueError("canonical preparation requires declared_frame_id map")
+
     source_path = Path(pcd_path).expanduser().resolve(); output = Path(output_dir).expanduser().resolve()
     source = {"absolute_path": str(source_path), "size_bytes": source_path.stat().st_size, "sha256": file_sha256(source_path), "summary": {}}
     if resume:
         doc = load_project(output)
         if doc["source"]["absolute_path"] != source["absolute_path"] or doc["source"]["sha256"] != source["sha256"]: raise SourceIdentityError("source SHA identity mismatch")
         if doc["project_state"] == "FROZEN": raise ValueError("cannot resume frozen project")
+        if doc.get("frame", {}).get("verification") == "VERIFIED" and alignment is None:
+            raise ValueError("resuming a VERIFIED project requires the canonical alignment/map pair")
+        if alignment is not None and doc.get("frame", {}).get("verification") == "VERIFIED":
+            if doc["frame"].get("alignment_sha256") != alignment.source_sha256:
+                raise SourceIdentityError("canonical alignment SHA identity mismatch")
+            if doc["frame"].get("grid", {}).get("map_yaml_sha256") != canonical_file_sha256(canonical_map_yaml):
+                raise SourceIdentityError("canonical map SHA identity mismatch")
     elif (output / "project.yaml").exists(): raise FileExistsError(f"project already exists: {output}")
+
     preset = resolve_preset(preset_name, profile_path=profile_path)
     cloud = read_pcd(source_path)
     source["summary"] = {"point_count": int(cloud.xyz().shape[0])}
     if not resume:
         preset_doc = write_resolved_preset(preset, output / "config" / "resolved_preset.yaml")
         doc = create_project(output, source=source, preset={"name": preset.name, "version": preset.version, "sha256": preset_doc["sha256"]}, declared_frame_id=declared_frame_id, site_id=site_id)
+    if alignment is not None:
+        _record_verified_frame(doc, alignment=alignment, grid=canonical_grid, canonical_map_yaml=canonical_map_yaml)
     doc["project_state"] = "PREPARING"; write_project(output, doc)
     completed=[]; blocked=[]
     register_stage(doc, "source_profile", status="READY", inputs_sha256=source["sha256"], outputs=[], message="source validated")
     completed.append("source_profile")
     try:
-        nav = derive_ground_relative_navigation_map(cloud, preset.navigation_config)
+        derivation_cloud = cloud
+        if alignment is not None:
+            derivation_cloud = transform_cloud_to_map(cloud, alignment, canonical_grid)
+        nav = derive_ground_relative_navigation_map(derivation_cloud, preset.navigation_config)
+        if canonical_grid is not None:
+            nav = regrid_navigation_result(nav, canonical_grid)
         layers = write_prepare_layers(output, nav)
         _register_outputs(doc, {"navigation.raw_occupancy": layers["navigation.occupancy"], "terrain.ground_height": layers["terrain.ground_height"], "terrain.ground_valid": layers["terrain.ground_valid"], "terrain.slope": layers["terrain.slope_deg"], "terrain.step": layers["terrain.step_m"], "obstacle.count": layers["obstacle.obstacle_count"]}, "navigation")
         _register_outputs(doc, {"navigation.nav2_pgm": layers["navigation.nav2_pgm"], "navigation.nav2_yaml": layers["navigation.nav2_yaml"]}, "navigation")
-        register_stage(doc, "navigation", status="READY", inputs_sha256=source["sha256"], outputs=[], message="ground-relative navigation derived"); completed.append("navigation")
+        register_stage(doc, "navigation", status="READY", inputs_sha256=source["sha256"], outputs=[], message="ground-relative navigation derived" + (" on canonical grid" if canonical_grid is not None else "")); completed.append("navigation")
         structure = derive_navigation_structure(nav, preset.structure_config)
         layers = write_prepare_layers(output, nav, structure)
         _register_outputs(doc, {"structure.row_support": layers["row_support"], "structure.row_regularized_obstacle": layers["row_regularized_obstacle"]}, "structure", "CANDIDATE")
