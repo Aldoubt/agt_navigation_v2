@@ -348,12 +348,17 @@ class Paper1MapWorkbenchWindow(ReviewMapWorkbenchWindow):
         def write(root: Path) -> None:
             target = root / "layers" / "traversability"
             target.mkdir(parents=True, exist_ok=True)
+            write_site_boundary(
+                boundary,
+                target / "site_boundary.yaml",
+                overwrite=False,
+            )
             write_traversability_candidate(
                 evidence,
                 navigation,
                 boundary,
                 target,
-                source_navigation_asset="navigation/accepted/navigation_map.yaml",
+                source_navigation_asset="WORKBENCH_CURRENT_NAVIGATION",
                 overwrite=False,
             )
 
