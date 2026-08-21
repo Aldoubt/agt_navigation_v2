@@ -44,26 +44,29 @@ Only `status: PASS` and target frame `map` are accepted for canonical preparatio
 
 ### Grid contract
 
-`agt_offline_assets.navigation_map_derivation.NavigationGridSpec` contains:
+`agt_map_pipeline.canonical_frame.NavigationGridSpec` contains:
 
 - `frame_id`,
 - `resolution_m`,
 - `origin_x_m`, `origin_y_m`,
 - `width`, `height`.
 
-`agt_map_pipeline.canonical_frame.load_nav2_grid_spec()` derives this from the accepted V25 map YAML and its PGM image.
+`load_nav2_grid_spec()` derives it from the accepted V25 map YAML and PGM image.
 
-### Navigation derivation
+### Canonical preparation boundary
 
-`derive_ground_relative_navigation_map()` gains optional `grid_spec`. With a canonical grid:
+M1.5-4 deliberately does **not** change the mathematical implementation in `agt_offline_assets`.
 
-1. source points are transformed into `map` first;
-2. grid resolution must match the navigation config;
-3. origin/width/height come only from `grid_spec`;
-4. points outside the canonical grid are ignored rather than clipped onto border cells;
-5. output grid geometry exactly matches the accepted V25 map.
+When canonical inputs are supplied, `agt_map_pipeline` performs:
 
-The no-`grid_spec` behavior remains backward compatible.
+1. rigid transform of the PCD from source/session coordinates to canonical `map`;
+2. conservative crop to canonical map bounds;
+3. the existing `derive_ground_relative_navigation_map()` unchanged;
+4. deterministic regridding of the resulting arrays onto the canonical Nav2 grid.
+
+Regridding is allowed only when source and target resolutions match and the source-grid origin offset is an integer number of cells within tolerance. Cells not covered by the derived source grid remain conservative defaults: `UNKNOWN` for occupancy, `NaN` for floating terrain fields, and zero for count/support fields.
+
+This boundary keeps the alignment fix auditable and prevents M1.5-4 from silently changing ground classification, row extraction, or obstacle semantics.
 
 ## Map pipeline behavior
 
@@ -78,10 +81,11 @@ When supplied, `prepare_project()`:
 
 1. verifies the alignment artifact;
 2. loads the canonical grid;
-3. transforms the PCD into canonical `map` coordinates during derivation;
-4. derives every existing candidate layer on the canonical grid;
-5. records transform/grid identities in `project.yaml`;
-6. changes frame verification from `UNVERIFIED` to `VERIFIED`.
+3. transforms/crops the PCD into canonical `map` coordinates;
+4. derives the existing navigation evidence with unchanged V25/Paper math;
+5. regrids every resulting raster layer to the exact canonical grid;
+6. records transform/grid identities in `project.yaml`;
+7. changes frame verification from `UNVERIFIED` to `VERIFIED`.
 
 This stage does not make candidate rows/aisles accepted truth.
 
@@ -107,7 +111,7 @@ The command fails closed when any required check fails. It does not modify route
 
 1. Never apply route X/Y offsets to make figures look aligned.
 2. Never rotate only the renderer; alignment is applied at the source PCD boundary.
-3. Never infer a canonical frame from PCD bounds.
+3. Never infer a canonical frame from PCD bounds in formal preparation.
 4. Do not modify V25 accepted map files.
 5. Do not modify source PCD files.
 6. Do not tune M1.5-3.3 row-track parameters in this stage.
