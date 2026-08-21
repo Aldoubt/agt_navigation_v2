@@ -19,6 +19,8 @@ runtime/evaluation/*.log
 runtime/evaluation/*.asan.*
 runtime/evaluation/*.pids
 runtime/evaluation/*.time
+/runtime/map_pipeline_trials/
+/runtime/paper1_runs/
 /myeasylog.log
 
 # Generated V25-10 real-bag validation reports, logs, and result bags.
