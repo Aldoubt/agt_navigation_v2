@@ -29,6 +29,10 @@ _ALLOWED_EVIDENCE = {
     "field_note",
     "other_documented",
 }
+_ALLOWED_REVISION_KINDS = {
+    "generated_plus_accepted_override_revision",
+    "structure_aware_generated_plus_accepted_override_revision",
+}
 
 
 def _occupancy_classes(nav_map: Nav2Map) -> np.ndarray:
@@ -84,7 +88,7 @@ def _load_overrides(path: Path | str) -> tuple[dict[str, object], ...]:
         raise ValueError("navigation derivation must be a mapping")
     if str(document.get("schema", "")) != "agt_ground_relative_navigation_map/v1":
         raise ValueError("unsupported navigation derivation schema")
-    if str(document.get("revision_kind", "")) != "generated_plus_accepted_override_revision":
+    if str(document.get("revision_kind", "")) not in _ALLOWED_REVISION_KINDS:
         raise ValueError("navigation derivation is not a generated/accepted freeze revision")
     if str(document.get("frame_id", "")) != "map":
         raise ValueError("formal navigation derivation frame_id must be map")
