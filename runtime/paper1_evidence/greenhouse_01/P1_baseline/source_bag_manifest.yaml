@@ -1,0 +1,35 @@
+schema: agt_paper1_source_bag/v1
+site_id: greenhouse_01
+role: PAPER1_E2_SHARED_RAW_BAG
+
+bag:
+  path: /home/yangxuan/agt_navigation_v2/runtime/rosbag/green-house
+  bag_name: green-house
+  storage_id: sqlite3
+  metadata_path: /home/yangxuan/agt_navigation_v2/runtime/rosbag/green-house/metadata.yaml
+  metadata_sha256: 5eef3d33bf8d24a478889219692ecf7703ea49a851d13af37bd90e9abe3b2010
+  data_file: /home/yangxuan/agt_navigation_v2/runtime/rosbag/green-house/green-house_0.db3
+  data_file_sha256: 33a7613643d561bc655725a4ae56e6bf5d53dc4a538798ee70251241a2193e5e
+  duration_s: 622.994416876
+  start_time_ns: 1767659506354222860
+  message_count: 130830
+  topics:
+    - name: /agt/sensors/imu/data
+      type: sensor_msgs/msg/Imu
+      message_count: 124600
+    - name: /agt/sensors/lidar/custom
+      type: livox_ros_driver2/msg/CustomMsg
+      message_count: 6230
+  evidence: metadata.yaml
+
+mapping_relation:
+  corresponding_locked_pcd: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01_map_assets_v01/pointcloud/processed.pcd
+  mapping_method: FAST-LIVO2
+  mapping_mode: LIO-only
+  relation_status: AUTHOR_CONFIRMED_REPOSITORY_BINDING_NOT_EXPLICIT
+  note: The bag contains raw lidar and IMU topics only. No replay or remapping was performed in P1.
+
+e2_contract:
+  same_frozen_raw_bag: true
+  later_replay_methods: [FAST-LIO, FAST-LIVO2_LIO-only, Kilo-Map]
+  replayed_in_p1: false

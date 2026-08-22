@@ -1,0 +1,86 @@
+{
+  "schema": "agt_paper1_p1_preflight/v1",
+  "site_id": "greenhouse_01",
+  "status": "PRECHECK_WITH_BLOCKERS",
+  "repository": {
+    "path": "/home/yangxuan/agt_navigation_v2_paper1",
+    "commit": "dea893c21d5205bcb97c0194e0fb17cf10b1d228",
+    "branch": "fix/paper1-m154b-v25-map-authority-recovery",
+    "working_tree_clean": true
+  },
+  "authoritative_pcd": {
+    "path": "/home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01_map_assets_v01/pointcloud/processed.pcd",
+    "sha256": "069abb9e7f89e78fd8529f224f953df19ec1d582c27dc6fe390b613ab7b0b12a",
+    "size_bytes": 2646843519,
+    "point_count": 82713852,
+    "candidate_count": 1,
+    "source_copy_hash_matches": true,
+    "source_copy": "/home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run/processed.pcd",
+    "header": {
+      "version": "0.7",
+      "fields": ["x", "y", "z", "intensity", "normal_x", "normal_y", "normal_z", "curvature"],
+      "size": [4, 4, 4, 4, 4, 4, 4, 4],
+      "type": ["F", "F", "F", "F", "F", "F", "F"],
+      "count": [1, 1, 1, 1, 1, 1, 1, 1],
+      "width": 82713852,
+      "height": 1,
+      "points": 82713852,
+      "data": "binary"
+    }
+  },
+  "source_bag": {
+    "path": "/home/yangxuan/agt_navigation_v2/runtime/rosbag/green-house",
+    "metadata": "/home/yangxuan/agt_navigation_v2/runtime/rosbag/green-house/metadata.yaml",
+    "metadata_sha256": "5eef3d33bf8d24a478889219692ecf7703ea49a851d13af37bd90e9abe3b2010",
+    "data_file": "/home/yangxuan/agt_navigation_v2/runtime/rosbag/green-house/green-house_0.db3",
+    "data_file_sha256": "33a7613643d561bc655725a4ae56e6bf5d53dc4a538798ee70251241a2193e5e",
+    "storage_id": "sqlite3",
+    "duration_s": 622.994416876,
+    "message_count": 130830,
+    "topics": ["/agt/sensors/imu/data", "/agt/sensors/lidar/custom"]
+  },
+  "provenance": {
+    "mapping_method": "FAST-LIVO2",
+    "mapping_mode": "LIO-only",
+    "manual_scale_applied": false,
+    "non_rigid_warp_applied": false,
+    "separate_alignment_file_found": false,
+    "pcd_declared_frame": "map",
+    "v25_formal_revision_found": false,
+    "v25_relation": "TBD-EVIDENCE"
+  },
+  "software_gate": {
+    "agt_map_pipeline": {"status": "PASS", "test_count": 34, "log": "software_gate/agt_map_pipeline_pytest.log"},
+    "agt_route_benchmark": {"status": "PASS", "test_count": 128, "log": "software_gate/agt_route_benchmark_pytest.log"},
+    "m154b_v25_contract": {"status": "PASS", "test_count": 22, "log": "software_gate/m154b_v25_contract_pytest.log"},
+    "compileall": {"status": "PASS", "log": "software_gate/compileall.log"}
+  },
+  "p1_gates": {
+    "authoritative_pcd_identity_frozen": true,
+    "raw_bag_identity_recorded": true,
+    "immutable_v25_revision_exported": false,
+    "map_only_qa": "NOT_RUN_NO_FORMAL_REVISION",
+    "human_map_review": "NOT_DONE",
+    "map_authority": "NOT_BOUND",
+    "authority_status": "NOT_BOUND_VERIFIED",
+    "frame_semantic_verification": "BLOCKED",
+    "formal_site_snapshot": "NOT_CREATED",
+    "validated_method_commit": "RECORDED",
+    "method_tag": "NOT_FOUND"
+  },
+  "stop_reason": [
+    "No formal immutable greenhouse_01 V25 Map Workbench revision was found.",
+    "Existing resource-bundle navigation accepted map is not itself evidence of V25_MAP_WORKBENCH BOUND_VERIFIED authority.",
+    "No explicit repository manifest directly binds green-house raw bag to the locked FAST-LIVO2 PCD; relation is author-confirmed and recorded as such.",
+    "No frame/grid verification or map-only QA can be accepted before the formal revision exists."
+  ],
+  "prohibited_actions_not_performed": [
+    "FAST-LIVO2 replay",
+    "FAST-LIO replay",
+    "Kilo-Map replay",
+    "E1/E2/E3 experiments",
+    "algorithm or parameter changes",
+    "PCD modification",
+    "bag modification"
+  ]
+}
