@@ -4,84 +4,93 @@ Date: 2026-08-22
 Branch: `refactor/v25-unified-map-authoring`  
 Base: `fix/paper1-m154b-v25-map-authority-recovery@5f889c6f0e10d8e77955e25fb624f2a20ccfcda9`
 
-## 1. Status and intent
+## 1. Intent
 
-This design unifies the current V25 Map Workbench map-production flow and the legacy standalone semantic editor into one authoritative authoring workflow.
+This increment removes the repository's competing map-authoring paths and closes the remaining gap between successful greenhouse structure extraction and a usable formal Nav2 PGM.
 
-The change has two coupled goals:
-
-1. remove the second navigation-map authority created by direct raster editing in `semantic_editor_qt5.py`;
-2. make the already-derived agricultural row/aisle structure participate in production of a usable Nav2 PGM instead of remaining review-only evidence.
-
-The governing invariant is:
+The frozen ownership rule is:
 
 ```text
 One PCD lineage
   -> One AGT Map Workbench authoring workflow
   -> One immutable Map Revision
   -> One accepted Navigation Map authority
-  -> One semantic task bound by hash to that accepted map
+  -> One semantic task bound by SHA256 to that accepted map
 ```
 
-`agt_map_pipeline` remains a consumer/verifier/evidence producer and must not become a competing formal raster producer.
+`agt_map_pipeline` remains a consumer/verifier/evidence producer. It must not create a competing formal Navigation Map.
 
-## 2. Problem statement
+## 2. Current problem
 
-### 2.1 Competing map contracts
+### 2.1 Two practical map authorities
 
-Today the repository has two practical authoring paths:
+The repository currently has two authoring paths:
 
 ```text
 A. V25 Map Workbench
-PCD -> ground-relative map -> agricultural structure -> Site Boundary -> world-coordinate overrides -> generated/accepted Navigation Map
+PCD -> Ground-relative map -> agricultural structure -> Site Boundary
+    -> world-coordinate overrides -> generated/accepted Navigation Map
 
 B. standalone semantic editor
-Nav2 YAML/PGM -> direct pixel FREE/OCCUPIED/UNKNOWN painting -> semantic_map.geojson + coverage.yaml
+Nav2 YAML/PGM -> direct FREE/OCCUPIED/UNKNOWN pixel painting
+    -> semantic_map.geojson + coverage.yaml
 ```
 
-The second path can mutate the base raster and then refresh `coverage.yaml.base_map_sha256`. The resulting files are internally consistent but no longer identical to the reviewed Workbench map. This violates the recovered V25 map-authority rule.
+Path B can mutate the raster and then update `coverage.yaml.base_map_sha256`. The result is internally consistent but is no longer necessarily the reviewed Workbench map.
 
-### 2.2 Automatic structure does not currently define the formal PGM
+The standalone semantic editor therefore must cease to own formal raster production.
 
-The current ground-relative derivation correctly produces conservative `FREE/OCCUPIED/UNKNOWN` cells from local ground, obstacle, slope and step evidence. The agricultural stack then separately derives row support, row structural bands, aisle geometric envelopes, refined aisle candidates and V25-12F traversability evidence.
+### 2.2 Structure extraction is not yet the formal PGM producer
 
-However, the formal Paper I freeze path still writes the generated map from the ground-relative base result. Therefore:
+The current Ground-relative derivation correctly creates conservative `FREE/OCCUPIED/UNKNOWN` evidence from local ground, obstacle, slope and step information.
+
+The agricultural stack then derives:
+
+```text
+row support
+row structural band
+aisle geometric envelope
+refined aisle / centerline
+V25-12F traversability evidence
+```
+
+However, formal Paper I freeze still starts from the Ground-only base result. Therefore:
 
 ```text
 row / aisle segmentation success
 !=
-formal PGM uses row / aisle semantics
+formal PGM uses row / aisle structure
 ```
 
-This leaves greenhouse aisles fragmented by UNKNOWN cells caused by occlusion or sparse ground returns, even when agricultural geometry already provides a strong explanation that the region is an aisle.
+In greenhouse data this leaves valid aisles fragmented by UNKNOWN cells caused by occlusion or sparse ground returns.
 
 ## 3. Scope
 
 ### 3.1 In scope
 
-- integrate semantic authoring into the existing Workbench as one tab/panel;
-- reuse the existing GUI-independent `agt_ui_bridge` semantic model, IO and validation logic;
-- prohibit formal direct pixel painting of accepted PGM assets;
-- add one deterministic structure-aware navigation-map materialization layer;
-- classify Ground-only output as evidence, not final formal map authority;
-- make row structural bands and valid aisle geometry participate in generated PGM materialization;
-- preserve evidence-backed `FORCE_FREE` / `FORCE_OCCUPIED` world-coordinate overrides as the only formal manual raster correction path;
+- integrate semantic authoring into the existing Workbench as one `语义与任务` tab/panel;
+- reuse existing GUI-independent `agt_ui_bridge` semantic model/IO/validation logic;
+- prohibit direct formal pixel painting of accepted PGM assets;
+- add one deterministic Structure-Aware Navigation Materializer;
+- classify Ground-only occupancy as Evidence rather than the final formal map;
+- use row structural bands as formal blocked evidence;
+- allow structurally valid aisle geometry to resolve Ground-only UNKNOWN cells;
+- keep evidence-backed world-coordinate `FORCE_FREE` / `FORCE_OCCUPIED` as the formal human raster-correction mechanism;
 - bind `semantic_map.geojson` and `coverage.yaml` to the accepted map by exact SHA256 identity;
-- export one immutable revision containing generated map, accepted map, semantic task, authoring inputs and validation reports;
-- add planner-independent map QA before a revision can be considered accepted for Paper I use;
-- keep the existing M1.5-4B `V25_MAP_WORKBENCH / BOUND_VERIFIED` ownership contract valid.
+- freeze one immutable revision containing Evidence, Generated, Accepted, semantics, authoring inputs and QA;
+- preserve the M1.5-4B `V25_MAP_WORKBENCH / BOUND_VERIFIED` ownership contract.
 
-### 3.2 Explicit non-goals
+### 3.2 Non-goals
 
-- no semantic schema 2.0 redesign in this increment;
-- no global `UNKNOWN -> FREE` policy;
-- no generic morphological closing across crop rows;
-- no direct route-dependent corridor painting into the map;
-- no new autonomous headland detector in this increment;
-- no planner tuning, route benchmark tuning or RPP tuning until map-authoring acceptance is restored;
-- no change that turns V25-12F candidate files into formal authority merely by renaming them.
+- no semantic schema 2.0 redesign;
+- no global `UNKNOWN -> FREE` conversion;
+- no cross-row morphology or generic flood fill;
+- no route-dependent whitening of the PGM;
+- no new automatic headland detector in this increment;
+- no planner/RPP tuning until the map-authoring gate is restored;
+- no promotion of existing `navigation_map_12f.*` to formal authority by renaming files.
 
-## 4. Final authoring architecture
+## 4. Final data flow
 
 ```text
 raw / cleaned PCD
@@ -89,78 +98,79 @@ raw / cleaned PCD
         v
 AGT Map Workbench
         |
-        +-- Point-cloud processing Recipe
-        |      -> processed.pcd
+        +-- Point-cloud Recipe -> processed.pcd
         |
         +-- Map Frame calibration / canonical PCD
         |
-        +-- Ground-relative evidence
+        +-- Ground-relative Evidence
         |      -> ground / obstacle / slope / step
-        |      -> strict Ground-only occupancy evidence
+        |      -> Ground-only trinary occupancy
         |
         +-- Agricultural structure
         |      -> row support
         |      -> row structural band
         |      -> aisle geometric envelope
-        |      -> refined aisle / centerline
+        |      -> aisle/refined centerline
         |
         +-- Site Boundary
         |
-        +-- Structure-aware Navigation Materializer
+        +-- Structure-Aware Navigation Materializer
         |      -> generated/navigation_map.{pgm,yaml}
         |
-        +-- Evidence-backed formal overrides
+        +-- Formal evidence-backed overrides
         |      -> accepted/navigation_map.{pgm,yaml}
         |
         +-- Semantic authoring
         |      -> semantic_map.geojson
         |      -> coverage.yaml
+        |      -> keepout mask
         |
         +-- Navigation + semantic QA
                -> immutable Map Revision
 ```
 
-The standalone semantic editor ceases to be a map-authority tool.
+The standalone semantic editor is no longer a formal map-authority application.
 
-## 5. Data ownership and semantic separation
+## 5. Data ownership remains separated
 
-The following concepts remain separate even when authored in one GUI:
+One GUI does not mean one overloaded file.
 
-| Asset | Meaning | Formal carrier |
+| Asset | Meaning | Carrier |
 | --- | --- | --- |
 | Site Boundary | physical inner boundary the vehicle footprint may enter | `authoring/site_boundary.yaml` |
-| Navigation Map | Nav2 FREE/OCCUPIED/UNKNOWN raster | `generated/` and `accepted/` |
-| Formal raster override | evidence-backed correction of automatic raster | derivation metadata + accepted replay |
+| Navigation Map | Nav2 FREE/OCCUPIED/UNKNOWN raster | `generated/`, `accepted/` |
+| Formal raster override | evidence-backed correction of automatic raster | derivation metadata + replay |
 | field boundary | task/coverage region | `semantic/semantic_map.geojson` |
-| exclusion / keepout | semantic no-go/task exclusion | `semantic/semantic_map.geojson` |
+| exclusion / keepout | semantic task/no-go region | `semantic/semantic_map.geojson` + keepout mask |
 | row centerline | crop-row semantic geometry | `semantic/semantic_map.geojson` |
 | access lane | explicit semantic road | `semantic/semantic_map.geojson` |
 | entry pose | task entry pose | `semantic/semantic_map.geojson` |
 | work direction | task direction | `semantic/semantic_map.geojson` |
 | coverage parameters | task/planning configuration | `semantic/coverage.yaml` |
 
-`Site Boundary` and `field_boundary` are not aliases. A Workbench convenience action may create a field-boundary candidate from the Site Boundary, but the operator must explicitly accept it as a semantic object.
+`Site Boundary` and `field_boundary` are deliberately not aliases. A convenience action may create a field-boundary candidate from Site Boundary, but an operator must explicitly accept it as semantic data.
 
-## 6. Structure-aware Navigation Map materialization
+Semantic `keepout_zone` remains a separate Nav2 semantic mask. It does not silently rewrite the generated or accepted base PGM in this increment.
 
-### 6.1 New layer
+## 6. Structure-Aware Navigation Materializer
 
-Add a focused offline core, tentatively:
+### 6.1 Offline core
+
+Add a focused offline module, planned as:
 
 ```text
 src/agt_offline_assets/agt_offline_assets/formal_navigation_map.py
 ```
 
-The module receives immutable evidence objects and returns a new structure-aware navigation result. It does not own Qt and does not write files by itself.
+It contains no Qt code and does not directly own file dialogs or GUI state.
 
 Inputs:
 
 ```text
-NavigationMapResult              # Ground-only conservative evidence
-NavigationStructureResult       # row/terrain evidence
-CorridorRefinementResult         # row structural band + aisle geometry
-SiteBoundary                     # mandatory for formal mode
-TraversabilityEvidence optional  # bounded evidence reuse where appropriate
+NavigationMapResult        # Ground-only conservative Evidence
+NavigationStructureResult  # terrain/row evidence
+CorridorRefinementResult   # row band + aisle geometry
+SiteBoundary               # mandatory in formal mode
 ```
 
 Output:
@@ -170,72 +180,78 @@ StructureAwareNavigationResult
 - occupancy
 - observed_free_mask
 - structure_inferred_free_mask
+- base_hard_occupied_mask
 - row_structural_blocked_mask
-- sensor_obstacle_mask
 - site_boundary_blocked_mask
 - unresolved_unknown_mask
-- provenance / counts
-- same grid geometry as the Ground-only input
+- counts / provenance
+- exact source grid geometry
 ```
 
-### 6.2 State precedence
+The materializer must preserve resolution, origin, width and height exactly.
 
-Formal materialization uses deterministic precedence. Later states may not weaken earlier hard constraints.
+### 6.2 Generated-map precedence
+
+Generated materialization contains no manual override.
+
+For each cell:
 
 ```text
-Priority 1: FORCE_OCCUPIED during accepted-map replay
-Priority 2: outside Site Boundary -> OCCUPIED
-Priority 3: sensor obstacle -> OCCUPIED
-Priority 4: row structural band -> OCCUPIED
-Priority 5: observed Ground FREE -> FREE
-Priority 6: structure-supported aisle FREE -> FREE
-Priority 7: otherwise -> UNKNOWN
-Priority 8: FORCE_FREE during accepted-map replay, subject to formal override validation policy
+1. outside Site Boundary
+   -> OCCUPIED
+
+2. Ground-only base occupancy == OCCUPIED
+   -> OCCUPIED
+   # includes current obstacle, slope, step and obstacle-padding decisions
+
+3. row_structural_band
+   -> OCCUPIED
+
+4. Ground-only base occupancy == FREE
+   -> OBSERVED_FREE -> FREE
+
+5. Ground-only base occupancy == UNKNOWN
+   AND inside structurally admissible aisle geometry
+   -> STRUCTURE_INFERRED_FREE -> FREE
+
+6. otherwise
+   -> UNKNOWN
 ```
 
-The generated map contains no manual override replay. Manual overrides only produce the accepted map.
+The materializer never automatically changes a current Ground-only OCCUPIED cell to FREE. This is important: structure inference solves missing evidence, not explicit negative evidence.
 
-### 6.3 Observed FREE
+### 6.3 Structurally admissible aisle geometry
 
-Observed FREE keeps the current conservative meaning:
+The inference source is `CorridorRefinementResult.aisle_geometric_envelope` with its existing structural gates.
+
+The existing corridor code only emits non-empty geometry after the corresponding row/boundary pair has passed the prerequisites required to define that corridor, including row support, geometric width and longitudinal overlap.
+
+For this design, the term **structurally admissible** refers to those geometric prerequisites, not necessarily to a final diagnostic status of `ACCEPTED`.
+
+This distinction is intentional. A corridor can have valid agricultural geometry while having no current safe cells because Ground evidence is missing. That exact condition is the greenhouse failure this materializer is intended to repair.
+
+Safety is retained because:
 
 ```text
-ground valid
-AND direct ground support >= configured threshold
-AND slope <= threshold
-AND step <= threshold
-AND no occupied evidence
--> OBSERVED_FREE
+base OCCUPIED is never auto-freed
+row structural band is blocked
+outside Site Boundary is blocked
+only base UNKNOWN can be promoted
 ```
+
+Therefore a slope/step/obstacle cell already classified OCCUPIED remains OCCUPIED even if it lies inside the aisle geometry.
 
 ### 6.4 Row structural blocking
 
-`CorridorRefinementResult.row_structural_band` becomes formal structural obstacle evidence.
+`CorridorRefinementResult.row_structural_band` becomes formal blocked evidence.
 
-A cell inside a validated row structural band is OCCUPIED in the generated map unless a future separately reviewed design explicitly changes that rule.
+This prevents sparse vegetation returns from turning a known crop row into navigable white space.
 
-This prevents vegetation sparsity or missing returns from turning a crop row into traversable white space.
+If the row structural model itself is wrong, the correct workflow is to fix/review the structure and regenerate the map rather than silently paint through the row band.
 
-### 6.5 Structure-supported aisle FREE
+### 6.5 UNKNOWN preservation
 
-A Ground-only UNKNOWN cell may become `STRUCTURE_INFERRED_FREE` only when all of the following are true:
-
-```text
-inside Site Boundary
-AND inside aisle_geometric_envelope
-AND outside row_structural_band
-AND no current sensor obstacle
-AND not semantically hard blocked by inputs available to the materializer
-AND agricultural pair geometry is already accepted by the existing corridor refinement
-```
-
-The materializer must not require direct Ground support for these cells, because that is exactly the greenhouse occlusion failure being addressed.
-
-The agricultural geometry is accepted only after the existing corridor logic has already checked row support, longitudinal overlap and geometric width. This makes structure-supported FREE a semantic/geometric inference, not an absence-of-obstacle heuristic.
-
-### 6.6 UNKNOWN preservation
-
-Cells outside validated agricultural aisle geometry that lack direct evidence remain UNKNOWN.
+Outside structurally admissible aisle geometry, cells without direct positive/negative Evidence remain UNKNOWN.
 
 The implementation must not perform:
 
@@ -246,42 +262,58 @@ cross-row closing
 free-space inference from image background
 ```
 
-### 6.7 Relation to V25-12F
+### 6.6 Relation to V25-12F
 
-V25-12F remains useful evidence, especially its explicit masks and bounded short-gap reasoning. However, this design does not promote the existing `navigation_map_12f.*` DRAFT candidate directly into formal authority.
+V25-12F remains evidence/candidate logic and continues to be useful for bounded occlusion reasoning and diagnostics.
 
-The new materializer may reuse compatible evidence concepts, but formal generated output must have its own deterministic contract and provenance.
+The new formal materializer does not simply rename `navigation_map_12f.pgm`. It owns a separate deterministic contract whose output is the automatic Generated map.
 
-## 7. Formal manual correction
+## 7. Formal manual correction and Accepted map
 
-Formal manual map repair remains world-coordinate metadata, never raw pixel mutation.
-
-Allowed formal modes for Paper I:
+Paper I formal modes remain:
 
 ```text
 FORCE_FREE
 FORCE_OCCUPIED
 ```
 
-Each override must carry the current Paper I metadata requirements, including non-empty reason and evidence category.
+Each override must retain the current audit metadata, including non-empty reason and evidence category.
 
-The accepted map is always reproduced as:
+Accepted is produced only by deterministic replay:
 
 ```text
-generated structure-aware map
-  + ordered formal overrides
-  -> accepted map
+Generated structure-aware map
+  + ordered validated formal overrides
+  -> Accepted map
 ```
 
-Changing map resolution or re-materializing the grid therefore replays geometry rather than preserving hand-painted pixels.
+### 7.1 FORCE_OCCUPIED
 
-The generic Workbench may continue to understand non-Paper modes such as `UNKNOWN` or `NO_GO`, but Paper I formal freeze remains restricted.
+`FORCE_OCCUPIED` may mark any in-grid area OCCUPIED and always wins for its rasterized cells according to ordered replay.
+
+### 7.2 FORCE_FREE safety rule
+
+`FORCE_FREE` is intended for independently evidenced false obstacle/UNKNOWN cases such as severe occlusion, sparse returns or a known false sensor obstacle.
+
+However, formal `FORCE_FREE` is rejected wherever it would create FREE cells:
+
+```text
+outside Site Boundary
+or
+inside row_structural_band
+```
+
+Thus it may correct automatic sensor/terrain evidence when independently justified, but it cannot punch through the physical permitted boundary or the current accepted crop-row structural model.
+
+If the row structural model is wrong, review/fix the structure and regenerate instead.
+
+This rule removes ambiguity between human correction and hard geometric invariants.
 
 ## 8. Semantic authoring integration
 
-### 8.1 UI placement
+### 8.1 Workbench UI
 
-The existing Workbench right-side control tabs become:
+The existing right-side tabs become:
 
 ```text
 点云编辑
@@ -290,11 +322,11 @@ The existing Workbench right-side control tabs become:
 语义与任务
 ```
 
-No second top-level semantic editor window is required for the formal workflow.
+The formal workflow does not open a second top-level semantic editor.
 
-### 8.2 Reuse existing semantic core
+### 8.2 Reuse the existing semantic core
 
-Reuse without duplicating contracts:
+Reuse rather than duplicate:
 
 ```text
 agt_ui_bridge.semantic_model
@@ -304,11 +336,11 @@ agt_ui_bridge.semantic_scene
 agt_ui_bridge.semantic_rasterizer
 ```
 
-The Workbench semantic panel owns only interaction and rendering glue.
+The new Workbench panel owns only Qt interaction/rendering glue.
 
-### 8.3 Supported semantic objects
+### 8.3 Existing semantic schema remains
 
-The integrated panel supports the existing 1.0 feature types:
+Support the existing 1.0 feature types:
 
 ```text
 field_boundary
@@ -321,13 +353,13 @@ headland_zone
 keepout_zone
 ```
 
-It must preserve existing validation rules, object IDs, world-coordinate GeoJSON geometry and footprint-aware validation.
+Existing world-coordinate geometry, ID rules and footprint-aware validation remain authoritative.
 
 ### 8.4 Automatic structure promotion
 
-Automatic agricultural results are candidates, not silently committed semantics.
+Automatic rows/lanes are candidates and are never silently committed to GeoJSON.
 
-The Workbench supports an explicit promotion workflow:
+Workflow:
 
 ```text
 automatic candidate
@@ -336,34 +368,32 @@ automatic candidate
   -> reject
 ```
 
-Promoted GeoJSON features record provenance in `properties`, for example:
+Promoted features record provenance in `properties`:
 
 ```yaml
 source: auto_row_detection
 authoring_state: accepted
 ```
 
-or after operator adjustment:
+After operator editing:
 
 ```yaml
 source: auto_row_detection
 authoring_state: manually_edited
 ```
 
-Purely manual features use:
+Pure manual objects use:
 
 ```yaml
 source: manual
 authoring_state: accepted
 ```
 
-This provenance is intended to support later Paper I reporting of direct accepts, edits and manual additions.
+## 9. Legacy semantic-editor migration
 
-## 9. Legacy semantic editor migration
+The standalone `semantic_editor_qt5.py` may no longer mutate formal navigation rasters.
 
-The standalone `semantic_editor_qt5.py` is no longer allowed to mutate formal navigation rasters.
-
-The following formal capabilities are retired from that path:
+Formal retirement includes:
 
 ```text
 map_free
@@ -371,20 +401,16 @@ map_occupied
 map_unknown
 freehand pixel painting
 line pixel painting
-_save_map_in_place() for formal map production
+_save_map_in_place() as a formal map-production path
 ```
 
-Migration may be staged:
+Migration may be staged: disable raster mutation first, retain legacy semantic-only inspection temporarily if useful, and later remove the standalone formal entry point after Workbench acceptance.
 
-1. disable formal raster mutation and show a clear deprecation message;
-2. keep the standalone editor temporarily for legacy semantic-only inspection if needed;
-3. remove the standalone formal entry point after Workbench acceptance.
+No accepted revision may be modified in place.
 
-No accepted map may be modified in place by the legacy editor.
+## 10. Immutable Map Revision
 
-## 10. Immutable Map Revision contract
-
-The existing M1.5-4B minimum paths remain compatible:
+The existing M1.5-4B minimum paths remain valid:
 
 ```text
 <revision>/generated/navigation_map.yaml
@@ -394,7 +420,7 @@ The existing M1.5-4B minimum paths remain compatible:
 <revision>/derivation.yaml
 ```
 
-The revision is extended, not replaced:
+The revision is extended as follows:
 
 ```text
 <revision>/
@@ -428,32 +454,32 @@ The revision is extended, not replaced:
 └── derivation.yaml
 ```
 
-`coverage.yaml.base_map` points to the accepted Nav2 YAML by relative path, and `base_map_sha256` must exactly match that accepted YAML file.
+`coverage.yaml.base_map` points by relative path to `accepted/navigation_map.yaml` and `base_map_sha256` must equal the exact SHA256 of that accepted YAML.
 
-The revision writer is atomic: if any required component or validation step fails, no READY final revision directory is published.
+The writer is atomic: a failed required writer/validation step must not publish a final revision directory.
 
-## 11. Generated vs accepted semantics
+## 11. Evidence / Generated / Accepted terminology
 
-The terms are frozen as follows:
+These meanings are frozen:
 
 ```text
 Evidence
-= what the sensors / deterministic low-level derivation directly observed or calculated
+= sensor-derived / deterministic low-level observation and Ground-only occupancy
 
 Generated
-= automatic structure-aware formal navigation map, with no manual override
+= automatic structure-aware formal Navigation Map with no human raster override
 
 Accepted
-= Generated + validated formal human overrides
+= Generated + validated evidence-backed human overrides
 ```
 
-The semantic task binds to `accepted/`, never to Evidence and never to an independent raster.
+The semantic task binds to Accepted, never to Evidence and never to an independently edited raster.
 
 ## 12. Navigation Map QA gate
 
-A map is not considered usable merely because a PGM file exists.
+A PGM file existing is not sufficient acceptance.
 
-Add planner-independent QA before Paper I acceptance. At minimum report:
+At minimum report:
 
 ```text
 outside_site_boundary_free_count
@@ -469,42 +495,43 @@ manual_force_free_area_m2
 manual_force_occupied_area_m2
 ```
 
-Required hard failures:
+`per_aisle_grid_connectivity` is a planner-independent diagnostic computed as 8-connected FREE-cell connectivity within each structurally admissible aisle envelope.
+
+Hard failures:
 
 ```text
 outside_site_boundary_free_count > 0
 row_structural_band_free_leak_count > 0
-accepted map cannot be deterministically replayed from generated + overrides
-coverage.yaml hash does not bind exactly to accepted map YAML
-semantic validation ERROR exists
+Accepted cannot be replayed deterministically from Generated + overrides
+coverage.yaml hash does not match accepted map YAML
+semantic validation contains ERROR
 map/frame/grid identity mismatch
+serialized PGM/YAML do not match the in-memory accepted grid
 ```
 
-The QA layer should also expose, but not necessarily hard-fail in the first implementation, aisle connectivity and unknown statistics so the operator can see why a map remains unusable.
+Aisle connectivity and UNKNOWN percentages are reported even when they are not yet hard-fail thresholds, so the operator can diagnose an unusable map before planner experiments.
 
-A later planner dry-run can consume the same revision, but the materialization contract itself must not depend on one planner.
+A later Nav2 dry-run may consume the same revision, but map materialization itself must remain planner-independent.
 
-## 13. Headland policy for this increment
+## 13. Headland policy
 
-No new automatic headland detector is introduced.
+No new headland detector is introduced in this increment.
 
 Headland/open-area cells become FREE only through:
 
 ```text
-observed Ground FREE
+Observed Ground FREE
 or
-formal evidence-backed FORCE_FREE
+validated evidence-backed FORCE_FREE
 ```
 
-This keeps the current increment focused on the known aisle occlusion failure and avoids inventing a second broad free-space inference policy.
-
-A semantic `headland_zone` may still be authored for task meaning, but it does not automatically whiten UNKNOWN raster cells in this increment.
+A semantic `headland_zone` may describe task meaning but does not automatically whiten UNKNOWN cells in the base PGM.
 
 ## 14. Resource bundle integration
 
-The existing `Save Map Resource Bundle As...` workflow remains an export/transport mechanism, not authority.
+`Save Map Resource Bundle As...` remains a persistence/transport feature, not a map-authority producer.
 
-Add an optional semantic group containing:
+Add one optional semantic group:
 
 ```text
 semantic_map.geojson
@@ -514,23 +541,24 @@ keepout_mask.yaml
 semantic_validation.json
 ```
 
-Recommended bundle export uses an already-frozen revision when available. It must not independently regenerate a different formal map.
+When a frozen revision exists, bundle export should package that revision rather than independently regenerate a formal raster.
 
-## 15. Error handling and fail-closed behavior
+## 15. Fail-closed conditions
 
-Formal freeze fails closed when any of these conditions hold:
+Formal freeze fails when any of the following is true:
 
 - no valid Site Boundary;
-- structure arrays do not match the navigation grid;
+- Evidence/structure arrays do not share one grid shape;
 - frame IDs differ;
 - grid geometry changes between Evidence and Generated;
-- generated occupancy contains invalid values;
+- Generated/Accepted occupancy contains values outside the AGT trinary contract;
 - formal override metadata is invalid;
-- accepted map replay does not match serialized accepted PGM;
-- semantic task is invalid;
-- semantic task cannot bind to the accepted map hash;
+- `FORCE_FREE` would free outside Site Boundary or inside row structural band;
+- Accepted replay differs from serialized Accepted PGM;
+- semantic validation fails;
+- semantic task cannot bind exactly to Accepted SHA256;
 - required output path already exists;
-- any staged writer fails.
+- any staging writer fails.
 
 The previous valid revision remains untouched.
 
@@ -538,71 +566,72 @@ The previous valid revision remains untouched.
 
 Implementation follows strict RED -> GREEN.
 
-### 16.1 Offline-core unit tests
+### 16.1 Structure-aware core
 
-Add tests for the structure-aware materializer covering:
+Tests must cover:
 
-- observed FREE preserved;
-- row structural band becomes OCCUPIED even with sparse obstacle returns;
-- Ground-only UNKNOWN inside valid aisle geometry becomes structure-inferred FREE;
+- Ground-only FREE remains FREE;
+- Ground-only OCCUPIED remains OCCUPIED even inside aisle geometry;
+- row structural band becomes OCCUPIED;
+- Ground-only UNKNOWN inside structurally admissible aisle geometry becomes structure-inferred FREE;
 - UNKNOWN outside aisle geometry remains UNKNOWN;
-- sensor OCCUPIED is never automatically freed;
-- outside Site Boundary is OCCUPIED;
-- output grid geometry is byte-for-byte/equality consistent with the source grid contract;
+- outside Site Boundary becomes OCCUPIED;
+- exact grid geometry preservation;
 - deterministic repeated materialization;
-- no overlap among incompatible provenance masks.
+- provenance masks do not claim contradictory states.
 
-### 16.2 Override / freeze tests
+### 16.2 Formal override/freeze
 
-- generated contains no manual override;
-- accepted exactly equals generated + ordered override replay;
-- invalid Paper override metadata blocks freeze;
-- existing revision directory is never overwritten;
+Tests must cover:
+
+- Generated contains no manual override;
+- Accepted exactly equals Generated + ordered validated replay;
+- `FORCE_FREE` outside Site Boundary is rejected;
+- `FORCE_FREE` inside row band is rejected;
+- independently evidenced `FORCE_FREE` may correct eligible Generated UNKNOWN/OCCUPIED cells;
+- invalid override metadata blocks freeze;
+- an existing revision is never overwritten;
 - writer failure leaves no final partial revision.
 
-### 16.3 Semantic integration tests
+### 16.3 Semantic integration
 
-- semantic feature authoring uses map-frame coordinates;
-- promoted automatic row/lane features carry provenance;
+Tests must cover:
+
+- map-frame coordinates are preserved;
+- automatic row/lane promotion records provenance;
 - semantic ERROR blocks formal freeze;
-- `coverage.base_map` targets accepted map YAML;
-- `coverage.base_map_sha256` equals accepted YAML SHA256;
-- direct formal PGM mutation is unavailable from the legacy editor.
+- coverage binds to Accepted YAML path/hash;
+- legacy editor formal raster mutation is unavailable.
 
-### 16.4 QA tests
+### 16.4 QA
 
-- outside-boundary FREE leak is detected;
-- row-band FREE leak is detected;
-- aisle fractions and connectivity are deterministic;
-- accepted replay mismatch is detected;
-- semantic/hash mismatch is detected.
+Tests must cover:
 
-### 16.5 Regression gates
+- outside-boundary FREE leak detection;
+- row-band FREE leak detection;
+- deterministic aisle fractions/connectivity;
+- Accepted replay mismatch detection;
+- semantic/hash mismatch detection.
 
-Preserve:
+### 16.5 Regression
 
-- V25-12C ground-relative derivation tests;
-- V25-12F traversability tests;
-- Site Boundary tests;
-- vehicle-safe-lane tests;
-- M1.5-4B map-authority tests;
-- resource-bundle atomicity tests.
+Preserve the existing Ground-relative, V25-12F, Site Boundary, vehicle-safe-lane, M1.5-4B map-authority and resource-bundle tests.
 
-## 17. Target-machine real-map acceptance
+## 17. Real greenhouse acceptance
 
-After software tests pass, use the intended greenhouse PCD and require one full Workbench run:
+After software gates pass, run one full target-machine workflow on the intended greenhouse PCD:
 
 ```text
 PCD loaded
--> Ground-only evidence generated
--> agricultural rows/aisles reviewed
+-> Ground-only Evidence generated
+-> rows/aisles reviewed
 -> Site Boundary READY
--> structure-aware generated map produced
--> operator reviews unresolved UNKNOWN / conflicts
+-> Structure-aware Generated map produced
+-> unresolved UNKNOWN/conflicts reviewed
 -> only evidence-backed formal overrides added where necessary
 -> semantic task authored/validated
 -> immutable revision frozen
--> map-only QA passes hard invariants
+-> map-only QA hard invariants pass
 -> human visual review passes
 -> Paper project binds revision as V25_MAP_WORKBENCH / BOUND_VERIFIED
 ```
@@ -613,70 +642,67 @@ Record at least:
 Ground-only FREE/OCCUPIED/UNKNOWN counts
 Generated FREE/OCCUPIED/UNKNOWN counts
 Accepted FREE/OCCUPIED/UNKNOWN counts
-structure-inferred FREE cell count / area
+structure-inferred FREE cells / area
 manual FORCE_FREE area
 manual FORCE_OCCUPIED area
-accepted aisle connectivity summary
+per-aisle connectivity summary
 semantic validation summary
-all output hashes
+all formal output hashes
 ```
 
-These records become Paper I experiment evidence rather than ad hoc screenshots only.
+## 18. Paper I ablation enabled by this architecture
 
-## 18. Paper I experiment interpretation
-
-The architecture naturally supports an ablation without changing map contracts:
+Without changing map contracts, Paper I can compare:
 
 ```text
-M0 = Ground-only evidence map
+M0 = Ground-only Evidence map
 M1 = structure-aware Generated map
 M2 = human-reviewed Accepted map
 ```
 
-Candidate metrics include:
+Useful metrics include:
 
 ```text
 UNKNOWN ratio
-accepted-aisle connectivity
 per-aisle passable fraction
-planner success on fixed route queries
+per-aisle connectivity
+fixed-query planner success
 manual correction area
-real vehicle route completion in later stages
+later real-vehicle route completion
 ```
 
-This allows the paper to distinguish sensor evidence, agricultural structural inference and human review instead of presenting one opaque final PGM.
+This cleanly separates sensor evidence, agricultural structural inference and human review.
 
-## 19. Implementation order
-
-Once this written design is approved, the implementation plan should stage work in this order:
+## 19. Implementation order after written-spec approval
 
 ```text
-A. structure-aware offline materializer + tests
-B. formal revision writer / QA + tests
-C. Workbench generated/accepted wiring
+A. Structure-Aware Navigation Materializer + unit tests
+B. formal revision writer + map QA + tests
+C. Workbench Generated/Accepted wiring
 D. integrated semantic authoring panel using existing semantic core
 E. automatic row/aisle promotion provenance
-F. legacy semantic-editor raster mutation deprecation
+F. legacy semantic-editor raster-mutation deprecation
 G. resource-bundle semantic group
-H. real greenhouse target-machine acceptance
+H. target-machine real greenhouse acceptance
 ```
 
-This order deliberately solves the unusable-PGM problem before expanding GUI behavior, while keeping each layer testable without Qt where possible.
+This order solves the unusable-PGM problem before expanding GUI behavior and keeps most early work testable without Qt.
 
-## 20. Frozen design decisions
-
-The following decisions are considered frozen for this increment unless a new design amendment is explicitly approved:
+## 20. Frozen decisions
 
 ```text
-V25 Workbench accepted revision is the only formal Navigation Map authority.
+V25 Workbench Accepted revision is the only formal Navigation Map authority.
 Ground-only occupancy is Evidence, not the final formal PGM.
 Generated formal PGM is structure-aware.
 Accepted formal PGM is Generated + auditable world-coordinate overrides.
+Ground-only OCCUPIED is never auto-freed by structure inference.
 Row structural bands are formal blocked evidence.
-Validated aisle geometry may promote Ground-only UNKNOWN to structure-inferred FREE.
-UNKNOWN outside supported geometry remains UNKNOWN.
-Site Boundary and field_boundary remain distinct concepts.
-Semantic task binds to accepted map by SHA256.
+Only Ground-only UNKNOWN inside structurally admissible aisle geometry is auto-promoted to FREE.
+Outside supported geometry, UNKNOWN remains UNKNOWN.
+FORCE_FREE cannot violate Site Boundary or row structural band.
+Site Boundary and field_boundary remain distinct.
+Semantic keepout remains a separate semantic mask and does not silently rewrite the base PGM.
+Semantic task binds to Accepted by exact SHA256.
 Standalone semantic editor may not directly mutate formal accepted PGM assets.
-No global UNKNOWN fill, no cross-row morphology, and no new headland detector in this increment.
+No global UNKNOWN fill, cross-row morphology, route-dependent whitening or new headland detector is introduced here.
 ```
