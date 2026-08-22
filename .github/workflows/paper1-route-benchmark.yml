@@ -81,6 +81,7 @@ jobs:
           PYTHONPATH: src/agt_route_benchmark:src/agt_coverage_planning:src/agt_offline_assets:src/agt_ui_bridge
         run: python -m pytest -q src/agt_route_benchmark/test
       - name: Compile changed Python sources
+        if: always()
         run: >-
           python -m compileall -q
           src/agt_route_benchmark/agt_route_benchmark
