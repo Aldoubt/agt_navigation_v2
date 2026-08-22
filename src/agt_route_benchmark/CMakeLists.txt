@@ -19,6 +19,7 @@ install(PROGRAMS
   scripts/route_benchmark_paper_bundle.py
   scripts/route_benchmark_map_quality.py
   scripts/route_benchmark_map_curation.py
+  scripts/route_benchmark_paper1_baseline_snapshot.py
   scripts/ackermann_kinematic_sim.py
   scripts/rpp_tracking_sim_trial.py
   DESTINATION lib/${PROJECT_NAME}
@@ -66,6 +67,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_map_curation_freeze_gate test/test_map_curation_freeze_gate.py)
   ament_add_pytest_test(test_map_quality test/test_map_quality.py)
   ament_add_pytest_test(test_map_quality_cli test/test_map_quality_cli.py)
+  ament_add_pytest_test(test_paper1_baseline_snapshot test/test_paper1_baseline_snapshot.py)
   ament_add_pytest_test(test_benchmark_launch_contract test/test_benchmark_launch_contract.py)
 endif()
 
