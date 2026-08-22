@@ -20,7 +20,30 @@ REVIEW_LAYER_EXPORTS = (
     ("09_formal_generated.png", "formal_generated"),
     ("10_formal_accepted.png", "formal_accepted"),
     ("11_generated_accepted_diff.png", "formal_diff"),
+    ("12_direct_obstacle.png", "formal_hard_direct"),
+    ("13_slope_hard.png", "formal_hard_slope"),
+    ("14_step_hard.png", "formal_hard_step"),
+    ("15_hard_before_padding.png", "formal_hard_before_padding"),
+    ("16_hard_after_padding.png", "formal_hard_after_padding"),
+    ("17_aisle_hard_conflict.png", "formal_aisle_hard_conflict"),
+    ("18_connectivity_breakpoints.png", "formal_connectivity_breakpoints"),
 )
+
+_FORMAL_RASTER_KEYS = {
+    "formal_generated",
+    "formal_accepted",
+    "formal_diff",
+}
+
+
+def review_layer_cloud_opacity(layer_key: str | None) -> float:
+    """Choose readable cloud context for deterministic review screenshots."""
+
+    if layer_key is None:
+        return 1.0
+    if layer_key in _FORMAL_RASTER_KEYS:
+        return 0.0
+    return 0.18
 
 
 def git_head(cwd: str | Path) -> str | None:
