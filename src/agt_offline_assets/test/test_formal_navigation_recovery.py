@@ -12,6 +12,7 @@ from agt_offline_assets import (
 )
 from agt_offline_assets.formal_navigation_map import (
     StructureAwareNavigationConfig,
+    derive_hard_occupancy_provenance,
     materialize_structure_aware_navigation_map,
 )
 
@@ -25,6 +26,7 @@ def _navigation(
     slope_deg=None,
     step_m=None,
     resolution=0.1,
+    obstacle_padding_m=0.0,
 ):
     occupancy = np.asarray(occupancy, dtype=np.uint8)
     shape = occupancy.shape
@@ -59,7 +61,7 @@ def _navigation(
             minimum_obstacle_points=2,
             maximum_slope_deg=10.0,
             maximum_step_m=0.12,
-            obstacle_padding_m=0.0,
+            obstacle_padding_m=float(obstacle_padding_m),
         ),
     )
 
@@ -197,3 +199,49 @@ def test_unknown_recovery_contract_is_preserved():
     assert result.navigation.occupancy[0, 1] == FREE
     assert result.structure_inferred_unknown_free_mask[0, 1]
     assert result.structure_inferred_free_mask[0, 1]
+
+
+def test_hard_occupancy_provenance_separates_sensor_slope_and_step_causes():
+    navigation = _navigation(
+        [[OCCUPIED, OCCUPIED, OCCUPIED, OCCUPIED]],
+        obstacle_count=[[12, 2, 0, 0]],
+        point_count=[[100, 100, 100, 100]],
+        slope_deg=[[0.0, 0.0, 15.0, 0.0]],
+        step_m=[[0.0, 0.0, 0.0, 0.20]],
+    )
+
+    provenance = derive_hard_occupancy_provenance(navigation, _config())
+
+    assert provenance.direct_obstacle_mask.tolist() == [[True, True, False, False]]
+    assert provenance.strong_sensor_obstacle_mask.tolist() == [[True, False, False, False]]
+    assert provenance.slope_hard_mask.tolist() == [[False, False, True, False]]
+    assert provenance.step_hard_mask.tolist() == [[False, False, False, True]]
+    assert provenance.hard_before_padding_mask.tolist() == [[True, False, True, True]]
+    assert provenance.soft_occupied_mask.tolist() == [[False, True, False, False]]
+
+
+def test_hard_occupancy_provenance_exposes_padding_added_cells_without_changing_policy():
+    navigation = _navigation(
+        [
+            [FREE, OCCUPIED, OCCUPIED],
+            [FREE, OCCUPIED, FREE],
+            [FREE, FREE, FREE],
+        ],
+        obstacle_count=[
+            [0, 0, 0],
+            [0, 12, 0],
+            [0, 0, 0],
+        ],
+        point_count=np.full((3, 3), 100, dtype=np.int32),
+        obstacle_padding_m=0.05,
+    )
+
+    provenance = derive_hard_occupancy_provenance(navigation, _config())
+
+    assert provenance.padding_cells == 1
+    assert provenance.hard_before_padding_mask[1, 1]
+    assert provenance.hard_after_padding_mask[0, 1]
+    assert provenance.hard_after_padding_mask[0, 2]
+    assert provenance.padding_added_hard_mask[0, 1]
+    assert provenance.padding_added_hard_mask[0, 2]
+    assert not provenance.padding_added_hard_mask[1, 1]
