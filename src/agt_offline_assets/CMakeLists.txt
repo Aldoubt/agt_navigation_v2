@@ -47,6 +47,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_navigation_row_tracks test/test_navigation_row_tracks.py)
   ament_add_pytest_test(test_navigation_corridor test/test_navigation_corridor.py)
   ament_add_pytest_test(
+    test_navigation_corridor_centerlines
+    test/test_navigation_corridor_centerlines.py
+  )
+  ament_add_pytest_test(
     test_navigation_corridor_boundary_candidates
     test/test_navigation_corridor_boundary_candidates.py
   )
