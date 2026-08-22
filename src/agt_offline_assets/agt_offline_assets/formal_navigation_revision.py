@@ -66,6 +66,7 @@ def _write_evidence_arrays(
         evidence_dir / "ground_support_count.npy",
         ground_evidence.ground_support_count,
     )
+    np.save(evidence_dir / "point_count.npy", ground_evidence.point_count)
     masks = evidence_dir / "formal_materialization_masks.npz"
     np.savez_compressed(
         masks,
@@ -73,7 +74,14 @@ def _write_evidence_arrays(
         structure_inferred_free_mask=materialized.structure_inferred_free_mask.astype(
             np.uint8
         ),
+        structure_inferred_unknown_free_mask=(
+            materialized.structure_inferred_unknown_free_mask.astype(np.uint8)
+        ),
+        structure_recovered_soft_occupied_mask=(
+            materialized.structure_recovered_soft_occupied_mask.astype(np.uint8)
+        ),
         base_hard_occupied_mask=materialized.base_hard_occupied_mask.astype(np.uint8),
+        base_soft_occupied_mask=materialized.base_soft_occupied_mask.astype(np.uint8),
         row_structural_blocked_mask=materialized.row_structural_blocked_mask.astype(
             np.uint8
         ),
@@ -165,6 +173,7 @@ def write_structure_aware_navigation_payload(
             ),
             "force_free_area_m2": float(accepted.force_free_area_m2),
             "force_occupied_area_m2": float(accepted.force_occupied_area_m2),
+            "diagnostics": [dict(item) for item in accepted.override_diagnostics],
         },
         "overrides": ordered_overrides,
         "outputs": {
