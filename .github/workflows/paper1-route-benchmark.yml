@@ -45,6 +45,7 @@ jobs:
           src/agt_offline_assets/test/test_formal_navigation_override.py
           src/agt_offline_assets/test/test_formal_navigation_revision.py
           src/agt_offline_assets/test/test_formal_navigation_qa.py
+          src/agt_offline_assets/test/test_formal_navigation_usability.py
       - name: Run agricultural terrain, structure, row-track and corridor regressions
         env:
           PYTHONPATH: src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
