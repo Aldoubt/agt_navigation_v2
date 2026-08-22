@@ -40,6 +40,17 @@ _FORMAL_LAYER_KEYS = {
     "formal_boundary_block",
     "formal_unknown",
 }
+_HUMAN_BOUNDARY_SOURCES = {
+    "WORKBENCH_MANUAL_POLYGON",
+    "HUMAN_CONFIRMED_WORKBENCH",
+}
+
+
+def _is_human_confirmed_boundary(boundary) -> bool:
+    source = getattr(boundary, "source", {}) or {}
+    return str(
+        source.get("boundary_source", source.get("authoring_mode", ""))
+    ) in _HUMAN_BOUNDARY_SOURCES
 
 
 class UnifiedMapWorkbenchWindow(Paper1MapWorkbenchWindow):
@@ -50,6 +61,9 @@ class UnifiedMapWorkbenchWindow(Paper1MapWorkbenchWindow):
         self._formal_accepted_result = None
         self._formal_navigation_qa = None
         self._formal_last_error = ""
+        self._formal_ready = False
+        self._formal_review_status = "HUMAN_REVIEW_REQUIRED"
+        self._formal_boundary_source = None
         super().__init__()
         self._install_formal_navigation_layers()
         self.setWindowTitle(
@@ -77,11 +91,23 @@ class UnifiedMapWorkbenchWindow(Paper1MapWorkbenchWindow):
         self._formal_accepted_result = None
         self._formal_navigation_qa = None
         self._formal_last_error = str(reason)
+        self._formal_ready = False
+        self._formal_review_status = "HUMAN_REVIEW_REQUIRED"
+        self._formal_boundary_source = None
 
     def _build_formal_navigation_state(self) -> bool:
         """Build Generated, Accepted and QA from the current Workbench evidence."""
 
-        self._invalidate_formal_navigation_state()
+        if hasattr(self, "_invalidate_formal_navigation_state"):
+            self._invalidate_formal_navigation_state()
+        else:
+            self._formal_materialization = None
+            self._formal_accepted_result = None
+            self._formal_navigation_qa = None
+            self._formal_last_error = ""
+            self._formal_ready = False
+            self._formal_review_status = "HUMAN_REVIEW_REQUIRED"
+            self._formal_boundary_source = None
         if self._navigation_base_result is None:
             self._formal_last_error = "缺少 Ground-relative Navigation Evidence"
             return False
@@ -126,12 +152,29 @@ class UnifiedMapWorkbenchWindow(Paper1MapWorkbenchWindow):
         self._formal_materialization = materialized
         self._formal_accepted_result = accepted
         self._formal_navigation_qa = qa
+        self._formal_boundary_source = str(
+            (getattr(self._site_boundary, "source", {}) or {}).get(
+                "boundary_source",
+                (getattr(self._site_boundary, "source", {}) or {}).get(
+                    "authoring_mode", "UNKNOWN"
+                ),
+            )
+        )
         if qa.get("status") != "PASS":
             failures = qa.get("hard_failures") or []
             self._formal_last_error = (
                 "Formal Navigation QA FAIL: " + ", ".join(str(v) for v in failures)
             )
             return False
+        if not _is_human_confirmed_boundary(self._site_boundary):
+            self._formal_ready = False
+            self._formal_review_status = "HUMAN_REVIEW_REQUIRED"
+            self._formal_last_error = (
+                "QA PASS，但 Site Boundary 未由 Workbench 人工确认；formal_ready=false"
+            )
+            return False
+        self._formal_ready = True
+        self._formal_review_status = "READY"
         self._formal_last_error = ""
         return True
 
@@ -274,7 +317,10 @@ class UnifiedMapWorkbenchWindow(Paper1MapWorkbenchWindow):
     # ------------------------------------------------------- formal export
     def _export_formal_navigation_revision_to(self, destination: Path | str) -> Path:
         destination = Path(destination).expanduser().resolve()
-        if not self._build_formal_navigation_state():
+        build = getattr(self, "_build_formal_navigation_state", None)
+        if build is None:
+            build = UnifiedMapWorkbenchWindow._build_formal_navigation_state.__get__(self)
+        if not build():
             raise ValueError(self._formal_last_error or "Formal Navigation state is not ready")
         assert self._formal_materialization is not None
         assert self._formal_accepted_result is not None
@@ -290,6 +336,7 @@ class UnifiedMapWorkbenchWindow(Paper1MapWorkbenchWindow):
                 self._source_path.name if self._source_path is not None else None
             ),
             frame_id="map",
+            boundary_source="HUMAN_CONFIRMED_WORKBENCH",
         )
         try:
             write_formal_navigation_qa(

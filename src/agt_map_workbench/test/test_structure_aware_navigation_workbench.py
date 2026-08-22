@@ -65,6 +65,7 @@ def _window_state(*, with_boundary=True):
         SiteBoundary(
             frame_id="map",
             outer_boundary_xy=((0.0, 0.0), (5.0, 0.0), (5.0, 2.0), (0.0, 2.0)),
+            source={"authoring_mode": "WORKBENCH_MANUAL_POLYGON"},
         )
         if with_boundary
         else None

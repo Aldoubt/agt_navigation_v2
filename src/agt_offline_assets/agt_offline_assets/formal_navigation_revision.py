@@ -107,6 +107,7 @@ def write_structure_aware_navigation_payload(
     overrides: Iterable[Mapping[str, object]],
     source_asset: str | None = None,
     frame_id: str = "map",
+    boundary_source: str | None = None,
 ) -> Path:
     """Write Evidence, Generated and Accepted products into an existing root."""
 
@@ -146,6 +147,7 @@ def write_structure_aware_navigation_payload(
         "formal_revision_schema": FORMAL_NAVIGATION_REVISION_SCHEMA,
         "materialization_schema": materialized.schema,
         "frame_id": str(frame_id),
+        "boundary_source": boundary_source,
         "source_asset": source_asset,
         "grid": _grid_record(ground_evidence),
         "counts": {
@@ -201,6 +203,7 @@ def export_structure_aware_navigation_revision(
     overrides: Iterable[Mapping[str, object]],
     source_asset: str | None = None,
     frame_id: str = "map",
+    boundary_source: str | None = None,
 ) -> Path:
     """Atomically publish one immutable navigation-only formal revision."""
 
@@ -219,6 +222,7 @@ def export_structure_aware_navigation_revision(
             overrides=overrides,
             source_asset=source_asset,
             frame_id=frame_id,
+            boundary_source=boundary_source,
         )
         os.replace(staging, destination)
     except Exception:

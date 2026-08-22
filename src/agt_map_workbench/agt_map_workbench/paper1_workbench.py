@@ -56,6 +56,20 @@ class Paper1MapWorkbenchWindow(ReviewMapWorkbenchWindow):
         )
         self._install_resource_bundle_action()
 
+    # Compatibility dispatch for lightweight Paper I contract fixtures.  The
+    # unified subclass owns the formal implementation.
+    def _build_formal_navigation_state(self) -> bool:
+        from .unified_workbench import UnifiedMapWorkbenchWindow
+
+        return UnifiedMapWorkbenchWindow._build_formal_navigation_state(self)
+
+    def _export_formal_navigation_revision_to(self, destination: Path | str) -> Path:
+        from .unified_workbench import UnifiedMapWorkbenchWindow
+
+        return UnifiedMapWorkbenchWindow._export_formal_navigation_revision_to(
+            self, destination
+        )
+
     # ------------------------------------------------------- PCD identity for bundle export
     def _open_pcd(self) -> None:
         previous = self._source_path
