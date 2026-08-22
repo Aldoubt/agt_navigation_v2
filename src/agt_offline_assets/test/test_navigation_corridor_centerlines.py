@@ -10,6 +10,7 @@ from agt_offline_assets import (
     RowModel,
     derive_corridor_refinement,
 )
+from agt_offline_assets.aisle_centerlines import derive_geometric_aisle_centerlines
 
 
 def _fixture():
@@ -77,23 +78,28 @@ def test_geometric_centerline_survives_ground_hole_while_safe_centerline_breaks(
     navigation, structure, config = _fixture()
     navigation.ground_valid[14:17, 20:24] = False
 
-    result = derive_corridor_refinement(navigation, structure, config)
+    corridor = derive_corridor_refinement(navigation, structure, config)
+    geometric = derive_geometric_aisle_centerlines(navigation, structure, corridor)
 
-    assert np.any(result.aisle_geometric_envelope[14:17, 20:24])
-    assert np.any(result.aisle_geometric_centerline[14:17, 20:24])
-    assert not np.any(result.aisle_centerline[14:17, 20:24])
-    assert np.all(~result.aisle_geometric_centerline | result.aisle_geometric_envelope)
-    assert np.all(~result.aisle_centerline | result.aisle_candidate)
+    assert np.any(corridor.aisle_geometric_envelope[14:17, 20:24])
+    assert np.any(geometric.mask[14:17, 20:24])
+    assert not np.any(corridor.aisle_centerline[14:17, 20:24])
+    assert np.all(~geometric.mask | corridor.aisle_geometric_envelope)
+    assert np.all(~corridor.aisle_centerline | corridor.aisle_candidate)
 
 
-def test_each_geometric_aisle_reports_a_geometric_centerline_independent_of_safe_cells():
+def test_each_geometric_aisle_reports_centerline_independent_of_safe_cells():
     navigation, structure, config = _fixture()
     navigation.ground_valid[14:17, 20:24] = False
 
-    result = derive_corridor_refinement(navigation, structure, config)
+    corridor = derive_corridor_refinement(navigation, structure, config)
+    geometric = derive_geometric_aisle_centerlines(navigation, structure, corridor)
 
-    interior = [d for d in result.aisle_pair_diagnostics if d.pair_kind == "ROW_ROW"]
+    interior = [pair for pair in geometric.pairs if pair.pair_kind == "ROW_ROW"]
     assert len(interior) == 2
-    assert all(d.geometric_cell_count > 0 for d in interior)
-    assert all(d.geometric_centerline_cell_count > 0 for d in interior)
-    assert np.count_nonzero(result.aisle_geometric_centerline) > 0
+    assert all(pair.geometric_cell_count > 0 for pair in interior)
+    assert all(pair.centerline_cell_count > 0 for pair in interior)
+    assert geometric.expected_interior_aisles == 2
+    assert geometric.interior_geometric_aisle_count == 2
+    assert geometric.geometric_centerline_count >= 2
+    assert np.count_nonzero(geometric.mask) > 0
