@@ -192,18 +192,31 @@ def test_tampered_accepted_map_fails_replay_check():
 
 
 def test_per_aisle_fractions_and_connectivity_are_reported():
-    ground = [[FREE, FREE, UNKNOWN, FREE, FREE], [FREE, FREE, UNKNOWN, FREE, FREE]]
-    aisle = np.ones((2, 5), dtype=bool)
-    # Keep the two UNKNOWN cells unresolved by removing them from structure inference.
-    aisle[:, 2] = False
-    fixture = _fixture(ground, aisle=aisle)
-    report = _report(*fixture)
+    ground, corridor, boundary, materialized, accepted = _fixture(
+        [[FREE] * 5, [FREE] * 5]
+    )
+    # QA must describe the actual Accepted raster even when replay integrity fails.
+    # Splitting a valid aisle with two UNKNOWN cells gives 8/10 FREE and 2/10 UNKNOWN.
+    tampered = accepted.navigation.occupancy.copy()
+    tampered[:, 2] = UNKNOWN
+    accepted = FormalOverrideReplayResult(
+        navigation=NavigationMapResult(
+            **{**accepted.navigation.__dict__, "occupancy": tampered}
+        ),
+        force_free_changed_cell_count=0,
+        force_occupied_changed_cell_count=0,
+        force_free_area_m2=0.0,
+        force_occupied_area_m2=0.0,
+    )
+
+    report = _report(ground, corridor, boundary, materialized, accepted)
     aisle_report = report["aisles"][0]
 
     assert aisle_report["free_fraction"] == 0.8
     assert aisle_report["unknown_fraction"] == 0.2
     assert aisle_report["occupied_conflict_fraction"] == 0.0
     assert aisle_report["grid_connectivity"] is False
+    assert "ACCEPTED_REPLAY_MISMATCH" in report["hard_failures"]
 
 
 def test_qa_json_writer_is_deterministic(tmp_path: Path):
