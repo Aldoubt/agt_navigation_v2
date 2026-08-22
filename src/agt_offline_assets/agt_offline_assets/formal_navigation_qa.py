@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import numpy as np
+from shapely.geometry import Polygon
 
 from .formal_navigation_map import StructureAwareNavigationResult
 from .formal_navigation_override import (
@@ -17,8 +18,16 @@ from .navigation_map_derivation import FREE, OCCUPIED, UNKNOWN, NavigationMapRes
 from .site_boundary import SiteBoundary, rasterize_site_boundary
 
 
-FORMAL_NAVIGATION_QA_SCHEMA = "agt_formal_navigation_qa/v1"
+FORMAL_NAVIGATION_QA_SCHEMA = "agt_formal_navigation_qa/v2"
 _ACCEPTED_DIAGNOSTIC_STATES = {"ACCEPTED", "ACCEPTED_NO_CENTERLINE"}
+
+
+def _require_scipy():
+    try:
+        from scipy import ndimage
+    except ImportError as exc:
+        raise RuntimeError("formal navigation QA requires scipy") from exc
+    return ndimage
 
 
 def _grid_xy(navigation: NavigationMapResult) -> tuple[np.ndarray, np.ndarray]:
@@ -85,6 +94,45 @@ def _free_connects_longitudinal_ends(
                     visited[rr, cc] = True
                     stack.append((rr, cc))
     return False
+
+
+def _largest_free_component_fraction(occupancy: np.ndarray) -> float:
+    free = np.asarray(occupancy, dtype=np.uint8) == FREE
+    total_free = int(np.count_nonzero(free))
+    if total_free == 0:
+        return 0.0
+    ndimage = _require_scipy()
+    labels, count = ndimage.label(free, structure=np.ones((3, 3), dtype=np.uint8))
+    if count <= 0:
+        return 0.0
+    sizes = np.bincount(labels.reshape(-1), minlength=count + 1)[1:]
+    largest = int(np.max(sizes)) if sizes.size else 0
+    return float(largest / total_free)
+
+
+def _site_boundary_shape_diagnostics(boundary: SiteBoundary) -> dict[str, object]:
+    polygon = Polygon(boundary.outer_boundary_xy)
+    hull = polygon.convex_hull
+    area_ratio = float(polygon.area / hull.area) if hull.area > 0.0 else 0.0
+    perimeter_ratio = (
+        float(polygon.length / hull.length) if hull.length > 0.0 else float("inf")
+    )
+    warnings: list[str] = []
+    # These are review warnings, not authority failures. A greenhouse perimeter
+    # can be concave, but a deeply serpentine polygon is often a corridor mask
+    # accidentally authored as the outer vehicle-permitted boundary.
+    if perimeter_ratio > 2.5 or area_ratio < 0.55:
+        warnings.append("SITE_BOUNDARY_SHAPE_REVIEW_REQUIRED")
+    if len(boundary.outer_boundary_xy) > 32:
+        warnings.append("SITE_BOUNDARY_VERTEX_COMPLEXITY_REVIEW")
+    return {
+        "site_boundary_vertex_count": len(boundary.outer_boundary_xy),
+        "site_boundary_area_m2": float(polygon.area),
+        "site_boundary_perimeter_m": float(polygon.length),
+        "site_boundary_convex_area_ratio": area_ratio,
+        "site_boundary_convex_perimeter_ratio": perimeter_ratio,
+        "site_boundary_warnings": warnings,
+    }
 
 
 def _aisle_reports(
@@ -164,7 +212,7 @@ def evaluate_formal_navigation_qa(
     corridor: Any,
     site_boundary: SiteBoundary,
 ) -> dict[str, object]:
-    """Evaluate hard invariants and diagnostic aisle quality without a planner."""
+    """Evaluate safety invariants separately from navigation usability."""
 
     expected_shape = ground_evidence.occupancy.shape
     if materialized.navigation.occupancy.shape != expected_shape:
@@ -208,27 +256,51 @@ def evaluate_formal_navigation_qa(
         hard_failures.append("ACCEPTED_REPLAY_MISMATCH")
 
     aisle_reports = _aisle_reports(accepted.navigation, structure, corridor)
+    connected_aisles = sum(bool(item.get("grid_connectivity")) for item in aisle_reports)
+    total_aisles = len(aisle_reports)
+    structural_status = "PASS" if not hard_failures else "FAIL"
+    if total_aisles == 0:
+        usability_status = "NOT_EVALUATED"
+    elif connected_aisles == total_aisles:
+        usability_status = "PASS"
+    else:
+        usability_status = "REVIEW_REQUIRED"
+
     total_cells = int(accepted_occupancy.size)
     unknown_count = int(np.count_nonzero(accepted_occupancy == UNKNOWN))
     inferred_count = int(np.count_nonzero(materialized.structure_inferred_free_mask))
+    recovered_soft_count = int(
+        np.count_nonzero(materialized.structure_recovered_soft_occupied_mask)
+    )
+    boundary_shape = _site_boundary_shape_diagnostics(site_boundary)
 
     return {
         "schema": FORMAL_NAVIGATION_QA_SCHEMA,
-        "status": "PASS" if not hard_failures else "FAIL",
+        # Backwards-compatible safety status consumed by existing binders/tests.
+        "status": structural_status,
+        "structural_safety_status": structural_status,
+        "navigation_usability_status": usability_status,
         "hard_failures": hard_failures,
         "outside_site_boundary_free_count": outside_count,
         "row_structural_band_free_leak_count": row_leak_count,
-        "accepted_aisle_count": len(aisle_reports),
+        "accepted_aisle_count": total_aisles,
+        "connected_aisle_count": connected_aisles,
         "aisles": aisle_reports,
+        "largest_free_component_fraction": _largest_free_component_fraction(
+            accepted_occupancy
+        ),
         "map_unknown_fraction": (
             float(unknown_count / total_cells) if total_cells else 0.0
         ),
         "structure_inferred_free_fraction": (
             float(inferred_count / total_cells) if total_cells else 0.0
         ),
+        "structure_recovered_soft_occupied_cell_count": recovered_soft_count,
         "manual_force_free_area_m2": float(accepted.force_free_area_m2),
         "manual_force_occupied_area_m2": float(accepted.force_occupied_area_m2),
+        "override_diagnostics": [dict(item) for item in accepted.override_diagnostics],
         "accepted_matches_replay": matches_replay,
+        **boundary_shape,
     }
 
 
