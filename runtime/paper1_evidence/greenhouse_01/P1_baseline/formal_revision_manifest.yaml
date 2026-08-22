@@ -1,0 +1,44 @@
+schema: agt_paper1_formal_v25_revision/v1
+site_id: greenhouse_01
+role: V25_MAP_WORKBENCH_FORMAL_REVISION
+revision_id: greenhouse_01_map_revision_002
+revision_path: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_002
+source_bundle: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01_map_assets_v01
+
+assets:
+  generated_map_pgm:
+    path: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_002/generated/navigation_map.pgm
+    sha256: 65780d45204a0eef0daa6045539a9fb09d999b31d848904983289474a08d6c8d
+  generated_map_yaml:
+    path: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_002/generated/navigation_map.yaml
+    sha256: c358702f01904765858182858e3cae30d1e7a0aff898f0701ac8cae511593939
+  accepted_map_pgm:
+    path: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_002/accepted/navigation_map.pgm
+    sha256: 65780d45204a0eef0daa6045539a9fb09d999b31d848904983289474a08d6c8d
+  accepted_map_yaml:
+    path: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_002/accepted/navigation_map.yaml
+    sha256: c358702f01904765858182858e3cae30d1e7a0aff898f0701ac8cae511593939
+  derivation:
+    path: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_002/derivation.yaml
+    sha256: 222cedf3c74ed53580d4714881b4e84febfc07a331b707756883a2a396df5b00
+
+qa:
+  report: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01/benchmark/map_only_qa_p1/map_qa_report.json
+  report_sha256: 7a82ec76008167c0017a80ccf2e1863ca0d3e7060b466b50bae97966389093b8
+  accepted_matches_replay: true
+  unexplained_changed_cell_count: 0
+  changed_cell_count: 0
+
+binding:
+  project: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01/paper1/m154b_project
+  authority: V25_MAP_WORKBENCH
+  status: BOUND_VERIFIED
+  frame_verification: PASS
+  frame_report: /home/yangxuan/agt_navigation_v2_paper1/runtime/paper1_evidence/greenhouse_01/P1_baseline/frame_verification.json
+
+acceptance:
+  human_map_review: TBD-EVIDENCE
+  semantic_map: TBD-EVIDENCE
+  coverage_yaml: TBD-EVIDENCE
+  formal_site_snapshot: NOT_CREATED
+  method_tag: NOT_CREATED
