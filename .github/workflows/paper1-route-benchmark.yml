@@ -63,6 +63,7 @@ jobs:
           src/agt_map_workbench/test/test_navigation_override_metadata.py
           src/agt_map_workbench/test/test_resource_bundle.py
           src/agt_map_workbench/test/test_paper1_resource_bundle_integration.py
+          src/agt_map_workbench/test/test_structure_aware_navigation_workbench.py
       - name: Run map pipeline contracts
         env:
           PYTHONPATH: src/agt_map_pipeline:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
