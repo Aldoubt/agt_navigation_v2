@@ -4,56 +4,50 @@
 
 **Goal:** Turn Ground-only evidence plus validated greenhouse row/aisle structure into one deterministic formal Nav2 Generated PGM, replay validated human overrides into Accepted, and freeze a planner-independent auditable map revision with QA.
 
-**Architecture:** Keep `NavigationMapResult` as the common grid/evidence carrier. Add a pure offline structure-aware materializer that may promote only Ground-only `UNKNOWN` cells inside valid aisle geometry, while preserving Site Boundary, base `OCCUPIED`, and row structural bands as hard blockers. Separate generated materialization, validated accepted-map replay, serialization, and QA into focused modules so the Workbench can compose them without owning map logic.
+**Architecture:** Keep `NavigationMapResult` as the common grid/evidence carrier. Add a pure offline structure-aware materializer that may promote only Ground-only `UNKNOWN` cells inside valid aisle geometry, while preserving Site Boundary, base `OCCUPIED`, and row structural bands as hard blockers. Keep Generated materialization, Accepted replay, revision serialization, and QA in separate modules so the Workbench only orchestrates them.
 
-**Tech Stack:** Python 3, NumPy, SciPy, PyYAML, ROS2 Humble/ament_cmake_python, PyQt5 Workbench integration, pytest.
+**Tech Stack:** Python 3, NumPy, SciPy, PyYAML, ROS2 Humble/ament_cmake_python, PyQt5, pytest.
 
 **Spec:** `docs/superpowers/specs/2026-08-22-v25-unified-map-authoring-structure-aware-pgm-design.md`
 
 ## Global Constraints
 
 - One PCD lineage -> one AGT Map Workbench authoring workflow -> one immutable Map Revision -> one accepted Navigation Map authority -> one semantic task bound by SHA256 to that accepted map.
-- `agt_map_pipeline` remains a consumer/verifier/evidence producer; it must not create a competing formal Navigation Map.
+- `agt_map_pipeline` remains a consumer/verifier/evidence producer and must not create a competing formal Navigation Map.
 - Only Ground-only `UNKNOWN` cells may be promoted automatically by agricultural structure.
 - Ground-only `OCCUPIED` cells must never be automatically promoted to FREE.
 - Cells outside Site Boundary are formal OCCUPIED.
 - Cells inside `row_structural_band` are formal OCCUPIED.
-- No global `UNKNOWN -> FREE`, map-wide flood fill, cross-row morphology, or route-dependent PGM whitening.
-- No new automatic headland detector in this increment.
+- No global `UNKNOWN -> FREE`, map-wide flood fill, cross-row morphology, route-dependent PGM whitening, or new automatic headland detector.
 - Paper I formal manual raster modes remain `FORCE_FREE` and `FORCE_OCCUPIED`.
-- `FORCE_FREE` must be rejected outside Site Boundary and inside `row_structural_band`.
+- `FORCE_FREE` is rejected outside Site Boundary and inside `row_structural_band`.
 - Ground-only output is Evidence; automatic structure-aware output is Generated; Generated plus validated formal overrides is Accepted.
-- Existing M1.5-4B minimum revision paths `generated/navigation_map.*`, `accepted/navigation_map.*`, and `derivation.yaml` remain present.
+- Existing M1.5-4B paths `generated/navigation_map.*`, `accepted/navigation_map.*`, and `derivation.yaml` remain present.
 - Formal freeze is fail-closed and deterministic.
 
 ---
 
 ## File Structure
 
-### New focused core files
-
-- `src/agt_offline_assets/agt_offline_assets/formal_navigation_map.py` — pure Generated-map materialization and provenance masks.
-- `src/agt_offline_assets/agt_offline_assets/formal_navigation_override.py` — formal override rasterization plus Site Boundary / row-band FORCE_FREE safety checks.
-- `src/agt_offline_assets/agt_offline_assets/formal_navigation_revision.py` — Evidence/Generated/Accepted serialization into a revision payload and atomic navigation-only export helper.
-- `src/agt_offline_assets/agt_offline_assets/formal_navigation_qa.py` — planner-independent invariant, aisle occupancy, connectivity, and replay QA.
-
-### Existing files modified
-
-- `src/agt_offline_assets/agt_offline_assets/__init__.py` — export the new public interfaces.
-- `src/agt_offline_assets/CMakeLists.txt` — register focused tests.
-- `src/agt_route_benchmark/agt_route_benchmark/map_quality.py` — accept/replay both historical and new structure-aware revision kinds without changing historical behavior.
-- `src/agt_map_workbench/agt_map_workbench/navigation_preview.py` — add Generated/materialization-mask preview support without replacing Ground evidence state.
-- `src/agt_map_workbench/agt_map_workbench/paper1_workbench.py` — build and preview the structure-aware Generated map, validate overrides, run QA, and use the new revision payload writer.
-- `src/agt_map_workbench/CMakeLists.txt` — register Workbench integration tests.
-
-### New tests
-
+**Create**
+- `src/agt_offline_assets/agt_offline_assets/formal_navigation_map.py` — Generated-map materialization.
+- `src/agt_offline_assets/agt_offline_assets/formal_navigation_override.py` — safe formal override replay.
+- `src/agt_offline_assets/agt_offline_assets/formal_navigation_revision.py` — Evidence/Generated/Accepted serialization and atomic navigation-only export helper.
+- `src/agt_offline_assets/agt_offline_assets/formal_navigation_qa.py` — planner-independent QA.
 - `src/agt_offline_assets/test/test_formal_navigation_map.py`
 - `src/agt_offline_assets/test/test_formal_navigation_override.py`
 - `src/agt_offline_assets/test/test_formal_navigation_revision.py`
 - `src/agt_offline_assets/test/test_formal_navigation_qa.py`
 - `src/agt_route_benchmark/test/test_map_quality_structure_aware.py`
 - `src/agt_map_workbench/test/test_structure_aware_navigation_workbench.py`
+
+**Modify**
+- `src/agt_offline_assets/agt_offline_assets/__init__.py`
+- `src/agt_offline_assets/CMakeLists.txt`
+- `src/agt_route_benchmark/agt_route_benchmark/map_quality.py`
+- `src/agt_map_workbench/agt_map_workbench/navigation_preview.py`
+- `src/agt_map_workbench/agt_map_workbench/paper1_workbench.py`
+- `src/agt_map_workbench/CMakeLists.txt`
 
 ---
 
@@ -69,76 +63,108 @@
 - Consumes: `NavigationMapResult`, `CorridorRefinementResult`, `SiteBoundary`.
 - Produces: `FORMAL_NAVIGATION_MATERIALIZATION_SCHEMA`, `StructureAwareNavigationResult`, `materialize_structure_aware_navigation_map(...)`.
 
-- [ ] **Step 1: Write failing precedence and grid-preservation tests**
+- [ ] **Step 1: Write the failing precedence fixture and tests**
 
-Create a compact 3x6 fixture where Ground-only occupancy includes all three states and where row/aisle/Site Boundary masks overlap deliberately:
+Put these local helpers in `test_formal_navigation_map.py` so the test is self-contained:
 
 ```python
-import numpy as np
 from types import SimpleNamespace
-
-from agt_offline_assets import FREE, OCCUPIED, UNKNOWN
-from agt_offline_assets.formal_navigation_map import (
-    materialize_structure_aware_navigation_map,
+import numpy as np
+from agt_offline_assets import (
+    FREE, OCCUPIED, UNKNOWN,
+    GroundRelativeNavigationConfig,
+    NavigationMapResult,
+    SiteBoundary,
 )
 
 
-def test_materializer_only_promotes_unknown_inside_aisle():
-    navigation = make_navigation(
-        np.array([
-            [FREE, UNKNOWN, UNKNOWN, OCCUPIED, UNKNOWN, FREE],
-            [FREE, UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, FREE],
-            [FREE, FREE, FREE, FREE, FREE, FREE],
-        ], dtype=np.uint8)
+def make_navigation(occupancy):
+    occupancy = np.asarray(occupancy, dtype=np.uint8)
+    h, w = occupancy.shape
+    zeros_f = np.zeros((h, w), dtype=np.float64)
+    zeros_i = np.zeros((h, w), dtype=np.int32)
+    return NavigationMapResult(
+        resolution_m=1.0,
+        origin_x_m=0.0,
+        origin_y_m=0.0,
+        width=w,
+        height=h,
+        ground_height_m=zeros_f.copy(),
+        ground_valid=np.ones((h, w), dtype=bool),
+        point_count=np.ones((h, w), dtype=np.int32),
+        ground_support_count=np.ones((h, w), dtype=np.int32),
+        obstacle_count=zeros_i.copy(),
+        slope_deg=zeros_f.copy(),
+        step_m=zeros_f.copy(),
+        occupancy=occupancy,
+        config=GroundRelativeNavigationConfig(resolution_m=1.0),
     )
+
+
+def make_corridor(aisle, row_band):
+    return SimpleNamespace(
+        aisle_geometric_envelope=np.asarray(aisle, dtype=bool),
+        row_structural_band=np.asarray(row_band, dtype=bool),
+    )
+
+
+def full_boundary(navigation):
+    return SiteBoundary(
+        frame_id="map",
+        outer_boundary_xy=(
+            (0.0, 0.0),
+            (float(navigation.width), 0.0),
+            (float(navigation.width), float(navigation.height)),
+            (0.0, float(navigation.height)),
+        ),
+    )
+```
+
+Then test exact precedence:
+
+```python
+def test_materializer_only_promotes_unknown_inside_aisle():
+    navigation = make_navigation([
+        [FREE, UNKNOWN, UNKNOWN, OCCUPIED, UNKNOWN, FREE],
+        [FREE, UNKNOWN, UNKNOWN, UNKNOWN, UNKNOWN, FREE],
+        [FREE, FREE, FREE, FREE, FREE, FREE],
+    ])
     corridor = make_corridor(
-        aisle=np.array([
+        aisle=[
             [False, True, True, True, False, False],
             [False, True, True, True, True, False],
             [False, False, False, False, False, False],
-        ]),
-        row_band=np.array([
+        ],
+        row_band=[
             [False, False, True, False, False, False],
             [False, False, False, False, True, False],
             [False, False, False, False, False, False],
-        ]),
+        ],
     )
     result = materialize_structure_aware_navigation_map(
-        navigation,
-        corridor,
-        full_site_boundary(navigation),
+        navigation, corridor, full_boundary(navigation)
     )
-
-    assert result.occupancy[0, 1] == FREE
+    occupancy = result.navigation.occupancy
+    assert occupancy[0, 1] == FREE
     assert result.structure_inferred_free_mask[0, 1]
-    assert result.occupancy[0, 2] == OCCUPIED  # row band wins
-    assert result.occupancy[0, 3] == OCCUPIED  # base occupied is never freed
-    assert result.occupancy[0, 4] == UNKNOWN   # outside aisle stays unknown
+    assert occupancy[0, 2] == OCCUPIED
+    assert occupancy[0, 3] == OCCUPIED
+    assert occupancy[0, 4] == UNKNOWN
+    assert result.navigation.resolution_m == navigation.resolution_m
+    assert result.navigation.origin_x_m == navigation.origin_x_m
+    assert result.navigation.origin_y_m == navigation.origin_y_m
 ```
 
-Also assert:
-
-```python
-assert result.navigation.resolution_m == navigation.resolution_m
-assert result.navigation.origin_x_m == navigation.origin_x_m
-assert result.navigation.origin_y_m == navigation.origin_y_m
-assert result.navigation.occupancy.shape == navigation.occupancy.shape
-```
-
-- [ ] **Step 2: Run the focused test and verify it fails before implementation**
-
-Run:
+- [ ] **Step 2: Run the test and verify import failure**
 
 ```bash
 PYTHONPATH=src/agt_offline_assets \
 python3 -m pytest -q src/agt_offline_assets/test/test_formal_navigation_map.py
 ```
 
-Expected: import failure for `agt_offline_assets.formal_navigation_map`.
+Expected: module import failure.
 
-- [ ] **Step 3: Implement the result contract and deterministic precedence**
-
-Use this public shape:
+- [ ] **Step 3: Implement the materialization contract**
 
 ```python
 FORMAL_NAVIGATION_MATERIALIZATION_SCHEMA = "agt_structure_aware_navigation_map/v1"
@@ -165,16 +191,12 @@ class StructureAwareNavigationResult:
         }
 ```
 
-Implement:
+Implement precedence exactly as:
 
 ```python
 def materialize_structure_aware_navigation_map(
-    navigation: NavigationMapResult,
-    corridor: CorridorRefinementResult,
-    site_boundary: SiteBoundary,
-    *,
-    frame_id: str = "map",
-) -> StructureAwareNavigationResult:
+    navigation, corridor, site_boundary, *, frame_id="map"
+):
     site_boundary.validate(expected_frame_id=frame_id)
     shape = navigation.occupancy.shape
     aisle = np.asarray(corridor.aisle_geometric_envelope, dtype=bool)
@@ -182,7 +204,9 @@ def materialize_structure_aware_navigation_map(
     if aisle.shape != shape or row_band.shape != shape:
         raise ValueError("formal navigation evidence grid shape mismatch")
 
-    inside = rasterize_site_boundary(site_boundary, navigation, expected_frame_id=frame_id)
+    inside = rasterize_site_boundary(
+        site_boundary, navigation, expected_frame_id=frame_id
+    )
     base_free = navigation.occupancy == FREE
     base_occupied = navigation.occupancy == OCCUPIED
     base_unknown = navigation.occupancy == UNKNOWN
@@ -193,52 +217,24 @@ def materialize_structure_aware_navigation_map(
     occupancy[base_free] = FREE
     occupancy[inferred] = FREE
     occupancy[base_occupied | row_band | outside] = OCCUPIED
-
     generated = NavigationMapResult(**{**navigation.__dict__, "occupancy": occupancy})
-    return StructureAwareNavigationResult(
-        navigation=generated,
-        observed_free_mask=base_free & ~row_band & inside,
-        structure_inferred_free_mask=inferred,
-        base_hard_occupied_mask=base_occupied,
-        row_structural_blocked_mask=row_band,
-        site_boundary_blocked_mask=outside,
-        unresolved_unknown_mask=occupancy == UNKNOWN,
-    )
 ```
 
-Do not add a Ground-confidence requirement to `inferred`; the corridor geometry already supplies the structural gate, and the purpose of this layer is to repair missing Ground evidence without freeing base OCCUPIED.
+Return all masks in `StructureAwareNavigationResult`. Do not add Ground-confidence gating to `inferred`.
 
-- [ ] **Step 4: Add edge-case tests**
+- [ ] **Step 4: Add hard-boundary edge tests**
 
-Add tests that assert:
+Add explicit tests for outside-boundary FREE becoming OCCUPIED, row-band Ground FREE becoming OCCUPIED, base OCCUPIED staying OCCUPIED, non-aisle UNKNOWN staying UNKNOWN, mismatched array shapes, and wrong Site Boundary frame.
 
-```python
-# outside Site Boundary is OCCUPIED even if Ground says FREE
-assert result.occupancy[outside_cell] == OCCUPIED
+- [ ] **Step 5: Export API and register test**
 
-# row band is OCCUPIED even if Ground says FREE
-assert result.occupancy[row_cell] == OCCUPIED
-
-# base OCCUPIED inside aisle stays OCCUPIED
-assert result.occupancy[obstacle_cell] == OCCUPIED
-
-# UNKNOWN inside non-aisle stays UNKNOWN
-assert result.occupancy[unknown_non_aisle] == UNKNOWN
-```
-
-Also add failures for mismatched array shape and wrong Site Boundary frame.
-
-- [ ] **Step 5: Export the API and register the pytest target**
-
-Add the imports and `__all__` entries in `agt_offline_assets/__init__.py`, then add:
+Add imports/`__all__` entries and:
 
 ```cmake
 ament_add_pytest_test(test_formal_navigation_map test/test_formal_navigation_map.py)
 ```
 
-- [ ] **Step 6: Run focused and nearby regression tests**
-
-Run:
+- [ ] **Step 6: Run focused regression**
 
 ```bash
 PYTHONPATH=src/agt_offline_assets \
@@ -250,11 +246,10 @@ python3 -m pytest -q \
 
 Expected: PASS.
 
-- [ ] **Step 7: Commit Task 1**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add \
-  src/agt_offline_assets/agt_offline_assets/formal_navigation_map.py \
+git add src/agt_offline_assets/agt_offline_assets/formal_navigation_map.py \
   src/agt_offline_assets/agt_offline_assets/__init__.py \
   src/agt_offline_assets/test/test_formal_navigation_map.py \
   src/agt_offline_assets/CMakeLists.txt
@@ -272,48 +267,31 @@ git commit -m "feat(map): materialize structure-aware navigation grid"
 - Modify: `src/agt_offline_assets/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: Generated `NavigationMapResult`, `CorridorRefinementResult.row_structural_band`, `SiteBoundary`, normalized formal override mappings.
+- Consumes: Generated `NavigationMapResult`, `CorridorRefinementResult`, `SiteBoundary`, normalized override mappings.
 - Produces: `FormalOverrideReplayResult`, `replay_formal_navigation_overrides(...)`.
 
 - [ ] **Step 1: Write failing FORCE_FREE safety tests**
 
-Use three polygons: one valid aisle correction, one crossing Site Boundary, and one crossing a row structural band.
+Reuse Task 1 fixture helpers by copying them into this test file. Create one valid in-boundary polygon, one polygon crossing the boundary, and one crossing `row_structural_band`. Assert boundary/row conflicts raise these exact codes:
 
 ```python
-def test_force_free_cannot_punch_through_site_boundary():
-    with pytest.raises(ValueError, match="FORCE_FREE_SITE_BOUNDARY_CONFLICT"):
-        replay_formal_navigation_overrides(
-            generated,
-            corridor,
-            boundary,
-            [force_free_polygon_crossing_boundary],
-        )
+with pytest.raises(ValueError, match="FORCE_FREE_SITE_BOUNDARY_CONFLICT"):
+    replay_formal_navigation_overrides(...)
 
-
-def test_force_free_cannot_punch_through_row_band():
-    with pytest.raises(ValueError, match="FORCE_FREE_ROW_STRUCTURAL_CONFLICT"):
-        replay_formal_navigation_overrides(
-            generated,
-            corridor,
-            boundary,
-            [force_free_polygon_crossing_row],
-        )
+with pytest.raises(ValueError, match="FORCE_FREE_ROW_STRUCTURAL_CONFLICT"):
+    replay_formal_navigation_overrides(...)
 ```
 
-Also assert `force_occupied` remains allowed within Site Boundary and wins over FREE.
+Also assert `force_occupied` may change FREE to OCCUPIED.
 
-- [ ] **Step 2: Run the new tests and verify failure**
+- [ ] **Step 2: Run and verify import failure**
 
 ```bash
 PYTHONPATH=src/agt_offline_assets \
 python3 -m pytest -q src/agt_offline_assets/test/test_formal_navigation_override.py
 ```
 
-Expected: import failure for the new module.
-
-- [ ] **Step 3: Implement ordered replay using existing world-coordinate rasterization**
-
-Define:
+- [ ] **Step 3: Implement ordered replay**
 
 ```python
 @dataclass(frozen=True)
@@ -325,57 +303,16 @@ class FormalOverrideReplayResult:
     force_occupied_area_m2: float
 ```
 
-Implement one-record-at-a-time ordered replay so change counts reflect actual mutations:
+For each record call existing `apply_navigation_overrides(current, [record])`; compare the candidate array to `current.occupancy`; reject `force_free` changes intersecting `~inside_boundary` or `row_structural_band`; then create the next immutable `NavigationMapResult`. Reject any mode outside `{force_free, force_occupied}` before mutation.
 
-```python
-def replay_formal_navigation_overrides(
-    generated: NavigationMapResult,
-    corridor: CorridorRefinementResult,
-    site_boundary: SiteBoundary,
-    overrides: Iterable[Mapping[str, object]],
-    *,
-    frame_id: str = "map",
-) -> FormalOverrideReplayResult:
-    site_boundary.validate(expected_frame_id=frame_id)
-    inside = rasterize_site_boundary(site_boundary, generated, expected_frame_id=frame_id)
-    row_band = np.asarray(corridor.row_structural_band, dtype=bool)
-    current = generated
-    free_changed = 0
-    occupied_changed = 0
-
-    for record in overrides:
-        mode = str(record.get("mode", "")).strip().lower()
-        if mode not in {"force_free", "force_occupied"}:
-            raise ValueError("formal override mode must be force_free or force_occupied")
-        candidate = apply_navigation_overrides(current, [record])
-        changed = candidate != current.occupancy
-        if mode == "force_free":
-            if np.any(changed & ~inside):
-                raise ValueError("FORCE_FREE_SITE_BOUNDARY_CONFLICT")
-            if np.any(changed & row_band):
-                raise ValueError("FORCE_FREE_ROW_STRUCTURAL_CONFLICT")
-            free_changed += int(np.count_nonzero(changed))
-        else:
-            occupied_changed += int(np.count_nonzero(changed))
-        current = NavigationMapResult(**{**current.__dict__, "occupancy": candidate})
-```
-
-Compute areas from `resolution_m ** 2` and return the final Accepted result.
-
-- [ ] **Step 4: Add deterministic-order and no-op tests**
-
-Verify:
+- [ ] **Step 4: Add deterministic-order/no-op tests**
 
 ```python
 assert first.navigation.occupancy.tobytes() == second.navigation.occupancy.tobytes()
 assert no_op.force_free_changed_cell_count == 0
 ```
 
-Also test that an unsupported mode fails before mutation.
-
-- [ ] **Step 5: Export/register and run regression**
-
-Run:
+- [ ] **Step 5: Register/run regression**
 
 ```bash
 PYTHONPATH=src/agt_offline_assets \
@@ -384,13 +321,10 @@ python3 -m pytest -q \
   src/agt_offline_assets/test/test_navigation_map_freeze_export.py
 ```
 
-Expected: PASS; historical freeze tests remain unchanged.
-
-- [ ] **Step 6: Commit Task 2**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add \
-  src/agt_offline_assets/agt_offline_assets/formal_navigation_override.py \
+git add src/agt_offline_assets/agt_offline_assets/formal_navigation_override.py \
   src/agt_offline_assets/agt_offline_assets/__init__.py \
   src/agt_offline_assets/test/test_formal_navigation_override.py \
   src/agt_offline_assets/CMakeLists.txt
@@ -399,7 +333,7 @@ git commit -m "feat(map): enforce safe formal override replay"
 
 ---
 
-### Task 3: Evidence / Generated / Accepted Revision Payload Writer
+### Task 3: Evidence / Generated / Accepted Revision Payload
 
 **Files:**
 - Create: `src/agt_offline_assets/agt_offline_assets/formal_navigation_revision.py`
@@ -408,94 +342,79 @@ git commit -m "feat(map): enforce safe formal override replay"
 - Modify: `src/agt_offline_assets/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: Ground Evidence `NavigationMapResult`, `StructureAwareNavigationResult`, `FormalOverrideReplayResult`, overrides, source identity.
+- Consumes: Ground Evidence `NavigationMapResult`, `StructureAwareNavigationResult`, `FormalOverrideReplayResult`, ordered overrides, source identity.
 - Produces: `FORMAL_NAVIGATION_REVISION_SCHEMA`, `write_structure_aware_navigation_payload(...)`, `export_structure_aware_navigation_revision(...)`.
-- Later Plan 2 will call `write_structure_aware_navigation_payload()` inside a larger unified staging transaction before semantic files are written.
+- Plan 2 will call the payload writer inside a larger unified staging transaction.
 
-- [ ] **Step 1: Write the failing directory-contract test**
+- [ ] **Step 1: Write the failing file-contract test**
 
-```python
-def test_payload_writes_evidence_generated_and_accepted(tmp_path):
-    root = tmp_path / "revision_stage"
-    root.mkdir()
-    write_structure_aware_navigation_payload(
-        root,
-        ground_evidence=ground,
-        materialized=generated,
-        accepted=accepted,
-        overrides=[override],
-        source_asset="processed.pcd",
-        frame_id="map",
-    )
+Create a Task 1 generated fixture and Task 2 replay fixture, create `root`, call the new payload writer, and assert these files exist:
 
-    expected = {
-        "evidence/ground_only_navigation_map.pgm",
-        "evidence/ground_only_navigation_map.yaml",
-        "evidence/ground_height.npy",
-        "evidence/slope_deg.npy",
-        "evidence/step_m.npy",
-        "evidence/obstacle_count.npy",
-        "evidence/ground_support_count.npy",
-        "generated/navigation_map.pgm",
-        "generated/navigation_map.yaml",
-        "accepted/navigation_map.pgm",
-        "accepted/navigation_map.yaml",
-        "derivation.yaml",
-    }
-    assert expected.issubset(
-        {path.relative_to(root).as_posix() for path in root.rglob("*") if path.is_file()}
-    )
+```text
+evidence/ground_only_navigation_map.pgm
+evidence/ground_only_navigation_map.yaml
+evidence/ground_height.npy
+evidence/slope_deg.npy
+evidence/step_m.npy
+evidence/obstacle_count.npy
+evidence/ground_support_count.npy
+evidence/formal_materialization_masks.npz
+generated/navigation_map.pgm
+generated/navigation_map.yaml
+accepted/navigation_map.pgm
+accepted/navigation_map.yaml
+derivation.yaml
 ```
 
-- [ ] **Step 2: Run and verify failure**
+- [ ] **Step 2: Run and verify import failure**
 
 ```bash
 PYTHONPATH=src/agt_offline_assets \
 python3 -m pytest -q src/agt_offline_assets/test/test_formal_navigation_revision.py
 ```
 
-Expected: import failure.
+- [ ] **Step 3: Implement payload serialization with existing Nav2 writer**
 
-- [ ] **Step 3: Implement the payload writer by reusing the existing Nav2 serializer**
+Reuse `write_navigation_map_files` for all three raster products. Save materialization masks with exact keys:
 
-Do not duplicate PGM/YAML encoding. Import and call `write_navigation_map_files` for Evidence, Generated, and Accepted.
+```python
+np.savez_compressed(
+    root / "evidence/formal_materialization_masks.npz",
+    observed_free_mask=materialized.observed_free_mask.astype(np.uint8),
+    structure_inferred_free_mask=materialized.structure_inferred_free_mask.astype(np.uint8),
+    base_hard_occupied_mask=materialized.base_hard_occupied_mask.astype(np.uint8),
+    row_structural_blocked_mask=materialized.row_structural_blocked_mask.astype(np.uint8),
+    site_boundary_blocked_mask=materialized.site_boundary_blocked_mask.astype(np.uint8),
+    unresolved_unknown_mask=materialized.unresolved_unknown_mask.astype(np.uint8),
+)
+```
 
-Use a derivation record compatible with the restored authority binder while distinguishing the new pipeline:
+Use:
 
 ```python
 FORMAL_NAVIGATION_REVISION_SCHEMA = "agt_structure_aware_navigation_revision/v1"
-
-record = {
-    "schema": "agt_ground_relative_navigation_map/v1",
-    "revision_kind": "structure_aware_generated_plus_accepted_override_revision",
-    "materialization_schema": FORMAL_NAVIGATION_MATERIALIZATION_SCHEMA,
-    "formal_revision_schema": FORMAL_NAVIGATION_REVISION_SCHEMA,
-    "frame_id": frame_id,
-    "source_asset": source_asset,
-    "grid": {...},
-    "counts": {
-        "evidence": ground_evidence.counts(),
-        "generated": materialized.navigation.counts(),
-        "accepted": accepted.navigation.counts(),
-        "materialization": materialized.counts(),
-    },
-    "manual_override_metrics": {...},
-    "overrides": list(overrides),
-    "outputs": {...sha256 records...},
-}
 ```
 
-Preserve top-level `schema = agt_ground_relative_navigation_map/v1` because historical map-quality tooling already recognizes it; use `formal_revision_schema` to identify the extended contract.
+Keep `derivation.yaml` top-level schema compatible with existing audit tooling:
 
-- [ ] **Step 4: Implement an atomic navigation-only export helper**
+```yaml
+schema: agt_ground_relative_navigation_map/v1
+revision_kind: structure_aware_generated_plus_accepted_override_revision
+formal_revision_schema: agt_structure_aware_navigation_revision/v1
+materialization_schema: agt_structure_aware_navigation_map/v1
+```
 
-`export_structure_aware_navigation_revision(destination, ...)` must create a hidden sibling staging directory, call `write_structure_aware_navigation_payload()`, and publish with `os.replace()` only after all writers and hashes succeed. Existing destination must raise `FileExistsError`.
+Record grid, Evidence/Generated/Accepted counts, materialization counts, override metrics, ordered override records, and SHA256 identities for every formal raster plus the mask NPZ.
 
-- [ ] **Step 5: Add byte-determinism and rollback tests**
+- [ ] **Step 4: Implement atomic navigation-only export helper**
 
-Verify two independent payload directories have byte-identical deterministic files except no timestamp is written in `derivation.yaml`. Inject a writer failure through a private test hook or monkeypatch `write_navigation_map_files` and assert the final destination does not exist.
+`export_structure_aware_navigation_revision(destination, ...)` creates a hidden sibling staging directory, calls the payload writer, and publishes with `os.replace()` only after successful writes/hashes. Existing destination raises `FileExistsError`.
 
-- [ ] **Step 6: Export/register and run tests**
+- [ ] **Step 5: Add determinism/rollback tests**
+
+Two payload roots with identical inputs must have byte-identical authority files. Monkeypatch a serializer to raise and assert the final destination and staging directory are absent.
+
+- [ ] **Step 6: Register/run tests**
 
 ```bash
 PYTHONPATH=src/agt_offline_assets \
@@ -504,13 +423,10 @@ python3 -m pytest -q \
   src/agt_offline_assets/test/test_navigation_map_freeze_export.py
 ```
 
-Expected: PASS.
-
-- [ ] **Step 7: Commit Task 3**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add \
-  src/agt_offline_assets/agt_offline_assets/formal_navigation_revision.py \
+git add src/agt_offline_assets/agt_offline_assets/formal_navigation_revision.py \
   src/agt_offline_assets/agt_offline_assets/__init__.py \
   src/agt_offline_assets/test/test_formal_navigation_revision.py \
   src/agt_offline_assets/CMakeLists.txt
@@ -528,79 +444,87 @@ git commit -m "feat(map): freeze structure-aware navigation revisions"
 - Modify: `src/agt_offline_assets/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: Generated/Accepted navigation results, materialization masks, corridor, structure direction, Site Boundary, replay result.
-- Produces: `FORMAL_NAVIGATION_QA_SCHEMA`, `evaluate_formal_navigation_qa(...) -> dict[str, object]`, `write_formal_navigation_qa(...) -> Path`.
+- Consumes: Ground Evidence, `StructureAwareNavigationResult`, `FormalOverrideReplayResult`, ordered overrides, `NavigationStructureResult`, `CorridorRefinementResult`, `SiteBoundary`.
+- Produces: `FORMAL_NAVIGATION_QA_SCHEMA`, `evaluate_formal_navigation_qa(...)`, `write_formal_navigation_qa(...)`.
 
-- [ ] **Step 1: Write failing hard-invariant tests**
+- [ ] **Step 1: Write hard-invariant tests**
 
-Create fixtures that deliberately leak one FREE cell outside Site Boundary and one FREE cell into the row band:
-
-```python
-def test_qa_fails_free_outside_site_boundary():
-    report = evaluate_formal_navigation_qa(...)
-    assert report["outside_site_boundary_free_count"] == 1
-    assert report["status"] == "FAIL"
-    assert "OUTSIDE_SITE_BOUNDARY_FREE" in report["hard_failures"]
-
-
-def test_qa_fails_row_band_free_leak():
-    report = evaluate_formal_navigation_qa(...)
-    assert report["row_structural_band_free_leak_count"] == 1
-    assert "ROW_STRUCTURAL_FREE_LEAK" in report["hard_failures"]
-```
-
-- [ ] **Step 2: Write aisle statistics/connectivity tests**
-
-For a synthetic straight aisle, assert:
+Create a valid synthetic fixture, then copy Accepted occupancy and inject one FREE cell outside Site Boundary and one inside row band in separate tests. Assert:
 
 ```python
-assert aisle["free_fraction"] == pytest.approx(0.8)
-assert aisle["unknown_fraction"] == pytest.approx(0.2)
-assert aisle["occupied_conflict_fraction"] == pytest.approx(0.0)
-assert aisle["grid_connected"] is True
+assert report["status"] == "FAIL"
+assert "OUTSIDE_SITE_BOUNDARY_FREE" in report["hard_failures"]
+assert "ROW_STRUCTURAL_FREE_LEAK" in report["hard_failures"]
 ```
 
-Break the center with an OCCUPIED cell and assert `grid_connected is False`.
+- [ ] **Step 2: Write replay verification test**
 
-Connectivity must be 8-connected and restricted to FREE cells inside the owned aisle geometry.
+Pass the exact ordered overrides to QA. QA must call `replay_formal_navigation_overrides(materialized.navigation, corridor, site_boundary, overrides)` again and compare the recomputed occupancy with `accepted.navigation.occupancy`:
 
-- [ ] **Step 3: Run and verify failure**
+```python
+assert report["accepted_matches_replay"] is True
+```
+
+Tamper one Accepted cell and assert `ACCEPTED_REPLAY_MISMATCH` is a hard failure.
+
+- [ ] **Step 3: Write per-aisle fraction/connectivity test**
+
+Use one accepted synthetic aisle geometry with 8 FREE and 2 UNKNOWN cells. Assert `free_fraction=0.8`, `unknown_fraction=0.2`, `occupied_conflict_fraction=0.0`, and 8-connected FREE connectivity is true. Break the corridor with OCCUPIED cells and assert connectivity false.
+
+- [ ] **Step 4: Run and verify import failure**
 
 ```bash
 PYTHONPATH=src/agt_offline_assets \
 python3 -m pytest -q src/agt_offline_assets/test/test_formal_navigation_qa.py
 ```
 
-Expected: import failure.
+- [ ] **Step 5: Implement deterministic QA report**
 
-- [ ] **Step 4: Implement QA metrics and hard-failure status**
-
-The report must include exactly these top-level metrics:
+The public signature is:
 
 ```python
-{
-    "schema": "agt_formal_navigation_qa/v1",
-    "status": "PASS" | "FAIL",
-    "hard_failures": [...],
-    "outside_site_boundary_free_count": int,
-    "row_structural_band_free_leak_count": int,
-    "accepted_aisle_count": int,
-    "aisles": [...],
-    "map_unknown_fraction": float,
-    "structure_inferred_free_fraction": float,
-    "manual_force_free_area_m2": float,
-    "manual_force_occupied_area_m2": float,
-    "accepted_matches_replay": bool,
-}
+def evaluate_formal_navigation_qa(
+    *,
+    ground_evidence: NavigationMapResult,
+    materialized: StructureAwareNavigationResult,
+    accepted: FormalOverrideReplayResult,
+    overrides: Iterable[Mapping[str, object]],
+    structure: NavigationStructureResult,
+    corridor: CorridorRefinementResult,
+    site_boundary: SiteBoundary,
+) -> dict[str, object]:
+    ...
 ```
 
-Build per-aisle ownership masks from each accepted `AislePairDiagnostic` using the same row-direction coordinate system used by `navigation_corridor.py`. Do not use planner paths as QA truth.
+Top-level keys:
 
-- [ ] **Step 5: Implement deterministic JSON serialization**
+```text
+schema
+status
+hard_failures
+outside_site_boundary_free_count
+row_structural_band_free_leak_count
+accepted_aisle_count
+aisles
+map_unknown_fraction
+structure_inferred_free_fraction
+manual_force_free_area_m2
+manual_force_occupied_area_m2
+accepted_matches_replay
+```
 
-`write_formal_navigation_qa(report, path)` writes `json.dumps(..., indent=2, sort_keys=True) + "\n"` and creates the parent directory.
+Per-aisle masks are built from accepted `AislePairDiagnostic` row/boundary intervals in the same row-direction coordinate system as `navigation_corridor.py`. Connectivity is 8-connected and restricted to FREE cells inside that owned geometry.
 
-- [ ] **Step 6: Export/register and run focused tests**
+- [ ] **Step 6: Implement deterministic JSON writer and register tests**
+
+```python
+path.write_text(
+    json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+    encoding="utf-8",
+)
+```
+
+Run:
 
 ```bash
 PYTHONPATH=src/agt_offline_assets \
@@ -610,13 +534,10 @@ python3 -m pytest -q \
   src/agt_offline_assets/test/test_formal_navigation_override.py
 ```
 
-Expected: PASS.
-
-- [ ] **Step 7: Commit Task 4**
+- [ ] **Step 7: Commit**
 
 ```bash
-git add \
-  src/agt_offline_assets/agt_offline_assets/formal_navigation_qa.py \
+git add src/agt_offline_assets/agt_offline_assets/formal_navigation_qa.py \
   src/agt_offline_assets/agt_offline_assets/__init__.py \
   src/agt_offline_assets/test/test_formal_navigation_qa.py \
   src/agt_offline_assets/CMakeLists.txt
@@ -625,19 +546,17 @@ git commit -m "feat(map): add planner-independent formal map QA"
 
 ---
 
-### Task 5: Preserve Historical Map-Quality Replay While Accepting the New Revision Kind
+### Task 5: Keep Historical Map-Quality Replay Compatible
 
 **Files:**
 - Modify: `src/agt_route_benchmark/agt_route_benchmark/map_quality.py`
 - Create: `src/agt_route_benchmark/test/test_map_quality_structure_aware.py`
 
 **Interfaces:**
-- Consumes: historical `generated_plus_accepted_override_revision` and new `structure_aware_generated_plus_accepted_override_revision` derivations.
-- Produces: unchanged public `audit_map_revision(...)` / `write_map_quality_evidence(...)` behavior for both revision kinds.
+- Consumes both revision kinds.
+- Produces unchanged `audit_map_revision(...)` and `write_map_quality_evidence(...)` behavior.
 
-- [ ] **Step 1: Write a failing new-revision replay test**
-
-Serialize a tiny new-format revision through Task 3, then:
+- [ ] **Step 1: Write a new-revision replay test using Task 3 exporter**
 
 ```python
 report = audit_map_revision(
@@ -649,7 +568,7 @@ assert report["accepted_matches_replay"] is True
 assert report["unexplained_changed_cell_count"] == 0
 ```
 
-- [ ] **Step 2: Run and verify the current strict revision-kind check fails**
+- [ ] **Step 2: Verify current strict kind check fails**
 
 ```bash
 MPLBACKEND=Agg \
@@ -657,11 +576,7 @@ PYTHONPATH=src/agt_route_benchmark:src/agt_offline_assets \
 python3 -m pytest -q src/agt_route_benchmark/test/test_map_quality_structure_aware.py
 ```
 
-Expected: failure saying the derivation is not a generated/accepted freeze revision.
-
-- [ ] **Step 3: Broaden only the allowed revision-kind set**
-
-Replace the single-value comparison with:
+- [ ] **Step 3: Broaden only revision-kind acceptance**
 
 ```python
 _ALLOWED_REVISION_KINDS = {
@@ -670,9 +585,9 @@ _ALLOWED_REVISION_KINDS = {
 }
 ```
 
-Do not weaken schema, frame, metadata, or replay checks.
+Do not weaken schema/frame/override metadata/replay checks.
 
-- [ ] **Step 4: Run historical and new map-quality tests**
+- [ ] **Step 4: Run historical + new tests**
 
 ```bash
 MPLBACKEND=Agg \
@@ -683,20 +598,17 @@ python3 -m pytest -q \
   src/agt_route_benchmark/test/test_map_quality_structure_aware.py
 ```
 
-Expected: PASS.
-
-- [ ] **Step 5: Commit Task 5**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add \
-  src/agt_route_benchmark/agt_route_benchmark/map_quality.py \
+git add src/agt_route_benchmark/agt_route_benchmark/map_quality.py \
   src/agt_route_benchmark/test/test_map_quality_structure_aware.py
 git commit -m "fix(benchmark): audit structure-aware map revisions"
 ```
 
 ---
 
-### Task 6: Wire Generated PGM Preview and Formal Export into Paper I Workbench
+### Task 6: Wire Generated Preview and Formal Export into Paper I Workbench
 
 **Files:**
 - Modify: `src/agt_map_workbench/agt_map_workbench/navigation_preview.py`
@@ -705,23 +617,22 @@ git commit -m "fix(benchmark): audit structure-aware map revisions"
 - Modify: `src/agt_map_workbench/CMakeLists.txt`
 
 **Interfaces:**
-- Consumes: Task 1 materializer, Task 2 replay, Task 3 payload writer, Task 4 QA.
-- Produces Workbench state: `_formal_materialization`, `_formal_accepted_result`, `_formal_navigation_qa`; explicit `生成 Structure-Aware 正式地图预览` action; formal export no longer starts from `_navigation_base_result` alone.
+- Consumes Tasks 1-4.
+- Produces `_formal_materialization`, `_formal_accepted_result`, `_formal_navigation_qa`, explicit Generated preview, and navigation-only structure-aware export pending Plan 2 unified freeze.
 
-- [ ] **Step 1: Write a failing Workbench-state test**
+- [ ] **Step 1: Write failing Workbench-state test**
 
-Instantiate `Paper1MapWorkbenchWindow` offscreen and inject minimal synthetic navigation/structure/corridor/site-boundary state. Call the new pure-ish method `_build_formal_navigation_state()` and assert:
+Offscreen instantiate `Paper1MapWorkbenchWindow`, inject synthetic `_navigation_base_result`, `_navigation_structure_result`, `_corridor_refinement_result`, and `_site_boundary`, then call `_build_formal_navigation_state()` and assert:
 
 ```python
 assert window._formal_materialization is not None
 assert window._formal_accepted_result is not None
 assert window._formal_navigation_qa["status"] == "PASS"
-assert window._formal_materialization.navigation.occupancy[aisle_unknown_cell] == FREE
 ```
 
-Also assert missing Site Boundary or missing corridor produces a user-facing reason and no formal state.
+Missing Site Boundary or corridor must leave formal state unset with a non-empty `_formal_last_error`.
 
-- [ ] **Step 2: Run and verify failure**
+- [ ] **Step 2: Run and verify missing method**
 
 ```bash
 QT_QPA_PLATFORM=offscreen \
@@ -729,11 +640,9 @@ PYTHONPATH=src/agt_map_workbench:src/agt_offline_assets:src/agt_ui_bridge:src/ag
 python3 -m pytest -q src/agt_map_workbench/test/test_structure_aware_navigation_workbench.py
 ```
 
-Expected: missing `_build_formal_navigation_state`.
+- [ ] **Step 3: Add formal-state members/invalidation**
 
-- [ ] **Step 3: Add explicit formal-state members and invalidation rules**
-
-In `Paper1MapWorkbenchWindow.__init__` initialize:
+Initialize:
 
 ```python
 self._formal_materialization = None
@@ -742,11 +651,9 @@ self._formal_navigation_qa = None
 self._formal_last_error = ""
 ```
 
-Clear them whenever Ground map, structure/corridor, Site Boundary, or formal overrides change. Do not mutate `_navigation_base_result`, `_navigation_result`, or the V25-12F candidate state.
+Clear them whenever Ground result, corridor, Site Boundary, or formal override list changes. Do not replace `_navigation_result` or V25-12F state.
 
-- [ ] **Step 4: Add the formal map build method**
-
-The method must perform this exact order:
+- [ ] **Step 4: Implement exact build sequence**
 
 ```python
 materialized = materialize_structure_aware_navigation_map(
@@ -765,17 +672,16 @@ qa = evaluate_formal_navigation_qa(
     ground_evidence=self._navigation_base_result,
     materialized=materialized,
     accepted=replay,
+    overrides=overrides,
     structure=self._navigation_structure_result,
     corridor=self._corridor_refinement_result,
     site_boundary=self._site_boundary,
 )
 ```
 
-Store all three only after every call succeeds.
+- [ ] **Step 5: Add preview modes**
 
-- [ ] **Step 5: Add Generated preview layers without replacing Ground evidence**
-
-Extend `navigation_preview.py` with mask rendering labels that accept Task 1 masks. Add Workbench combo entries for:
+Add these combo entries and render with existing `NavigationPreviewItem.set_result` / `set_mask`:
 
 ```text
 正式 Generated PGM
@@ -785,17 +691,13 @@ Site Boundary Block
 Unresolved UNKNOWN
 ```
 
-Use `NavigationPreviewItem.set_result(materialized.navigation, "final")` for the Generated raster and `set_mask()` for diagnostic masks.
+Ground-only and existing structure layers remain available.
 
-- [ ] **Step 6: Change `_export_navigation_map()` to export the structure-aware payload**
+- [ ] **Step 6: Change `_export_navigation_map()` to Task 3 exporter**
 
-Before opening the destination dialog, build formal state and reject export if QA status is FAIL. Replace the call to historical `write_navigation_map_freeze_bundle(self._navigation_base_result, ...)` with `export_structure_aware_navigation_revision(...)` using Ground Evidence, materialization, accepted replay and the validated overrides.
+Build formal state first and reject export when QA status is FAIL. Export Ground Evidence + Generated + Accepted + derivation through `export_structure_aware_navigation_revision(...)`.
 
-Keep the existing immutable revision name behavior and the user message that planner-independent QA is required.
-
-- [ ] **Step 7: Register and run Workbench regression tests**
-
-Add:
+- [ ] **Step 7: Register/run Workbench tests**
 
 ```cmake
 ament_add_pytest_test(
@@ -803,8 +705,6 @@ ament_add_pytest_test(
   test/test_structure_aware_navigation_workbench.py
 )
 ```
-
-Run:
 
 ```bash
 QT_QPA_PLATFORM=offscreen \
@@ -815,13 +715,10 @@ python3 -m pytest -q \
   src/agt_map_workbench/test/test_structure_aware_navigation_workbench.py
 ```
 
-Expected: PASS.
-
-- [ ] **Step 8: Commit Task 6**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add \
-  src/agt_map_workbench/agt_map_workbench/navigation_preview.py \
+git add src/agt_map_workbench/agt_map_workbench/navigation_preview.py \
   src/agt_map_workbench/agt_map_workbench/paper1_workbench.py \
   src/agt_map_workbench/test/test_structure_aware_navigation_workbench.py \
   src/agt_map_workbench/CMakeLists.txt
@@ -830,25 +727,22 @@ git commit -m "feat(workbench): preview and freeze structure-aware PGM"
 
 ---
 
-### Task 7: Full Software Gate and Real-Map Acceptance Checkpoint
+### Task 7: Software Gate and Real Greenhouse Checkpoint
 
 **Files:**
-- Modify only if a failure identifies a concrete defect in Tasks 1-6.
-- Evidence output on target machine: `runtime/maps/greenhouse_01/derivation/<new_revision>/...`
+- Modify only if a failing gate identifies a concrete defect.
 
 **Interfaces:**
-- Consumes all Task 1-6 interfaces.
-- Produces a verified checkpoint that Plan 2 may build on; this task does not start semantic-GUI work until the map core is green.
+- Consumes Tasks 1-6.
+- Produces the verified map-core checkpoint required before Plan 2.
 
-- [ ] **Step 1: Run offline-assets tests**
+- [ ] **Step 1: Run all offline-assets tests**
 
 ```bash
 source /opt/ros/humble/setup.bash
 PYTHONPATH=src/agt_offline_assets \
 python3 -m pytest -q src/agt_offline_assets/test
 ```
-
-Expected: PASS.
 
 - [ ] **Step 2: Run map-quality tests**
 
@@ -861,8 +755,6 @@ python3 -m pytest -q \
   src/agt_route_benchmark/test/test_map_quality_structure_aware.py
 ```
 
-Expected: PASS.
-
 - [ ] **Step 3: Run Workbench tests**
 
 ```bash
@@ -870,8 +762,6 @@ QT_QPA_PLATFORM=offscreen \
 PYTHONPATH=src/agt_map_workbench:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning \
 python3 -m pytest -q src/agt_map_workbench/test
 ```
-
-Expected: PASS.
 
 - [ ] **Step 4: Run syntax gate**
 
@@ -882,9 +772,9 @@ python3 -m compileall -q \
   src/agt_route_benchmark/agt_route_benchmark
 ```
 
-Expected: exit code 0.
+- [ ] **Step 5: Launch Paper I Workbench and export a fixed-name real revision**
 
-- [ ] **Step 5: Launch the Paper I Workbench with the authoritative processed/canonical greenhouse PCD**
+Use revision directory name `greenhouse_01_map_revision_unified_001` in the GUI so later commands are exact:
 
 ```bash
 source install/setup.bash
@@ -892,24 +782,25 @@ ROS_LOG_DIR="$PWD/runtime/log/unified_map_authoring" \
 ros2 run agt_map_workbench agt_map_workbench_paper1
 ```
 
-Manual acceptance criteria:
+Manual acceptance:
 
 ```text
-[ ] Ground-only Evidence preview remains available.
-[ ] Row structural band visually aligns with crop rows.
-[ ] Aisle geometric envelope visually aligns with actual inter-row corridors.
-[ ] Structure-Inferred FREE fills Ground-only UNKNOWN inside valid aisles.
-[ ] No base OCCUPIED cell is automatically whitened.
+[ ] Ground-only Evidence remains visible.
+[ ] Row structural band aligns with crop rows.
+[ ] Aisle geometric envelope aligns with actual inter-row corridors.
+[ ] Structure-Inferred FREE fills Ground-only UNKNOWN only inside valid aisles.
+[ ] No base OCCUPIED is automatically whitened.
 [ ] No row structural cell is FREE.
 [ ] No Site Boundary exterior cell is FREE.
-[ ] Headland UNKNOWN remains UNKNOWN unless directly Ground-FREE or formally overridden.
-[ ] Formal QA reports per-aisle FREE/UNKNOWN/conflict/connectivity values.
-[ ] Export creates evidence/, generated/, accepted/, derivation.yaml.
+[ ] Headland UNKNOWN remains UNKNOWN unless Ground-FREE or formally overridden.
+[ ] Formal QA exposes per-aisle FREE/UNKNOWN/conflict/connectivity.
+[ ] Export contains evidence/, generated/, accepted/, derivation.yaml.
 ```
 
-- [ ] **Step 6: Run planner-independent replay audit against the exported revision**
+- [ ] **Step 6: Run replay audit on the exact revision**
 
 ```bash
+REV="$PWD/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_unified_001"
 ros2 run agt_route_benchmark route_benchmark_map_quality.py \
   --generated-map-yaml "$REV/generated/navigation_map.yaml" \
   --accepted-map-yaml "$REV/accepted/navigation_map.yaml" \
@@ -924,15 +815,15 @@ accepted_matches_replay == true
 unexplained_changed_cell_count == 0
 ```
 
-- [ ] **Step 7: Record the checkpoint commit**
+- [ ] **Step 7: Record verification**
 
-If no fixes were needed, do not create an empty commit. Record the verified head SHA in the implementation handoff. If fixes were required, commit only the concrete fixes with a focused message before proceeding to Plan 2.
+Do not create an empty commit. If fixes were needed, commit only those fixes. Record the verified head SHA and real revision path in the implementation handoff.
 
 ---
 
 ## Plan 1 Completion Gate
 
-Do not start semantic-GUI integration until all of the following are true:
+Do not start semantic-GUI integration until all are true:
 
 ```text
 Structure-aware unit tests PASS
@@ -945,5 +836,3 @@ compileall PASS
 real greenhouse Generated PGM visually reviewed
 accepted replay QA PASS
 ```
-
-At that point the repository has one working automatic PGM production chain even before the legacy semantic editor is retired.
