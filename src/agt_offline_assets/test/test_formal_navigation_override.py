@@ -153,3 +153,33 @@ def test_override_replay_rejects_unsupported_mode_before_mutation():
             boundary(max_x=2.0),
             [invalid],
         )
+
+
+def test_force_free_reports_requested_and_effective_transition_counts():
+    generated = make_navigation([[FREE, UNKNOWN, OCCUPIED, FREE]])
+    corridor = make_corridor([[False, False, False, False]])
+    record = {
+        "id": "well_cover_free",
+        "mode": "force_free",
+        "polygon_xy": [[1.0, 0.0], [3.0, 0.0], [3.0, 1.0], [1.0, 1.0]],
+        "reason": "measured flush well cover",
+        "evidence_category": "field_note",
+    }
+
+    result = replay_formal_navigation_overrides(
+        generated,
+        corridor,
+        boundary(),
+        [record],
+    )
+
+    assert len(result.override_diagnostics) == 1
+    diagnostic = result.override_diagnostics[0]
+    assert diagnostic["id"] == "well_cover_free"
+    assert diagnostic["requested_cell_count"] == 2
+    assert diagnostic["effective_changed_cell_count"] == 2
+    assert diagnostic["unknown_to_free_cell_count"] == 1
+    assert diagnostic["occupied_to_free_cell_count"] == 1
+    assert diagnostic["already_target_cell_count"] == 0
+    assert diagnostic["blocked_site_boundary_cell_count"] == 0
+    assert diagnostic["blocked_row_structural_cell_count"] == 0
