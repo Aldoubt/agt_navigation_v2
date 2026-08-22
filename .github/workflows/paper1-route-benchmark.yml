@@ -67,6 +67,11 @@ jobs:
         env:
           PYTHONPATH: src/agt_map_pipeline:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
         run: python -m pytest -q src/agt_map_pipeline/test
+      - name: Run structure-aware map-quality compatibility
+        env:
+          MPLBACKEND: Agg
+          PYTHONPATH: src/agt_route_benchmark:src/agt_coverage_planning:src/agt_offline_assets:src/agt_ui_bridge
+        run: python -m pytest -q src/agt_route_benchmark/test/test_map_quality_structure_aware.py
       - name: Run Paper I benchmark unit tests
         env:
           MPLBACKEND: Agg
