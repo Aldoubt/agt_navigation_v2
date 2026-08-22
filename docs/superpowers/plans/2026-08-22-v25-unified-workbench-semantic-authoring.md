@@ -69,9 +69,11 @@
 
 - [ ] **Step 1: Write failing initial-state/manual-feature tests**
 
+Use this local fixture so no constructor details are implicit:
+
 ```python
-def test_new_state_is_map_frame_and_unbound_until_freeze():
-    state = new_semantic_authoring_state(
+def _state():
+    return new_semantic_authoring_state(
         map_id="greenhouse_01",
         robot_profile="mk_mini",
         robot_width=0.60,
@@ -80,6 +82,10 @@ def test_new_state_is_map_frame_and_unbound_until_freeze():
         headland_width=1.50,
         allow_reverse=True,
     )
+
+
+def test_new_state_is_map_frame_and_unbound_until_freeze():
+    state = _state()
     assert state.scene.semantic_map.map_id == "greenhouse_01"
     assert state.scene.semantic_map.frame_id == "map"
     assert state.coverage.base_map == UNBOUND_ACCEPTED_MAP
@@ -87,7 +93,7 @@ def test_new_state_is_map_frame_and_unbound_until_freeze():
 
 
 def test_manual_feature_gets_provenance():
-    state = new_semantic_authoring_state(...same explicit arguments...)
+    state = _state()
     feature = state.add_manual_feature(
         feature_type="field_boundary",
         feature_id="field_01",
@@ -98,8 +104,6 @@ def test_manual_feature_gets_provenance():
     assert feature.properties["source"] == "manual"
     assert feature.properties["authoring_state"] == "accepted"
 ```
-
-In the actual test file, replace the repeated constructor call with a local `_state()` helper containing those exact arguments; do not use ellipsis in executable test code.
 
 - [ ] **Step 2: Run and verify import failure**
 
@@ -308,7 +312,7 @@ if self._interaction_mode and self._interaction_mode.startswith("semantic:"):
 super()._on_map_clicked(x, y)
 ```
 
-Polygon tools require >=3 points; row/access/work direction require >=2; `entry_pose` uses first click as position and second as yaw direction. Geometry is stored directly in map-frame meters.
+Polygon tools require at least 3 points; row/access/work direction require at least 2; `entry_pose` uses first click as position and second as yaw direction. Geometry is stored directly in map-frame meters.
 
 - [ ] **Step 5: Use `SemanticScene` for edits**
 
@@ -476,7 +480,7 @@ python3 -m pytest -q src/agt_map_workbench/test/test_unified_map_revision.py
 9. os.replace(stage, final_revision)
 ```
 
-No timestamp is added to authority/derivation files.
+Here `...` is prose notation inside the plan, not executable code: the concrete arguments are the Plan 1 objects already held by `Paper1MapWorkbenchWindow` (`_navigation_base_result`, `_formal_materialization`, `_formal_accepted_result`, validated overrides, source asset, and frame id). The implementation function signature must name those arguments explicitly; do not use variadic `*args` for authority data.
 
 - [ ] **Step 5: Replace Paper Workbench navigation-only export**
 
@@ -595,7 +599,7 @@ git commit -m "feat(workbench): bundle frozen semantic task assets"
 
 - [ ] **Step 1: Write failing toolbar/save-authority test**
 
-Offscreen create a temporary Nav2 map, instantiate `SemanticEditorWindow(map_path=...)`, and assert:
+Offscreen create a temporary Nav2 map, instantiate `SemanticEditorWindow(map_path=map_yaml)`, and assert:
 
 ```python
 assert "map_occupied" not in window._tool_actions
@@ -620,7 +624,7 @@ Do not create `map_occupied`, `map_free`, `map_unknown`, brush/line raster actio
 
 - [ ] **Step 4: Fail closed for stale raster calls**
 
-`apply_map_brush`, `apply_map_line`, `begin_map_edit`, `commit_map_edit`, and `_save_map_in_place` must return without mutation. `_save_map_in_place()` returns `False` and shows the message:
+`apply_map_brush`, `apply_map_line`, `begin_map_edit`, `commit_map_edit`, and `_save_map_in_place` return without mutation. `_save_map_in_place()` returns `False` and shows:
 
 ```text
 正式 Navigation Map 栅格编辑已迁移到 AGT Map Workbench；此编辑器仅保留语义任务编辑。
@@ -628,7 +632,7 @@ Do not create `map_occupied`, `map_free`, `map_unknown`, brush/line raster actio
 
 `save()` no longer calls `_save_map_in_place()`.
 
-- [ ] **Step 5: Register and run all UI-bridge semantic regressions**
+- [ ] **Step 5: Register and run UI-bridge semantic regressions**
 
 ```cmake
 ament_add_pytest_test(
@@ -673,13 +677,13 @@ git commit -m "refactor(ui): retire standalone raster map authority"
 
 - [ ] **Step 1: Write end-to-end synthetic test**
 
-Inject Ground Evidence containing one aisle UNKNOWN gap, valid row/corridor structure, Site Boundary, one formal override, and required semantic features. Freeze to a temporary parent and assert:
+Define `GAP_ROW = 1` and `GAP_COL = 3` in the test fixture. Inject Ground Evidence with that aisle UNKNOWN gap, valid row/corridor structure, Site Boundary, one formal override, and required semantic features. Freeze to a temporary parent and assert:
 
 ```python
 revision = window._freeze_unified_revision_to(test_parent, "revision_001")
 generated = load_navigation_grid(revision / "generated/navigation_map.yaml")
 coverage = yaml.safe_load((revision / "semantic/coverage.yaml").read_text())
-assert generated.occupancy[gap_row, gap_col] == FREE
+assert generated.occupancy[GAP_ROW, GAP_COL] == FREE
 assert coverage["base_map_sha256"] == sha256_file(
     revision / "accepted/navigation_map.yaml"
 )
@@ -690,8 +694,6 @@ assert json.loads(
     (revision / "validation/semantic_validation.json").read_text()
 )["status"] == "PASS"
 ```
-
-Define `gap_row` and `gap_col` as constants in the test fixture; do not leave them implicit.
 
 - [ ] **Step 2: Register/run complete Workbench suite**
 
@@ -732,7 +734,7 @@ python3 -m compileall -q \
 
 - [ ] **Step 5: Perform real greenhouse unified session**
 
-Use final revision name `greenhouse_01_map_revision_unified_001` if Plan 1 did not already consume it; otherwise use `greenhouse_01_map_revision_unified_002`. Record the chosen exact name in the handoff before running replay QA.
+If Plan 1 already published `greenhouse_01_map_revision_unified_001`, use `greenhouse_01_map_revision_unified_002` here. Otherwise use `_001`. Record the exact chosen name in the handoff.
 
 ```bash
 source /opt/ros/humble/setup.bash
@@ -745,7 +747,7 @@ Manual checklist:
 
 ```text
 [ ] Review Ground Evidence, row band, aisle geometry, Generated PGM.
-[ ] Site Boundary is frozen separately from field_boundary.
+[ ] Site Boundary is separate from field_boundary.
 [ ] Add only evidence-backed formal raster overrides.
 [ ] `语义与任务` is available without another top-level editor.
 [ ] Accept/edit/reject automatic row/lane candidates.
@@ -756,9 +758,9 @@ Manual checklist:
 [ ] Standalone semantic editor cannot paint/save PGM changes.
 ```
 
-- [ ] **Step 6: Run replay QA using the exact chosen revision name**
+- [ ] **Step 6: Run replay QA for either allowed exact revision name**
 
-If the real revision is `_002`, run:
+For `_002`:
 
 ```bash
 REV="$PWD/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_unified_002"
@@ -769,7 +771,13 @@ ros2 run agt_route_benchmark route_benchmark_map_quality.py \
   --output-dir "$REV/validation/replay_qa"
 ```
 
-If Plan 1 did not publish `_001` and this task used `_001`, substitute only the literal final suffix from `_002` to `_001` in the four paths. Required values remain:
+For `_001`, set only:
+
+```bash
+REV="$PWD/runtime/maps/greenhouse_01/derivation/greenhouse_01_map_revision_unified_001"
+```
+
+and run the same command. Required:
 
 ```text
 accepted_matches_replay == true
@@ -778,7 +786,7 @@ unexplained_changed_cell_count == 0
 
 - [ ] **Step 7: Update README after verification**
 
-Document the canonical flow exactly as:
+Document canonical flow:
 
 ```text
 PCD -> Ground Evidence -> Agricultural Structure -> Structure-Aware Generated PGM
