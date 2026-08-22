@@ -1,10 +1,13 @@
 import json
 from pathlib import Path
 
+from PyQt5.QtWidgets import QApplication
+
 from agt_map_workbench.review_export import (
     REVIEW_LAYER_EXPORTS,
     write_review_summary,
 )
+from agt_map_workbench.review_export_workbench import ReviewExportMapWorkbenchWindow
 
 
 def test_review_layer_export_contract_covers_structure_and_formal_products():
@@ -49,3 +52,19 @@ def test_write_review_summary_emits_json_and_human_readable_text(tmp_path: Path)
     assert "geometric_aisles: 20" in text
     assert "connected_aisles: 5" in text
     assert "navigation_usability_status: REVIEW_REQUIRED" in text
+
+
+def test_review_workbench_installs_geometric_and_export_controls():
+    app = QApplication.instance() or QApplication([])
+    window = ReviewExportMapWorkbenchWindow()
+    try:
+        geometric = window._find_layer_index("aisle_geometric_centerline")
+        safe = window._find_layer_index("aisle_centerline")
+        assert geometric >= 0
+        assert safe >= 0
+        assert "几何中心线" in window._nav_layer.itemText(geometric)
+        assert "导航安全中心线" in window._nav_layer.itemText(safe)
+        assert window._review_export_button.text() == "一键导出地图审查包"
+    finally:
+        window.close()
+        app.processEvents()
