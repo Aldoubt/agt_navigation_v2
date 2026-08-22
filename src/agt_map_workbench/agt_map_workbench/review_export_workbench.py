@@ -1,9 +1,10 @@
 """Review-focused V25 Workbench additions.
 
 This bounded layer keeps the formal map authority in ``UnifiedMapWorkbenchWindow``
-while adding two review-only capabilities:
+while adding review-only capabilities:
 
-* a geometric aisle centerline that is independent from Ground/safe evidence;
+* a geometric aisle centerline independent from Ground/safe evidence;
+* hard-occupancy provenance and connectivity-breakpoint overlays; and
 * a one-click screenshot + metadata package for repeatable map review.
 """
 
@@ -19,12 +20,35 @@ from PyQt5.QtWidgets import QApplication, QFileDialog, QMessageBox, QPushButton
 
 from agt_offline_assets.aisle_centerlines import derive_geometric_aisle_centerlines
 from agt_offline_assets.contracts import sha256_file
+from agt_offline_assets.formal_navigation_map import (
+    StructureAwareNavigationConfig,
+    derive_hard_occupancy_provenance,
+)
 
-from .review_export import REVIEW_LAYER_EXPORTS, git_head, write_review_summary
+from .review_diagnostics import (
+    build_aisle_provenance_reports,
+    derive_aisle_hard_conflict_mask,
+    derive_connectivity_breakpoint_mask,
+)
+from .review_export import (
+    REVIEW_LAYER_EXPORTS,
+    git_head,
+    review_layer_cloud_opacity,
+    write_review_summary,
+)
 from .unified_workbench import UnifiedMapWorkbenchWindow
 
 
 _GEOMETRIC_CENTERLINE_KEY = "aisle_geometric_centerline"
+_REVIEW_DIAGNOSTIC_KEYS = {
+    "formal_hard_direct",
+    "formal_hard_slope",
+    "formal_hard_step",
+    "formal_hard_before_padding",
+    "formal_hard_after_padding",
+    "formal_aisle_hard_conflict",
+    "formal_connectivity_breakpoints",
+}
 
 
 class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
@@ -33,6 +57,7 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
     def __init__(self) -> None:
         super().__init__()
         self._install_geometric_centerline_layer()
+        self._install_hard_occupancy_layers()
         self._install_review_export_action()
 
     # ------------------------------------------------------- geometric aisle semantics
@@ -49,6 +74,23 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
         safe_index = self._find_layer_index("aisle_centerline")
         if safe_index >= 0:
             self._nav_layer.setItemText(safe_index, "导航安全中心线（允许断开）")
+
+    def _install_hard_occupancy_layers(self) -> None:
+        existing = {
+            str(self._nav_layer.itemData(index))
+            for index in range(self._nav_layer.count())
+        }
+        for label, key in (
+            ("Hard 来源：Direct Obstacle", "formal_hard_direct"),
+            ("Hard 来源：Slope", "formal_hard_slope"),
+            ("Hard 来源：Step", "formal_hard_step"),
+            ("Hard OCCUPIED（Padding 前）", "formal_hard_before_padding"),
+            ("Hard OCCUPIED（Padding 后）", "formal_hard_after_padding"),
+            ("行道内 Hard OCCUPIED 冲突", "formal_aisle_hard_conflict"),
+            ("行道连通断点截面", "formal_connectivity_breakpoints"),
+        ):
+            if key not in existing:
+                self._nav_layer.addItem(label, key)
 
     def _install_review_export_action(self) -> None:
         parent = self._nav_status.parentWidget()
@@ -78,25 +120,96 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
             self._corridor_refinement_result,
         )
 
+    def _hard_occupancy_provenance(self):
+        if self._navigation_base_result is None:
+            return None
+        # Unified Workbench currently materializes with the default formal
+        # recovery policy.  Reusing the same policy here makes this a pure
+        # diagnostic reproduction rather than a second map producer.
+        return derive_hard_occupancy_provenance(
+            self._navigation_base_result,
+            StructureAwareNavigationConfig(),
+        )
+
+    def _review_diagnostic_masks(self) -> dict[str, np.ndarray]:
+        if (
+            self._navigation_base_result is None
+            or self._navigation_structure_result is None
+            or self._corridor_refinement_result is None
+        ):
+            return {}
+        if self._formal_materialization is None or self._formal_accepted_result is None:
+            self._build_formal_navigation_state()
+        if self._formal_materialization is None or self._formal_accepted_result is None:
+            return {}
+        provenance = self._hard_occupancy_provenance()
+        if provenance is None:
+            return {}
+        accepted_occupancy = np.asarray(
+            self._formal_accepted_result.navigation.occupancy,
+            dtype=np.uint8,
+        )
+        return {
+            "formal_hard_direct": provenance.direct_obstacle_mask,
+            "formal_hard_slope": provenance.slope_hard_mask,
+            "formal_hard_step": provenance.step_hard_mask,
+            "formal_hard_before_padding": provenance.hard_before_padding_mask,
+            "formal_hard_after_padding": provenance.hard_after_padding_mask,
+            "formal_aisle_hard_conflict": derive_aisle_hard_conflict_mask(
+                self._corridor_refinement_result,
+                provenance,
+            ),
+            "formal_connectivity_breakpoints": derive_connectivity_breakpoint_mask(
+                self._navigation_base_result,
+                self._navigation_structure_result,
+                self._corridor_refinement_result,
+                accepted_occupancy,
+            ),
+        }
+
     def _update_navigation_overlay(self) -> None:
         if not hasattr(self, "_nav_layer"):
             return
         layer = str(self._nav_layer.currentData())
-        if layer != _GEOMETRIC_CENTERLINE_KEY:
-            super()._update_navigation_overlay()
+        if layer == _GEOMETRIC_CENTERLINE_KEY:
+            if not self._nav_overlay_visible.isChecked():
+                self._navigation_preview_item.clear_result()
+                return
+            geometric = self._geometric_centerlines()
+            if geometric is None or self._navigation_base_result is None:
+                self._navigation_preview_item.clear_result()
+                return
+            self._navigation_preview_item.set_mask(
+                self._navigation_base_result,
+                geometric.mask,
+                (40, 235, 255, 245),
+            )
             return
-        if not self._nav_overlay_visible.isChecked():
-            self._navigation_preview_item.clear_result()
+        if layer in _REVIEW_DIAGNOSTIC_KEYS:
+            if not self._nav_overlay_visible.isChecked():
+                self._navigation_preview_item.clear_result()
+                return
+            masks = self._review_diagnostic_masks()
+            mask = masks.get(layer)
+            if mask is None or self._navigation_base_result is None:
+                self._navigation_preview_item.clear_result()
+                return
+            colors = {
+                "formal_hard_direct": (255, 165, 35, 235),
+                "formal_hard_slope": (255, 55, 210, 235),
+                "formal_hard_step": (170, 80, 255, 235),
+                "formal_hard_before_padding": (255, 75, 75, 220),
+                "formal_hard_after_padding": (255, 30, 30, 235),
+                "formal_aisle_hard_conflict": (255, 220, 40, 245),
+                "formal_connectivity_breakpoints": (255, 255, 255, 250),
+            }
+            self._navigation_preview_item.set_mask(
+                self._navigation_base_result,
+                mask,
+                colors[layer],
+            )
             return
-        geometric = self._geometric_centerlines()
-        if geometric is None or self._navigation_base_result is None:
-            self._navigation_preview_item.clear_result()
-            return
-        self._navigation_preview_item.set_mask(
-            self._navigation_base_result,
-            geometric.mask,
-            (40, 235, 255, 245),
-        )
+        super()._update_navigation_overlay()
 
     def _refresh_navigation_status(self) -> None:
         super()._refresh_navigation_status()
@@ -124,6 +237,15 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
             f"Geometric Centerline={line_count}/{expected} | "
             f"Traversable={traversable}/{expected} | Connected={connected}/{expected}"
         )
+        provenance = self._hard_occupancy_provenance()
+        if provenance is not None:
+            counts = provenance.counts()
+            suffix += (
+                f"\nHard 来源：strong sensor={counts['strong_sensor_obstacle']:,} | "
+                f"slope={counts['slope_hard']:,} | step={counts['step_hard']:,} | "
+                f"padding+={counts['padding_added_hard']:,} | "
+                f"hard total={counts['hard_after_padding']:,}"
+            )
         self._nav_status.setText(self._nav_status.text() + suffix)
 
     # ------------------------------------------------------- review package
@@ -158,6 +280,9 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
         accepted = self._formal_accepted_result
         qa = self._formal_navigation_qa
         geometric = derive_geometric_aisle_centerlines(navigation, structure, corridor)
+        provenance = self._hard_occupancy_provenance()
+        if provenance is None:
+            raise ValueError("地图审查包无法重建 Hard OCCUPIED provenance")
         interior_reports = [
             dict(item)
             for item in (qa.get("aisles") or [])
@@ -169,6 +294,16 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
         geometric_centerlines = sum(
             pair.pair_kind == "ROW_ROW" and pair.centerline_cell_count > 0
             for pair in geometric.pairs
+        )
+        diagnostic_masks = self._review_diagnostic_masks()
+        aisle_provenance = build_aisle_provenance_reports(
+            navigation,
+            structure,
+            corridor,
+            accepted.navigation.occupancy,
+            provenance,
+            materialized=formal,
+            qa=qa,
         )
 
         source_path = self._source_path.resolve() if self._source_path is not None else None
@@ -207,7 +342,7 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
         )
 
         return {
-            "schema": "agt_map_workbench_review/v1",
+            "schema": "agt_map_workbench_review/v2",
             "source": {
                 "pcd": str(source_path) if source_path is not None else None,
                 "pcd_sha256": source_sha,
@@ -235,6 +370,8 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
                 "connected_aisles": int(connected_interior),
             },
             "ground_navigation": navigation.counts(),
+            "hard_occupancy_provenance": provenance.counts(),
+            "aisle_provenance": aisle_provenance,
             "formal_navigation": {
                 "generated_counts": formal.navigation.counts(),
                 "accepted_counts": accepted.navigation.counts(),
@@ -254,6 +391,22 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
                 ),
                 "row_structural_band_free_leak_count": int(
                     qa.get("row_structural_band_free_leak_count", 0)
+                ),
+                "aisle_hard_conflict_cell_count": int(
+                    np.count_nonzero(
+                        diagnostic_masks.get(
+                            "formal_aisle_hard_conflict",
+                            np.zeros_like(navigation.occupancy, dtype=bool),
+                        )
+                    )
+                ),
+                "connectivity_breakpoint_cell_count": int(
+                    np.count_nonzero(
+                        diagnostic_masks.get(
+                            "formal_connectivity_breakpoints",
+                            np.zeros_like(navigation.occupancy, dtype=bool),
+                        )
+                    )
                 ),
                 "override_diagnostics": [
                     dict(item) for item in (qa.get("override_diagnostics") or [])
@@ -281,6 +434,7 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
             self._save_widget_grab(self, destination / "00_workbench_window.png")
 
             for filename, key in REVIEW_LAYER_EXPORTS:
+                self._cloud_item.setOpacity(review_layer_cloud_opacity(key))
                 if key is None:
                     self._nav_overlay_visible.setChecked(False)
                 else:
@@ -336,7 +490,7 @@ class ReviewExportMapWorkbenchWindow(UnifiedMapWorkbenchWindow):
         QMessageBox.information(
             self,
             "地图审查包已导出",
-            f"{output}\n\n已保存窗口截图、11 个审查视图以及 review_summary.json/txt。",
+            f"{output}\n\n已保存窗口截图、18 个审查视图以及 review_summary.json/txt。",
         )
         return output
 
