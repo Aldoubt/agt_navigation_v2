@@ -55,6 +55,47 @@ class StructureAwareNavigationConfig:
 
 
 @dataclass(frozen=True)
+class HardOccupancyProvenance:
+    """Diagnostic-only decomposition of Ground-only OCCUPIED evidence.
+
+    These masks reproduce the exact hard/soft split used by formal
+    materialization.  They do not modify classification policy; they only make
+    direct sensor, terrain geometry and padding effects independently visible.
+    """
+
+    direct_obstacle_mask: np.ndarray
+    strong_sensor_obstacle_mask: np.ndarray
+    slope_hard_mask: np.ndarray
+    step_hard_mask: np.ndarray
+    hard_before_padding_mask: np.ndarray
+    hard_after_padding_mask: np.ndarray
+    padding_added_hard_mask: np.ndarray
+    soft_occupied_mask: np.ndarray
+    padding_cells: int
+
+    def counts(self) -> dict[str, int]:
+        return {
+            "direct_obstacle": int(np.count_nonzero(self.direct_obstacle_mask)),
+            "strong_sensor_obstacle": int(
+                np.count_nonzero(self.strong_sensor_obstacle_mask)
+            ),
+            "slope_hard": int(np.count_nonzero(self.slope_hard_mask)),
+            "step_hard": int(np.count_nonzero(self.step_hard_mask)),
+            "hard_before_padding": int(
+                np.count_nonzero(self.hard_before_padding_mask)
+            ),
+            "hard_after_padding": int(
+                np.count_nonzero(self.hard_after_padding_mask)
+            ),
+            "padding_added_hard": int(
+                np.count_nonzero(self.padding_added_hard_mask)
+            ),
+            "soft_occupied": int(np.count_nonzero(self.soft_occupied_mask)),
+            "padding_cells": int(self.padding_cells),
+        }
+
+
+@dataclass(frozen=True)
 class StructureAwareNavigationResult:
     """Generated navigation grid plus explicit provenance masks."""
 
@@ -221,13 +262,15 @@ def _directional_soft_recovery(
     return soft_candidate & bridge
 
 
-def _occupied_provenance(
+def derive_hard_occupancy_provenance(
     navigation: NavigationMapResult,
-    occupancy_source: np.ndarray,
-    policy: StructureAwareNavigationConfig,
-) -> tuple[np.ndarray, np.ndarray]:
-    """Split Ground-only OCCUPIED into hard and potentially recoverable masks."""
+    policy: StructureAwareNavigationConfig | None = None,
+) -> HardOccupancyProvenance:
+    """Reproduce the current hard/soft OCCUPIED split as review evidence."""
 
+    config = policy or StructureAwareNavigationConfig()
+    config.validate()
+    occupancy_source = np.asarray(navigation.occupancy, dtype=np.uint8)
     base_occupied = occupancy_source == OCCUPIED
     obstacle_count = np.asarray(navigation.obstacle_count, dtype=np.int32)
     point_count = np.asarray(navigation.point_count, dtype=np.int32)
@@ -239,21 +282,25 @@ def _occupied_provenance(
     obstacle_ratio = obstacle_count.astype(np.float64) / np.maximum(
         point_count.astype(np.float64), 1.0
     )
-    geometry_hard = (
+    slope_hard = (
         ground_valid
         & (point_count > 0)
-        & (
-            (slope > float(navigation.config.maximum_slope_deg))
-            | (step > float(navigation.config.maximum_step_m))
-        )
+        & (slope > float(navigation.config.maximum_slope_deg))
     )
+    step_hard = (
+        ground_valid
+        & (point_count > 0)
+        & (step > float(navigation.config.maximum_step_m))
+    )
+    geometry_hard = slope_hard | step_hard
     soft_direct = (
         direct_obstacle
         & ~geometry_hard
-        & (obstacle_count <= int(policy.soft_obstacle_max_count))
-        & (obstacle_ratio <= float(policy.soft_obstacle_max_ratio))
+        & (obstacle_count <= int(config.soft_obstacle_max_count))
+        & (obstacle_ratio <= float(config.soft_obstacle_max_ratio))
     )
-    hard_direct = geometry_hard | (direct_obstacle & ~soft_direct)
+    strong_sensor = direct_obstacle & ~soft_direct & ~geometry_hard
+    hard_direct = geometry_hard | strong_sensor
 
     padding_cells = int(
         ceil(float(navigation.config.obstacle_padding_m) / float(navigation.resolution_m))
@@ -268,9 +315,39 @@ def _occupied_provenance(
     else:
         hard_with_padding = hard_direct
 
-    hard_occupied = base_occupied & hard_with_padding
-    soft_occupied = base_occupied & ~hard_occupied
-    return hard_occupied, soft_occupied
+    hard_before_padding = base_occupied & hard_direct
+    hard_after_padding = base_occupied & hard_with_padding
+    soft_occupied = base_occupied & ~hard_after_padding
+    padding_added = hard_after_padding & ~hard_before_padding
+    return HardOccupancyProvenance(
+        direct_obstacle_mask=base_occupied & direct_obstacle,
+        strong_sensor_obstacle_mask=base_occupied & strong_sensor,
+        slope_hard_mask=base_occupied & slope_hard,
+        step_hard_mask=base_occupied & step_hard,
+        hard_before_padding_mask=hard_before_padding,
+        hard_after_padding_mask=hard_after_padding,
+        padding_added_hard_mask=padding_added,
+        soft_occupied_mask=soft_occupied,
+        padding_cells=padding_cells,
+    )
+
+
+def _occupied_provenance(
+    navigation: NavigationMapResult,
+    occupancy_source: np.ndarray,
+    policy: StructureAwareNavigationConfig,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Split Ground-only OCCUPIED into hard and potentially recoverable masks."""
+
+    if not np.array_equal(
+        np.asarray(navigation.occupancy, dtype=np.uint8),
+        np.asarray(occupancy_source, dtype=np.uint8),
+    ):
+        navigation = NavigationMapResult(
+            **{**navigation.__dict__, "occupancy": np.asarray(occupancy_source, dtype=np.uint8)}
+        )
+    provenance = derive_hard_occupancy_provenance(navigation, policy)
+    return provenance.hard_after_padding_mask, provenance.soft_occupied_mask
 
 
 def materialize_structure_aware_navigation_map(
@@ -351,12 +428,7 @@ def materialize_structure_aware_navigation_map(
             >= int(policy.soft_recovery_min_ground_support_points)
         )
     )
-    allowed_path = (
-        aisle
-        & inside_boundary
-        & ~row_band
-        & ~hard_occupied
-    )
+    allowed_path = aisle & inside_boundary & ~row_band & ~hard_occupied
     if policy.enable_soft_occupied_recovery:
         recovered_soft = _directional_soft_recovery(
             seed_free=seed_free,
@@ -374,7 +446,9 @@ def materialize_structure_aware_navigation_map(
     generated_occupancy = np.full(shape, UNKNOWN, dtype=np.uint8)
     generated_occupancy[base_free] = FREE
     generated_occupancy[inferred_unknown | recovered_soft] = FREE
-    generated_occupancy[hard_occupied | soft_occupied | row_band | outside_boundary] = OCCUPIED
+    generated_occupancy[
+        hard_occupied | soft_occupied | row_band | outside_boundary
+    ] = OCCUPIED
     # Recovery is applied after the conservative occupied assignment, but hard
     # masks remain impossible to override because recovered_soft excludes them.
     generated_occupancy[recovered_soft] = FREE
