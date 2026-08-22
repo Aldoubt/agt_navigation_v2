@@ -37,6 +37,9 @@ from agt_offline_assets import (  # noqa: E402
     replay_formal_navigation_overrides,
     write_formal_navigation_qa,
 )
+from agt_offline_assets.aisle_centerlines import (  # noqa: E402
+    derive_geometric_aisle_centerlines,
+)
 from agt_offline_assets.contracts import sha256_file  # noqa: E402
 from agt_offline_assets.formal_navigation_map import (  # noqa: E402
     StructureAwareNavigationConfig,
@@ -138,6 +141,11 @@ def run(
         "navigation_usability_status": "NOT_EVALUATED",
         "accepted_aisle_count": 0,
         "connected_aisle_count": 0,
+        "expected_interior_aisle_count": 0,
+        "geometric_interior_aisle_count": 0,
+        "geometric_centerline_count": 0,
+        "traversable_interior_aisle_count": 0,
+        "connected_interior_aisle_count": 0,
         "largest_free_component_fraction": 0.0,
         "structure_recovered_soft_occupied_cell_count": 0,
         "formal_ready": False,
@@ -158,6 +166,20 @@ def run(
         corridor = derive_corridor_refinement(
             navigation, structure, CorridorRefinementConfig()
         )
+        geometric = derive_geometric_aisle_centerlines(navigation, structure, corridor)
+        summary["expected_interior_aisle_count"] = int(
+            geometric.expected_interior_aisles
+        )
+        summary["geometric_interior_aisle_count"] = int(
+            geometric.interior_geometric_aisle_count
+        )
+        summary["geometric_centerline_count"] = int(
+            sum(
+                pair.pair_kind == "ROW_ROW" and pair.centerline_cell_count > 0
+                for pair in geometric.pairs
+            )
+        )
+
         boundary = (
             load_site_boundary(site_boundary_path, expected_frame_id="map")
             if site_boundary_path is not None
@@ -193,6 +215,15 @@ def run(
         )
         summary["accepted_aisle_count"] = int(qa.get("accepted_aisle_count", 0))
         summary["connected_aisle_count"] = int(qa.get("connected_aisle_count", 0))
+        interior_reports = [
+            dict(item)
+            for item in (qa.get("aisles") or [])
+            if str(item.get("pair_kind")) == "ROW_ROW"
+        ]
+        summary["traversable_interior_aisle_count"] = len(interior_reports)
+        summary["connected_interior_aisle_count"] = sum(
+            bool(item.get("grid_connectivity")) for item in interior_reports
+        )
         summary["largest_free_component_fraction"] = float(
             qa.get("largest_free_component_fraction", 0.0)
         )
