@@ -48,12 +48,20 @@ if(BUILD_TESTING)
     test/test_vehicle_vertical_boundary_audit.py
   )
   ament_add_pytest_test(
+    test_terrain_local_evidence
+    test/test_terrain_local_evidence.py
+  )
+  ament_add_pytest_test(
     test_run_vehicle_vertical_boundary_audit_contract
     test/test_run_vehicle_vertical_boundary_audit_contract.py
   )
   ament_add_pytest_test(
     test_run_vehicle_exact_collision_ablation_contract
     test/test_run_vehicle_exact_collision_ablation_contract.py
+  )
+  ament_add_pytest_test(
+    test_run_terrain_local_evidence_audit_contract
+    test/test_run_terrain_local_evidence_audit_contract.py
   )
   ament_add_pytest_test(
     test_run_navigation_ablation_contract
