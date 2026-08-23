@@ -161,8 +161,8 @@ def apply_navigation_ablation_profile(
     point_count = np.asarray(navigation.point_count, dtype=np.int32)
     ground_support = np.asarray(navigation.ground_support_count, dtype=np.int32)
     obstacle_count = np.asarray(navigation.obstacle_count, dtype=np.int32)
-    slope = np.asarray(navigation.slope_deg, dtype=np.float64)
-    step = np.asarray(navigation.step_m, dtype=np.float64)
+    slope = np.asarray(navigation.slope_deg, dtype=np.float64).copy()
+    step = np.asarray(navigation.step_m, dtype=np.float64).copy()
 
     if spec.step_mode == "local_linear_discontinuity":
         step = derive_local_linear_step_map(navigation.ground_height_m)
@@ -171,6 +171,12 @@ def apply_navigation_ablation_profile(
     terrain_support = ground_valid & (point_count > 0)
     if spec.require_ground_support_for_geometry:
         terrain_support &= ground_support >= int(config.minimum_ground_support_points)
+        # Formal hard-occupancy provenance consumes these evidence arrays.  NaN
+        # outside trusted Ground ensures the later diagnostic/materialization
+        # layer cannot accidentally re-promote an ignored interpolation-only
+        # slope/step into HARD OCCUPIED.
+        slope = np.where(terrain_support, slope, np.nan)
+        step = np.where(terrain_support, step, np.nan)
 
     geometry_bad = terrain_support & (
         (slope > float(config.maximum_slope_deg))
@@ -194,6 +200,7 @@ def apply_navigation_ablation_profile(
     return replace(
         navigation,
         config=effective_config,
+        slope_deg=slope,
         step_m=step,
         occupancy=occupancy,
     )
