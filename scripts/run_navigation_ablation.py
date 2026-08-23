@@ -7,11 +7,14 @@ all profiles. Therefore A1/A2/A3 change only Ground-navigation occupancy
 policy while PCD, Site Boundary, Row geometry and Corridor geometry stay
 identical.
 
-Each profile also emits a planner-independent per-aisle blocker audit. For a
-disconnected geometric aisle the audit finds a minimum-blocker end-to-end path
-and attributes only the non-FREE cells on that path to sensor, terrain,
-structure, boundary or UNKNOWN evidence. This is diagnostic evidence; it never
-repairs the map.
+Each profile emits two planner-independent diagnostics:
+- a per-aisle minimum-blocker root-cause audit;
+- a vehicle-clearance-aware connectivity audit that does not mutate the PGM.
+
+Optionally, one selected profile can also run D0, a chunked 3D height-profile
+audit over the critical blocker cross-sections. D0 reuses the same local ground
+surface and emits ground-relative height evidence plus compact review plots.
+All of these outputs are EXPERIMENTAL_REVIEW_EVIDENCE, never map authority.
 """
 
 from __future__ import annotations
@@ -51,6 +54,10 @@ from agt_offline_assets.aisle_blocker_audit import (  # noqa: E402
 from agt_offline_assets.aisle_centerlines import (  # noqa: E402
     derive_geometric_aisle_centerlines,
 )
+from agt_offline_assets.critical_barrier_3d import (  # noqa: E402
+    build_critical_barrier_height_audit,
+    write_critical_barrier_height_plots,
+)
 from agt_offline_assets.formal_navigation_map import (  # noqa: E402
     StructureAwareNavigationConfig,
     derive_hard_occupancy_provenance,
@@ -59,6 +66,9 @@ from agt_offline_assets.navigation_ablation import (  # noqa: E402
     ABLATION_PROFILE_KEYS,
     apply_navigation_ablation_profile,
     navigation_ablation_spec,
+)
+from agt_offline_assets.vehicle_feasibility import (  # noqa: E402
+    build_vehicle_feasible_aisle_audit,
 )
 
 
@@ -128,6 +138,65 @@ def _write_aisle_root_cause_report(
     return json_path, txt_path
 
 
+def _write_vehicle_feasibility_report(
+    revision: Path,
+    *,
+    profile: str,
+    clearance_radius_m: float,
+    reports: list[dict[str, object]],
+) -> Path:
+    validation = revision / "validation"
+    validation.mkdir(parents=True, exist_ok=True)
+    path = validation / "vehicle_feasibility.json"
+    document = {
+        "schema": "agt_vehicle_feasible_aisle_audit/v1",
+        "profile": profile,
+        "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
+        "clearance_radius_m": float(clearance_radius_m),
+        "raster_connected_aisles": sum(
+            bool(item.get("raster_grid_connectivity")) for item in reports
+        ),
+        "vehicle_feasible_connected_aisles": sum(
+            bool(item.get("vehicle_feasible_connectivity")) for item in reports
+        ),
+        "aisles": reports,
+    }
+    path.write_text(
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_critical_barrier_3d_report(
+    revision: Path,
+    *,
+    profile: str,
+    result,
+    write_plots: bool,
+) -> Path:
+    validation = revision / "validation"
+    validation.mkdir(parents=True, exist_ok=True)
+    path = validation / "critical_barrier_3d.json"
+    document = {
+        "schema": "agt_critical_barrier_3d_audit/v1",
+        "profile": profile,
+        "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
+        "critical_blocker_count": len(result.records),
+        "records": result.records,
+    }
+    path.write_text(
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    if write_plots:
+        write_critical_barrier_height_plots(
+            result,
+            validation / "critical_barrier_3d_plots",
+        )
+    return path
+
+
 def _profile_summary(
     profile: str,
     *,
@@ -138,13 +207,16 @@ def _profile_summary(
     qa,
     provenance,
     blocker_reports: list[dict[str, object]],
+    vehicle_reports: list[dict[str, object]],
+    vehicle_clearance_radius_m: float,
+    barrier_3d_records: list[dict[str, object]] | None,
 ) -> dict[str, object]:
     interior = [
         dict(item)
         for item in (qa.get("aisles") or [])
         if str(item.get("pair_kind")) == "ROW_ROW"
     ]
-    return {
+    summary = {
         "profile": profile,
         "profile_spec": navigation_ablation_spec(profile).to_dict(),
         "ground_navigation": navigation.counts(),
@@ -180,7 +252,47 @@ def _profile_summary(
                 if not bool(item.get("grid_connectivity"))
             ),
         },
+        "vehicle_feasibility": {
+            "clearance_radius_m": float(vehicle_clearance_radius_m),
+            "raster_connected_aisles": sum(
+                bool(item.get("raster_grid_connectivity")) for item in vehicle_reports
+            ),
+            "vehicle_feasible_connected_aisles": sum(
+                bool(item.get("vehicle_feasible_connectivity")) for item in vehicle_reports
+            ),
+            "minimum_of_end_to_end_clearance_radius_m": float(
+                min(
+                    (
+                        float(item.get("maximum_end_to_end_clearance_radius_m", 0.0))
+                        for item in vehicle_reports
+                    ),
+                    default=0.0,
+                )
+            ),
+            "maximum_of_end_to_end_clearance_radius_m": float(
+                max(
+                    (
+                        float(item.get("maximum_end_to_end_clearance_radius_m", 0.0))
+                        for item in vehicle_reports
+                    ),
+                    default=0.0,
+                )
+            ),
+        },
     }
+    if barrier_3d_records is not None:
+        summary["critical_barrier_3d"] = {
+            "critical_blocker_count": len(barrier_3d_records),
+            "classifiable_point_count": sum(
+                int(item.get("classifiable_point_count", 0))
+                for item in barrier_3d_records
+            ),
+            "obstacle_evidence_point_count": sum(
+                int(item.get("obstacle_evidence_point_count", 0))
+                for item in barrier_3d_records
+            ),
+        }
+    return summary
 
 
 def run(args) -> dict[str, object]:
@@ -188,6 +300,12 @@ def run(args) -> dict[str, object]:
     if output.exists() and any(output.iterdir()):
         raise FileExistsError(f"ablation output must be empty/new: {output}")
     output.mkdir(parents=True, exist_ok=True)
+
+    if args.enable_barrier_3d_audit and len(args.profiles) != 1:
+        raise ValueError(
+            "--enable-barrier-3d-audit requires exactly one profile; "
+            "the 80M+ point PCD should not be rescanned once per ablation profile"
+        )
 
     cloud = read_pcd(args.pcd)
     base_config = GroundRelativeNavigationConfig(
@@ -240,6 +358,8 @@ def run(args) -> dict[str, object]:
                 frozen_geometric.interior_geometric_aisle_count
             ),
             "navigation_config_A0": vars(base_config),
+            "vehicle_clearance_radius_m": float(args.vehicle_clearance_radius_m),
+            "barrier_3d_enabled": bool(args.enable_barrier_3d_audit),
         },
     }
 
@@ -278,6 +398,25 @@ def run(args) -> dict[str, object]:
             provenance,
             materialized=materialized,
         )
+        vehicle_reports = build_vehicle_feasible_aisle_audit(
+            navigation,
+            frozen_structure,
+            frozen_corridor,
+            accepted.navigation.occupancy,
+            clearance_radius_m=args.vehicle_clearance_radius_m,
+        )
+
+        barrier_3d_result = None
+        if args.enable_barrier_3d_audit:
+            barrier_3d_result = build_critical_barrier_height_audit(
+                cloud,
+                navigation,
+                frozen_structure,
+                frozen_corridor,
+                blocker_reports,
+                longitudinal_half_window_m=args.barrier_longitudinal_half_window_m,
+                chunk_size=args.barrier_chunk_size,
+            )
 
         destination = output / profile
         revision = export_structure_aware_navigation_revision(
@@ -299,12 +438,27 @@ def run(args) -> dict[str, object]:
             profile=profile,
             reports=blocker_reports,
         )
+        _write_vehicle_feasibility_report(
+            revision,
+            profile=profile,
+            clearance_radius_m=args.vehicle_clearance_radius_m,
+            reports=vehicle_reports,
+        )
+        if barrier_3d_result is not None:
+            _write_critical_barrier_3d_report(
+                revision,
+                profile=profile,
+                result=barrier_3d_result,
+                write_plots=args.write_barrier_plots,
+            )
         (revision / "validation" / "ablation_profile.json").write_text(
             json.dumps(
                 {
                     **navigation_ablation_spec(profile).to_dict(),
                     "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
                     "frozen_structure_source": "A0",
+                    "vehicle_clearance_radius_m": float(args.vehicle_clearance_radius_m),
+                    "barrier_3d_enabled": bool(args.enable_barrier_3d_audit),
                 },
                 indent=2,
                 sort_keys=True,
@@ -325,6 +479,11 @@ def run(args) -> dict[str, object]:
             qa=qa,
             provenance=provenance,
             blocker_reports=blocker_reports,
+            vehicle_reports=vehicle_reports,
+            vehicle_clearance_radius_m=args.vehicle_clearance_radius_m,
+            barrier_3d_records=(
+                None if barrier_3d_result is None else barrier_3d_result.records
+            ),
         )
 
     (output / "ablation_summary.json").write_text(
@@ -346,6 +505,31 @@ def main(argv: list[str] | None = None) -> int:
         default=list(ABLATION_PROFILE_KEYS),
     )
     parser.add_argument("--write-overlays", action="store_true")
+    parser.add_argument(
+        "--vehicle-clearance-radius-m",
+        type=float,
+        default=0.30,
+        help=(
+            "review-only center clearance radius for vehicle-feasible aisle connectivity; "
+            "does not inflate or mutate the formal PGM"
+        ),
+    )
+    parser.add_argument(
+        "--enable-barrier-3d-audit",
+        action="store_true",
+        help="rescan the PCD once to measure ground-relative 3D evidence at critical blockers",
+    )
+    parser.add_argument(
+        "--write-barrier-plots",
+        action="store_true",
+        help="with --enable-barrier-3d-audit, write u-v/u-height/v-height density plots",
+    )
+    parser.add_argument(
+        "--barrier-longitudinal-half-window-m",
+        type=float,
+        default=0.40,
+    )
+    parser.add_argument("--barrier-chunk-size", type=int, default=1_000_000)
     parser.add_argument("--resolution", type=float, default=0.10)
     parser.add_argument("--ground-quantile", type=float, default=0.10)
     parser.add_argument("--ground-fill-distance", type=float, default=0.35)
@@ -360,6 +544,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--soft-obstacle-max-ratio", type=float, default=0.05)
     parser.add_argument("--soft-recovery-max-gap-m", type=float, default=0.60)
     args = parser.parse_args(argv)
+    if args.vehicle_clearance_radius_m < 0.0:
+        parser.error("--vehicle-clearance-radius-m must be >= 0")
+    if args.write_barrier_plots and not args.enable_barrier_3d_audit:
+        parser.error("--write-barrier-plots requires --enable-barrier-3d-audit")
     document = run(args)
     print(json.dumps(document, indent=2, ensure_ascii=False))
     return 0
