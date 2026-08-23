@@ -110,3 +110,4 @@ jobs:
           scripts/run_vehicle_sensor_evidence_audit.py
           scripts/run_vehicle_vertical_boundary_audit.py
           scripts/run_vehicle_exact_collision_ablation.py
+          scripts/run_terrain_local_evidence_audit.py
