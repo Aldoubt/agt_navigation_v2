@@ -42,6 +42,7 @@ def _fixture(occupancy: np.ndarray, *, cause: str | None = None):
 
     empty = np.zeros(shape, dtype=bool)
     masks = {
+        "direct_obstacle_mask": empty.copy(),
         "strong_sensor_obstacle_mask": empty.copy(),
         "slope_hard_mask": empty.copy(),
         "step_hard_mask": empty.copy(),
@@ -55,6 +56,7 @@ def _fixture(occupancy: np.ndarray, *, cause: str | None = None):
         }[cause]
         masks[key] = occupancy == OCCUPIED
         if cause == "STRONG_SENSOR_OBSTACLE":
+            masks["direct_obstacle_mask"] = occupancy == OCCUPIED
             navigation.obstacle_count[occupancy == OCCUPIED] = 6
     provenance = SimpleNamespace(**masks)
     materialized = SimpleNamespace(
@@ -116,6 +118,35 @@ def test_full_cross_section_sensor_barrier_is_localized_and_classified():
     assert blocker["ground_support_count"] == 20
     assert blocker["slope_deg"] == 0.0
     assert blocker["step_m"] == 0.0
+    assert blocker["direct_obstacle_neighbors_r1"] == 2
+    assert blocker["direct_obstacle_neighbors_r2"] == 2
+    assert blocker["direct_obstacle_component_size_in_aisle"] == 3
+    assert blocker["strong_sensor_neighbors_r1"] == 2
+    assert blocker["strong_sensor_component_size_in_aisle"] == 3
+
+
+def test_isolated_sensor_blocker_reports_zero_spatial_persistence():
+    occupancy = np.full((5, 9), FREE, dtype=np.uint8)
+    occupancy[2, 4] = OCCUPIED
+    navigation, structure, corridor, provenance, materialized = _fixture(
+        occupancy, cause="STRONG_SENSOR_OBSTACLE"
+    )
+
+    report = build_aisle_blocker_audit(
+        navigation,
+        structure,
+        corridor,
+        occupancy,
+        provenance,
+        materialized=materialized,
+    )[0]
+    blocker = report["critical_blocker_cells"][0]
+
+    assert blocker["direct_obstacle_neighbors_r1"] == 0
+    assert blocker["direct_obstacle_neighbors_r2"] == 0
+    assert blocker["direct_obstacle_component_size_in_aisle"] == 1
+    assert blocker["strong_sensor_neighbors_r1"] == 0
+    assert blocker["strong_sensor_component_size_in_aisle"] == 1
 
 
 def test_missing_start_free_reports_start_block_and_slope_cause():
