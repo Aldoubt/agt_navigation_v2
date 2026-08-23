@@ -95,6 +95,9 @@ def test_d31_environment_throat_reports_world_location_and_constraint_sources():
 
     assert audit["schema"] == "agt_vehicle_clearance_throat_audit/v2"
     assert audit["clearance_throat_aisles"] == 1
+    assert audit["nearest_environment_constraint_causes"] == {
+        "STRONG_SENSOR_OBSTACLE": 1,
+    }
     report = audit["aisles"][0]
     assert report["status"] == "CLEARANCE_THROAT"
     assert report["interior_terminal_raster_connectivity"] is True
@@ -140,6 +143,7 @@ def test_d31_lateral_boundary_throat_is_not_misreported_as_environment_obstacle(
         provenance=provenance,
     )
 
+    assert audit["nearest_environment_constraint_causes"] == {}
     report = audit["aisles"][0]
     assert report["status"] == "CLEARANCE_THROAT"
     assert report["bottleneck_clearance_m"] == pytest.approx(0.15)
