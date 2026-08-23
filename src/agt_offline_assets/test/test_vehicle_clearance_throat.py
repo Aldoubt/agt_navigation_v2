@@ -152,3 +152,88 @@ def test_d31_lateral_boundary_throat_is_not_misreported_as_environment_obstacle(
     assert throat["nearest_environment_constraint"] is None
     assert throat["lower_v_constraint"]["source"] == "LATERAL_AISLE_BOUNDARY"
     assert throat["upper_v_constraint"]["source"] == "LATERAL_AISLE_BOUNDARY"
+
+
+def test_e1_strong_sensor_throat_reports_selected_layer_strength_and_persistence():
+    from agt_offline_assets.height_layer_ablation import HeightLayerObstacleEvidence
+    from agt_offline_assets.vehicle_sensor_evidence_audit import (
+        build_vehicle_sensor_evidence_root_cause_audit,
+    )
+
+    shape = (5, 5)
+    point_count = np.full(shape, 100, dtype=np.int32)
+    ground_support = np.full(shape, 12, dtype=np.int32)
+    selected_obstacle = np.zeros(shape, dtype=np.int32)
+    selected_obstacle[2, 2] = 6
+    low = np.zeros(shape, dtype=np.int32)
+    mid = np.zeros(shape, dtype=np.int32)
+    high = np.zeros(shape, dtype=np.int32)
+    low[2, 2] = 1
+    mid[2, 2] = 5
+    high[2, 2] = 9
+    navigation = SimpleNamespace(
+        point_count=point_count,
+        ground_support_count=ground_support,
+        obstacle_count=selected_obstacle,
+        slope_deg=np.zeros(shape, dtype=np.float64),
+        step_m=np.zeros(shape, dtype=np.float64),
+        config=SimpleNamespace(minimum_ground_support_points=2),
+    )
+    evidence = HeightLayerObstacleEvidence(
+        low_count=low,
+        mid_count=mid,
+        high_count=high,
+        obstacle_min_height_m=0.12,
+        low_max_height_m=0.30,
+        mid_max_height_m=0.60,
+        obstacle_max_height_m=1.00,
+    )
+    strong = np.zeros(shape, dtype=bool)
+    strong[2, 2] = True
+    strong[2, 3] = True
+    provenance = SimpleNamespace(strong_sensor_obstacle_mask=strong)
+    throat_audit = {
+        "schema": "agt_vehicle_clearance_throat_audit/v2",
+        "aisles": [
+            {
+                "aisle_id": "aisle_001",
+                "status": "CLEARANCE_THROAT",
+                "primary_throat": {
+                    "nearest_environment_constraint": {
+                        "source": "STRONG_SENSOR_OBSTACLE",
+                        "row": 2,
+                        "col": 2,
+                        "distance_m": 0.05,
+                    }
+                },
+            }
+        ],
+    }
+
+    audit = build_vehicle_sensor_evidence_root_cause_audit(
+        navigation,
+        evidence,
+        throat_audit,
+        provenance,
+        selected_layers=("LOW", "MID"),
+        soft_obstacle_max_count=4,
+        soft_obstacle_max_ratio=0.05,
+    )
+
+    assert audit["schema"] == "agt_vehicle_sensor_evidence_root_cause/v1"
+    assert audit["strong_sensor_throat_count"] == 1
+    assert audit["strong_reason_counts"] == {"COUNT_AND_RATIO": 1}
+    assert audit["height_layer_dominance_counts"] == {"MID": 1}
+    record = audit["records"][0]
+    assert record["aisle_id"] == "aisle_001"
+    assert record["selected_layers"] == ["LOW", "MID"]
+    assert record["low_count"] == 1
+    assert record["mid_count"] == 5
+    assert record["high_count"] == 9
+    assert record["selected_obstacle_count"] == 6
+    assert record["selected_obstacle_ratio"] == pytest.approx(0.06)
+    assert record["strong_sensor_reason"] == "COUNT_AND_RATIO"
+    assert record["height_layer_dominance"] == "MID"
+    assert record["ground_supported"] is True
+    assert record["strong_sensor_neighbors_r1"] == 1
+    assert record["strong_sensor_component_size"] == 2
