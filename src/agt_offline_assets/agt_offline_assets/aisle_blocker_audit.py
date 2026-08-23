@@ -15,7 +15,7 @@ smallest raster barrier that still separates the longitudinal ends.
 
 from __future__ import annotations
 
-from collections import Counter
+from collections import Counter, deque
 import heapq
 from typing import Any
 
@@ -190,9 +190,47 @@ def _failure_mode(*, connected: bool, start_free: bool, end_free: bool) -> str:
     return "NO_END_TO_END_COMPONENT"
 
 
+def _neighbor_count(mask: np.ndarray, owned: np.ndarray, row: int, col: int, radius: int) -> int:
+    height, width = mask.shape
+    r0 = max(0, row - radius)
+    r1 = min(height, row + radius + 1)
+    c0 = max(0, col - radius)
+    c1 = min(width, col + radius + 1)
+    local = np.asarray(mask[r0:r1, c0:c1], dtype=bool) & np.asarray(
+        owned[r0:r1, c0:c1], dtype=bool
+    )
+    count = int(np.count_nonzero(local))
+    if bool(mask[row, col]) and bool(owned[row, col]):
+        count -= 1
+    return max(0, count)
+
+
+def _component_size(mask: np.ndarray, owned: np.ndarray, row: int, col: int) -> int:
+    active = np.asarray(mask, dtype=bool) & np.asarray(owned, dtype=bool)
+    if not bool(active[row, col]):
+        return 0
+    height, width = active.shape
+    seen = {(int(row), int(col))}
+    queue = deque([(int(row), int(col))])
+    while queue:
+        rr, cc = queue.popleft()
+        for dr, dc in _NEIGHBOURS:
+            nr = rr + dr
+            nc = cc + dc
+            if not (0 <= nr < height and 0 <= nc < width):
+                continue
+            key = (nr, nc)
+            if key in seen or not bool(active[nr, nc]):
+                continue
+            seen.add(key)
+            queue.append(key)
+    return len(seen)
+
+
 def _critical_blocker_cells(
     navigation: Any,
     critical: np.ndarray,
+    owned: np.ndarray,
     occupancy: np.ndarray,
     provenance: Any,
     materialized: Any | None,
@@ -205,6 +243,18 @@ def _critical_blocker_cells(
     )
     slope = np.asarray(getattr(navigation, "slope_deg", np.zeros_like(occupancy, dtype=float)), dtype=np.float64)
     step = np.asarray(getattr(navigation, "step_m", np.zeros_like(occupancy, dtype=float)), dtype=np.float64)
+    strong = np.asarray(
+        getattr(provenance, "strong_sensor_obstacle_mask", np.zeros_like(occupancy)),
+        dtype=bool,
+    )
+    soft = np.asarray(
+        getattr(provenance, "soft_occupied_mask", np.zeros_like(occupancy)),
+        dtype=bool,
+    )
+    direct = np.asarray(
+        getattr(provenance, "direct_obstacle_mask", strong | soft),
+        dtype=bool,
+    )
     resolution = float(navigation.resolution_m)
     origin_x = float(navigation.origin_x_m)
     origin_y = float(navigation.origin_y_m)
@@ -235,6 +285,16 @@ def _critical_blocker_cells(
                 "ground_support_count": int(ground_support[rr, cc]),
                 "slope_deg": float(slope[rr, cc]),
                 "step_m": float(step[rr, cc]),
+                "direct_obstacle_neighbors_r1": _neighbor_count(direct, owned, rr, cc, 1),
+                "direct_obstacle_neighbors_r2": _neighbor_count(direct, owned, rr, cc, 2),
+                "direct_obstacle_component_size_in_aisle": _component_size(
+                    direct, owned, rr, cc
+                ),
+                "strong_sensor_neighbors_r1": _neighbor_count(strong, owned, rr, cc, 1),
+                "strong_sensor_neighbors_r2": _neighbor_count(strong, owned, rr, cc, 2),
+                "strong_sensor_component_size_in_aisle": _component_size(
+                    strong, owned, rr, cc
+                ),
             }
         )
     return records
@@ -282,6 +342,7 @@ def build_aisle_blocker_audit(
         blocker_cells = _critical_blocker_cells(
             navigation,
             critical,
+            owned,
             occupancy,
             provenance,
             materialized,
