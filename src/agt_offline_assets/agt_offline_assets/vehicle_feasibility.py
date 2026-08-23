@@ -3,9 +3,12 @@
 The formal Navigation Map remains an environment occupancy product. This module
 adds a separate review layer that asks whether a vehicle center can traverse an
 aisle while maintaining a requested clearance radius from non-FREE cells and
-from the geometric aisle boundary.
+from the *lateral* geometric aisle boundary.
 
-It never mutates or inflates the formal PGM.
+D1 deliberately does not treat the longitudinal start/end caps of an aisle as
+virtual obstacles. Start and end are interior terminal bands inset from the
+geometric extrema, while clearance is constrained by real environment evidence
+and by lateral aisle width. The audit never mutates or inflates the formal PGM.
 """
 
 from __future__ import annotations
@@ -29,6 +32,7 @@ _NEIGHBOURS = (
     (1, 0),
     (1, 1),
 )
+_CLEARANCE_CONTRACT = "ENVIRONMENT_PLUS_LATERAL_AISLE_BOUNDARY"
 
 
 def _require_scipy():
@@ -61,27 +65,107 @@ def _owned_mask(geometric: np.ndarray, v: np.ndarray, diagnostic: Any) -> np.nda
     return geometric & (v >= low - 1.0e-9) & (v <= high + 1.0e-9)
 
 
-def _end_masks(owned: np.ndarray, u: np.ndarray, resolution_m: float) -> tuple[np.ndarray, np.ndarray]:
+def _nearest_u_band(owned: np.ndarray, u: np.ndarray, target_u: float, resolution_m: float) -> np.ndarray:
+    tolerance = 0.51 * float(resolution_m)
+    band = owned & (np.abs(u - float(target_u)) <= tolerance)
+    if np.any(band):
+        return band
+    distances = np.where(owned, np.abs(u - float(target_u)), np.inf)
+    nearest = float(np.min(distances))
+    if not np.isfinite(nearest):
+        return np.zeros_like(owned, dtype=bool)
+    return owned & (np.abs(distances - nearest) <= 1.0e-9)
+
+
+def _terminal_masks(
+    owned: np.ndarray,
+    u: np.ndarray,
+    resolution_m: float,
+    terminal_inset_m: float,
+) -> tuple[np.ndarray, np.ndarray, float, float, float]:
+    """Return interior start/end terminal bands without virtual end-cap clearance."""
+
     if not np.any(owned):
         empty = np.zeros_like(owned, dtype=bool)
-        return empty, empty
+        return empty, empty, 0.0, 0.0, 0.0
     u_min = float(np.min(u[owned]))
     u_max = float(np.max(u[owned]))
-    tolerance = 0.51 * float(resolution_m)
-    return owned & (u <= u_min + tolerance), owned & (u >= u_max - tolerance)
+    span = max(0.0, u_max - u_min)
+    # Preserve at least roughly one raster interval between terminal bands. A
+    # short synthetic aisle therefore remains auditable instead of producing
+    # empty terminal sets when the requested inset is larger than half its span.
+    maximum_inset = max(0.0, 0.5 * (span - float(resolution_m)))
+    effective_inset = min(float(terminal_inset_m), maximum_inset)
+    start_u = u_min + effective_inset
+    end_u = u_max - effective_inset
+    return (
+        _nearest_u_band(owned, u, start_u, resolution_m),
+        _nearest_u_band(owned, u, end_u, resolution_m),
+        effective_inset,
+        start_u,
+        end_u,
+    )
 
 
-def _clearance_field_m(traversable: np.ndarray, resolution_m: float) -> np.ndarray:
-    """Cell-center clearance to nearest blocked/aisle-exterior cell boundary."""
+def _environment_clearance_field_m(
+    accepted_occupancy: np.ndarray,
+    resolution_m: float,
+) -> np.ndarray:
+    """Distance from FREE cell centers to real non-FREE/map-exterior evidence."""
 
     ndimage = _require_scipy()
-    padded = np.pad(np.asarray(traversable, dtype=bool), 1, constant_values=False)
+    free = np.asarray(accepted_occupancy, dtype=np.uint8) == FREE
+    padded = np.pad(free, 1, constant_values=False)
     distance_centers = ndimage.distance_transform_edt(padded)[1:-1, 1:-1]
-    # EDT measures center-to-center distance to the nearest blocked cell. Subtract
-    # half a cell so a one-cell-wide corridor has 0.5*resolution geometric
-    # clearance rather than 1.0*resolution.
     clearance = distance_centers * float(resolution_m) - 0.5 * float(resolution_m)
     return np.maximum(clearance, 0.0)
+
+
+def _lateral_clearance_field_m(
+    owned: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    resolution_m: float,
+) -> np.ndarray:
+    """Approximate local clearance to aisle side boundaries, excluding end caps.
+
+    Per-u bins estimate local transverse bounds. Neighbouring bins are merged to
+    remain stable when a row-aligned aisle is oblique to the raster axes. This
+    preserves local width variation without converting u-min/u-max into virtual
+    obstacles.
+    """
+
+    clearance = np.zeros_like(u, dtype=np.float64)
+    if not np.any(owned):
+        return clearance
+    resolution = float(resolution_m)
+    u_min = float(np.min(u[owned]))
+    bin_index = np.floor((u - u_min) / resolution + 1.0e-9).astype(np.int64)
+    owned_bins = bin_index[owned]
+    bin_count = int(np.max(owned_bins)) + 1
+    minimum_v = np.full(bin_count, np.inf, dtype=np.float64)
+    maximum_v = np.full(bin_count, -np.inf, dtype=np.float64)
+    np.minimum.at(minimum_v, owned_bins, v[owned])
+    np.maximum.at(maximum_v, owned_bins, v[owned])
+
+    local_minimum = minimum_v.copy()
+    local_maximum = maximum_v.copy()
+    for shift in (-1, 1):
+        source = np.arange(bin_count, dtype=np.int64) + shift
+        valid = (source >= 0) & (source < bin_count)
+        local_minimum[valid] = np.minimum(
+            local_minimum[valid], minimum_v[source[valid]]
+        )
+        local_maximum[valid] = np.maximum(
+            local_maximum[valid], maximum_v[source[valid]]
+        )
+
+    bins = np.clip(bin_index[owned], 0, bin_count - 1)
+    low_edge = local_minimum[bins] - 0.5 * resolution
+    high_edge = local_maximum[bins] + 0.5 * resolution
+    values = np.minimum(v[owned] - low_edge, high_edge - v[owned])
+    clearance[owned] = np.maximum(values, 0.0)
+    return clearance
 
 
 def _widest_end_to_end_clearance(
@@ -136,11 +220,14 @@ def build_vehicle_feasible_aisle_audit(
     accepted_occupancy: np.ndarray,
     *,
     clearance_radius_m: float,
+    terminal_inset_m: float = 0.50,
 ) -> list[dict[str, object]]:
-    """Return raster and vehicle-clearance connectivity for accepted ROW_ROW aisles."""
+    """Return D1 raster and vehicle-clearance connectivity for ROW_ROW aisles."""
 
     if clearance_radius_m < 0.0:
         raise ValueError("clearance_radius_m must be >= 0")
+    if terminal_inset_m < 0.0:
+        raise ValueError("terminal_inset_m must be >= 0")
     occupancy = np.asarray(accepted_occupancy, dtype=np.uint8)
     geometric = np.asarray(corridor.aisle_geometric_envelope, dtype=bool)
     if occupancy.shape != geometric.shape:
@@ -152,6 +239,7 @@ def build_vehicle_feasible_aisle_audit(
     if resolution <= 0.0:
         raise ValueError("vehicle feasibility resolution must be > 0")
     u, v = _grid_uv(navigation, structure)
+    environment_clearance = _environment_clearance_field_m(occupancy, resolution)
 
     reports: list[dict[str, object]] = []
     for diagnostic in corridor.aisle_pair_diagnostics:
@@ -162,11 +250,18 @@ def build_vehicle_feasible_aisle_audit(
 
         owned = _owned_mask(geometric, v, diagnostic)
         traversable = owned & (occupancy == FREE)
-        start_zone, end_zone = _end_masks(owned, u, resolution)
+        start_zone, end_zone, effective_inset, start_u, end_u = _terminal_masks(
+            owned,
+            u,
+            resolution,
+            terminal_inset_m,
+        )
         start_has_free = bool(np.any(start_zone & traversable))
         end_has_free = bool(np.any(end_zone & traversable))
 
-        clearance = _clearance_field_m(traversable, resolution)
+        lateral_clearance = _lateral_clearance_field_m(owned, u, v, resolution)
+        clearance = np.minimum(environment_clearance, lateral_clearance)
+        clearance = np.where(traversable, clearance, 0.0)
         widest = _widest_end_to_end_clearance(
             traversable,
             clearance,
@@ -193,8 +288,13 @@ def build_vehicle_feasible_aisle_audit(
                 "aisle_id": f"aisle_{int(diagnostic.pair_index):03d}",
                 "pair_index": int(diagnostic.pair_index),
                 "diagnostic_status": str(diagnostic.status),
+                "clearance_contract": _CLEARANCE_CONTRACT,
                 "raster_grid_connectivity": raster_connected,
                 "required_clearance_radius_m": float(clearance_radius_m),
+                "terminal_inset_m": float(terminal_inset_m),
+                "effective_terminal_inset_m": float(effective_inset),
+                "start_terminal_u_m": float(start_u),
+                "end_terminal_u_m": float(end_u),
                 "vehicle_feasible_connectivity": vehicle_connected,
                 "start_has_free": start_has_free,
                 "end_has_free": end_has_free,
