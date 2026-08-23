@@ -190,6 +190,56 @@ def _failure_mode(*, connected: bool, start_free: bool, end_free: bool) -> str:
     return "NO_END_TO_END_COMPONENT"
 
 
+def _critical_blocker_cells(
+    navigation: Any,
+    critical: np.ndarray,
+    occupancy: np.ndarray,
+    provenance: Any,
+    materialized: Any | None,
+) -> list[dict[str, object]]:
+    point_count = np.asarray(getattr(navigation, "point_count", np.zeros_like(occupancy)), dtype=np.int32)
+    obstacle_count = np.asarray(getattr(navigation, "obstacle_count", np.zeros_like(occupancy)), dtype=np.int32)
+    ground_support = np.asarray(
+        getattr(navigation, "ground_support_count", np.zeros_like(occupancy)),
+        dtype=np.int32,
+    )
+    slope = np.asarray(getattr(navigation, "slope_deg", np.zeros_like(occupancy, dtype=float)), dtype=np.float64)
+    step = np.asarray(getattr(navigation, "step_m", np.zeros_like(occupancy, dtype=float)), dtype=np.float64)
+    resolution = float(navigation.resolution_m)
+    origin_x = float(navigation.origin_x_m)
+    origin_y = float(navigation.origin_y_m)
+
+    records: list[dict[str, object]] = []
+    for row, col in np.argwhere(critical):
+        rr = int(row)
+        cc = int(col)
+        points = int(point_count[rr, cc])
+        obstacles = int(obstacle_count[rr, cc])
+        records.append(
+            {
+                "row": rr,
+                "col": cc,
+                "x_m": float(origin_x + (cc + 0.5) * resolution),
+                "y_m": float(origin_y + (rr + 0.5) * resolution),
+                "cause": _exclusive_blocker_cause(
+                    rr,
+                    cc,
+                    occupancy,
+                    provenance,
+                    materialized,
+                ),
+                "occupancy": int(occupancy[rr, cc]),
+                "obstacle_count": obstacles,
+                "point_count": points,
+                "obstacle_ratio": float(obstacles / max(points, 1)),
+                "ground_support_count": int(ground_support[rr, cc]),
+                "slope_deg": float(slope[rr, cc]),
+                "step_m": float(step[rr, cc]),
+            }
+        )
+    return records
+
+
 def build_aisle_blocker_audit(
     navigation: Any,
     structure: Any,
@@ -229,17 +279,16 @@ def build_aisle_blocker_audit(
             resolution,
         )
         critical = path_mask & (occupancy != FREE)
-        cause_counts: Counter[str] = Counter()
-        for row, col in np.argwhere(critical):
-            cause_counts[
-                _exclusive_blocker_cause(
-                    int(row),
-                    int(col),
-                    occupancy,
-                    provenance,
-                    materialized,
-                )
-            ] += 1
+        blocker_cells = _critical_blocker_cells(
+            navigation,
+            critical,
+            occupancy,
+            provenance,
+            materialized,
+        )
+        cause_counts: Counter[str] = Counter(
+            str(item["cause"]) for item in blocker_cells
+        )
 
         connected = bool(total > 0 and blocker_count == 0 and start_free and end_free)
         if connected:
@@ -269,6 +318,7 @@ def build_aisle_blocker_audit(
                 "minimum_blocker_cell_count": int(blocker_count),
                 "critical_path_cell_count": int(np.count_nonzero(path_mask)),
                 "critical_blocker_cause_counts": dict(sorted(cause_counts.items())),
+                "critical_blocker_cells": blocker_cells,
                 "dominant_blocker_cause": dominant,
             }
         )
