@@ -9,11 +9,21 @@ from agt_offline_assets.navigation_map_derivation import FREE, OCCUPIED
 def _fixture(occupancy: np.ndarray, *, cause: str | None = None):
     occupancy = np.asarray(occupancy, dtype=np.uint8)
     shape = occupancy.shape
+    point_count = np.full(shape, 100, dtype=np.int32)
+    obstacle_count = np.zeros(shape, dtype=np.int32)
+    ground_support_count = np.full(shape, 20, dtype=np.int32)
+    slope_deg = np.zeros(shape, dtype=np.float64)
+    step_m = np.zeros(shape, dtype=np.float64)
     navigation = SimpleNamespace(
         occupancy=occupancy,
         origin_x_m=0.0,
         origin_y_m=0.0,
         resolution_m=1.0,
+        point_count=point_count,
+        obstacle_count=obstacle_count,
+        ground_support_count=ground_support_count,
+        slope_deg=slope_deg,
+        step_m=step_m,
     )
     structure = SimpleNamespace(
         row_model=SimpleNamespace(direction_xy=np.array([1.0, 0.0]))
@@ -44,6 +54,8 @@ def _fixture(occupancy: np.ndarray, *, cause: str | None = None):
             "STEP_HARD": "step_hard_mask",
         }[cause]
         masks[key] = occupancy == OCCUPIED
+        if cause == "STRONG_SENSOR_OBSTACLE":
+            navigation.obstacle_count[occupancy == OCCUPIED] = 6
     provenance = SimpleNamespace(**masks)
     materialized = SimpleNamespace(
         row_structural_blocked_mask=empty.copy(),
@@ -71,6 +83,7 @@ def test_connected_aisle_reports_no_blocker():
     assert report["failure_mode"] == "CONNECTED"
     assert report["minimum_blocker_cell_count"] == 0
     assert report["dominant_blocker_cause"] == "NONE"
+    assert report["critical_blocker_cells"] == []
 
 
 def test_full_cross_section_sensor_barrier_is_localized_and_classified():
@@ -94,6 +107,15 @@ def test_full_cross_section_sensor_barrier_is_localized_and_classified():
     assert report["minimum_blocker_cell_count"] == 1
     assert report["dominant_blocker_cause"] == "STRONG_SENSOR_OBSTACLE"
     assert report["critical_blocker_cause_counts"]["STRONG_SENSOR_OBSTACLE"] >= 1
+    assert len(report["critical_blocker_cells"]) == 1
+    blocker = report["critical_blocker_cells"][0]
+    assert blocker["cause"] == "STRONG_SENSOR_OBSTACLE"
+    assert blocker["obstacle_count"] == 6
+    assert blocker["point_count"] == 100
+    assert blocker["obstacle_ratio"] == 0.06
+    assert blocker["ground_support_count"] == 20
+    assert blocker["slope_deg"] == 0.0
+    assert blocker["step_m"] == 0.0
 
 
 def test_missing_start_free_reports_start_block_and_slope_cause():
