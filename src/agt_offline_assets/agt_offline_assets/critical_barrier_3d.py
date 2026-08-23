@@ -255,7 +255,7 @@ def build_critical_barrier_height_audit(
             if np.any(obstacle):
                 cast_list = acc["obstacle_heights"]
                 assert isinstance(cast_list, list)
-                cast_list.append(np.asarray(h[obstacle], dtype=np.float32))
+                cast_list.append(np.asarray(h[obstacle], dtype=np.float64))
 
             hist = plot_histograms[str(acc["plot_key"])]
             hist["uv"] += np.histogram2d(uu, vv, bins=(u_edges, v_edges))[0].astype(
