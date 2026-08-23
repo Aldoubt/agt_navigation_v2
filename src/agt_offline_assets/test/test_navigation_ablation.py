@@ -77,14 +77,8 @@ def test_a1_removes_only_raster_padding_from_environment_occupancy():
     obstacle[2, 2] = 3
     padded_occupancy = baseline.occupancy.copy()
     padded_occupancy[1:4, 1:4] = OCCUPIED
-    baseline = replace(
-        baseline,
-        obstacle_count=obstacle,
-        occupancy=padded_occupancy,
-    )
-
+    baseline = replace(baseline, obstacle_count=obstacle, occupancy=padded_occupancy)
     a1 = apply_navigation_ablation_profile(baseline, "A1")
-
     assert a1.config.obstacle_padding_m == 0.0
     assert a1.occupancy[2, 2] == OCCUPIED
     assert np.count_nonzero(a1.occupancy == OCCUPIED) == 1
@@ -101,17 +95,9 @@ def test_a2_does_not_turn_interpolated_geometry_without_ground_support_into_hard
     slope[1, 1] = 30.0
     step[1, 1] = 0.30
     occupancy[1, 1] = OCCUPIED
-    baseline = replace(
-        baseline,
-        ground_support_count=support,
-        slope_deg=slope,
-        step_m=step,
-        occupancy=occupancy,
-    )
-
+    baseline = replace(baseline, ground_support_count=support, slope_deg=slope, step_m=step, occupancy=occupancy)
     a1 = apply_navigation_ablation_profile(baseline, "A1")
     a2 = apply_navigation_ablation_profile(baseline, "A2")
-
     assert a1.occupancy[1, 1] == OCCUPIED
     assert a2.occupancy[1, 1] == UNKNOWN
     assert np.isnan(a2.slope_deg[1, 1])
@@ -128,23 +114,12 @@ def test_a2_keeps_direct_obstacle_but_does_not_repromote_ignored_slope_to_hard()
     obstacle[1, 1] = 2
     slope[1, 1] = 30.0
     occupancy[1, 1] = OCCUPIED
-    baseline = replace(
-        baseline,
-        ground_support_count=support,
-        obstacle_count=obstacle,
-        slope_deg=slope,
-        occupancy=occupancy,
-    )
-
+    baseline = replace(baseline, ground_support_count=support, obstacle_count=obstacle, slope_deg=slope, occupancy=occupancy)
     a2 = apply_navigation_ablation_profile(baseline, "A2")
     provenance = derive_hard_occupancy_provenance(
         a2,
-        StructureAwareNavigationConfig(
-            soft_obstacle_max_count=4,
-            soft_obstacle_max_ratio=0.05,
-        ),
+        StructureAwareNavigationConfig(soft_obstacle_max_count=4, soft_obstacle_max_ratio=0.05),
     )
-
     assert a2.occupancy[1, 1] == OCCUPIED
     assert not provenance.slope_hard_mask[1, 1]
     assert provenance.soft_occupied_mask[1, 1]
@@ -155,7 +130,6 @@ def test_a3_local_linear_step_is_zero_on_plane_and_detects_height_discontinuity(
     plane = 0.03 * cols + 0.01 * rows
     plane_step = derive_local_linear_step_map(plane)
     assert np.nanmax(plane_step[1:-1, 1:-1]) < 1.0e-9
-
     discontinuous = plane.copy()
     discontinuous[:, 5:] += 0.30
     detected = derive_local_linear_step_map(discontinuous)
@@ -168,16 +142,9 @@ def test_a3_replaces_window_range_false_step_on_smooth_plane():
     ground = 0.03 * cols + 0.01 * rows
     fake_window_range = np.full((7, 9), 0.20, dtype=np.float64)
     occupancy = np.full((7, 9), OCCUPIED, dtype=np.uint8)
-    baseline = replace(
-        baseline,
-        ground_height_m=ground,
-        step_m=fake_window_range,
-        occupancy=occupancy,
-    )
-
+    baseline = replace(baseline, ground_height_m=ground, step_m=fake_window_range, occupancy=occupancy)
     a2 = apply_navigation_ablation_profile(baseline, "A2")
     a3 = apply_navigation_ablation_profile(baseline, "A3")
-
     assert np.count_nonzero(a2.occupancy == OCCUPIED) == a2.occupancy.size
     assert np.count_nonzero(a3.occupancy == OCCUPIED) == 0
     assert np.count_nonzero(a3.occupancy == FREE) == a3.occupancy.size
@@ -189,7 +156,6 @@ def test_d2_height_layer_profiles_are_nested_and_full_matches_a3():
         apply_height_layer_ablation_profile,
         height_layer_ablation_spec,
     )
-
     a3 = _result(shape=(1, 3))
     obstacle = np.full((1, 3), 3, dtype=np.int32)
     a3 = replace(a3, obstacle_count=obstacle, occupancy=np.full((1, 3), OCCUPIED, dtype=np.uint8))
@@ -202,11 +168,9 @@ def test_d2_height_layer_profiles_are_nested_and_full_matches_a3():
         mid_max_height_m=0.60,
         obstacle_max_height_m=1.00,
     )
-
     full = apply_height_layer_ablation_profile(a3, evidence, "D2-FULL")
     low_mid = apply_height_layer_ablation_profile(a3, evidence, "D2-LM")
     low = apply_height_layer_ablation_profile(a3, evidence, "D2-L")
-
     assert height_layer_ablation_spec("D2-FULL").included_layers == ("LOW", "MID", "HIGH")
     assert np.array_equal(full.obstacle_count, a3.obstacle_count)
     assert np.array_equal(full.occupancy, a3.occupancy)
@@ -216,33 +180,48 @@ def test_d2_height_layer_profiles_are_nested_and_full_matches_a3():
 
 def test_d2_height_layer_evidence_bins_ground_relative_points_once():
     from types import SimpleNamespace
-
     from agt_offline_assets.height_layer_ablation import derive_height_layer_obstacle_evidence
-
     navigation = _result(shape=(1, 1))
-    xyz = np.asarray(
-        [
-            [0.05, 0.05, 0.05],
-            [0.05, 0.05, 0.15],
-            [0.05, 0.05, 0.29],
-            [0.05, 0.05, 0.30],
-            [0.05, 0.05, 0.59],
-            [0.05, 0.05, 0.60],
-            [0.05, 0.05, 0.99],
-            [0.05, 0.05, 1.20],
-        ],
-        dtype=np.float64,
-    )
+    xyz = np.asarray([
+        [0.05, 0.05, 0.05], [0.05, 0.05, 0.15], [0.05, 0.05, 0.29], [0.05, 0.05, 0.30],
+        [0.05, 0.05, 0.59], [0.05, 0.05, 0.60], [0.05, 0.05, 0.99], [0.05, 0.05, 1.20],
+    ], dtype=np.float64)
     cloud = SimpleNamespace(xyz=lambda: xyz)
-
-    evidence = derive_height_layer_obstacle_evidence(
-        cloud,
-        navigation,
-        low_max_height_m=0.30,
-        mid_max_height_m=0.60,
-    )
-
+    evidence = derive_height_layer_obstacle_evidence(cloud, navigation, low_max_height_m=0.30, mid_max_height_m=0.60)
     assert evidence.low_count[0, 0] == 2
     assert evidence.mid_count[0, 0] == 2
     assert evidence.high_count[0, 0] == 2
     assert evidence.counts() == {"LOW": 2, "MID": 2, "HIGH": 2, "FULL": 6}
+
+
+def test_d21_vertical_evidence_bundle_round_trips_arrays_and_grid_contract(tmp_path):
+    import json
+    from agt_offline_assets import height_layer_ablation as module
+
+    assert hasattr(module, "write_height_layer_evidence_bundle")
+    assert hasattr(module, "load_height_layer_evidence_bundle")
+
+    navigation = _result(shape=(2, 3))
+    evidence = module.HeightLayerObstacleEvidence(
+        low_count=np.asarray([[1, 2, 3], [4, 5, 6]], dtype=np.int32),
+        mid_count=np.asarray([[6, 5, 4], [3, 2, 1]], dtype=np.int32),
+        high_count=np.asarray([[0, 1, 0], [1, 0, 1]], dtype=np.int32),
+        obstacle_min_height_m=0.12,
+        low_max_height_m=0.30,
+        mid_max_height_m=0.60,
+        obstacle_max_height_m=1.00,
+    )
+
+    metadata_path = module.write_height_layer_evidence_bundle(evidence, navigation, tmp_path / "vertical_evidence")
+    restored = module.load_height_layer_evidence_bundle(metadata_path.parent)
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+
+    assert metadata["schema"] == "agt_vertical_obstacle_evidence/v1"
+    assert metadata["grid"]["shape"] == [2, 3]
+    assert metadata["grid"]["resolution_m"] == 0.10
+    assert metadata["status"] == "EXPERIMENTAL_REVIEW_EVIDENCE"
+    assert set(metadata["arrays"]) == {"LOW", "MID", "HIGH"}
+    assert all(len(item["sha256"]) == 64 for item in metadata["arrays"].values())
+    assert np.array_equal(restored.low_count, evidence.low_count)
+    assert np.array_equal(restored.mid_count, evidence.mid_count)
+    assert np.array_equal(restored.high_count, evidence.high_count)
