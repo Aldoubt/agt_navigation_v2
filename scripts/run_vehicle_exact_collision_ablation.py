@@ -239,28 +239,60 @@ def _build_exact_review_summary(
     throat_audit: dict[str, object],
     blocker_reports: list[dict[str, object]],
 ) -> dict[str, object]:
-    disconnected = [
+    full_extent_disconnected = [
         item for item in blocker_reports if not bool(item.get("grid_connectivity"))
     ]
+    throat_reports = throat_audit.get("aisles") or []
+    if not isinstance(throat_reports, list):
+        raise ValueError("E3 exact throat aisle reports must be a list")
+    interior_terminal_ids = sorted(
+        str(item.get("aisle_id"))
+        for item in throat_reports
+        if isinstance(item, dict)
+        and str(item.get("status", "")) == "NO_INTERIOR_TERMINAL_PATH"
+    )
+    expected_interior_count = int(
+        throat_audit.get("no_interior_terminal_path_aisles", 0)
+    )
+    if len(interior_terminal_ids) != expected_interior_count:
+        raise ValueError("E3 exact interior-terminal disconnected aisle count mismatch")
+
+    full_extent_ids = sorted(
+        str(item.get("aisle_id")) for item in full_extent_disconnected
+    )
+    interior_terminal_id_set = set(interior_terminal_ids)
+    interior_terminal_blockers = [
+        item
+        for item in full_extent_disconnected
+        if str(item.get("aisle_id")) in interior_terminal_id_set
+    ]
+    endpoint_only_ids = sorted(set(full_extent_ids) - interior_terminal_id_set)
+
     causes = throat_audit.get("nearest_environment_constraint_causes") or {}
     if not isinstance(causes, dict):
         raise ValueError("E3 exact throat cause summary must be an object")
     return {
         "aisle_count": int(throat_audit.get("aisle_count", 0)),
         "clearance_throat_aisles": int(throat_audit.get("clearance_throat_aisles", 0)),
-        "no_interior_terminal_path_aisles": int(
-            throat_audit.get("no_interior_terminal_path_aisles", 0)
-        ),
+        "no_interior_terminal_path_aisles": expected_interior_count,
         "vehicle_feasible_aisles": int(throat_audit.get("vehicle_feasible_aisles", 0)),
         "nearest_environment_constraint_causes": dict(
             sorted((str(key), int(value)) for key, value in causes.items())
         ),
-        "disconnected_aisle_count": len(disconnected),
-        "disconnected_aisle_ids": sorted(
-            str(item.get("aisle_id")) for item in disconnected
-        ),
+        "disconnected_aisle_count": len(interior_terminal_ids),
+        "disconnected_aisle_ids": interior_terminal_ids,
+        "interior_terminal_disconnected_aisle_count": len(interior_terminal_ids),
+        "interior_terminal_disconnected_aisle_ids": interior_terminal_ids,
+        "full_extent_b0_disconnected_aisle_count": len(full_extent_ids),
+        "full_extent_b0_disconnected_aisle_ids": full_extent_ids,
+        "endpoint_only_full_extent_disconnected_aisle_ids": endpoint_only_ids,
         "minimum_blocker_cells_total": sum(
-            int(item.get("minimum_blocker_cell_count", 0)) for item in disconnected
+            int(item.get("minimum_blocker_cell_count", 0))
+            for item in interior_terminal_blockers
+        ),
+        "full_extent_minimum_blocker_cells_total": sum(
+            int(item.get("minimum_blocker_cell_count", 0))
+            for item in full_extent_disconnected
         ),
     }
 
