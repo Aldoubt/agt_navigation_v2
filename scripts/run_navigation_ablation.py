@@ -7,6 +7,7 @@ Experimental control contract:
 - D1.1 vehicle feasibility is a downstream interior-terminal review layer.
 - D2.1 vertical evidence is persisted as a sidecar, never map authority.
 - D3 vehicle collision-envelope review is derived from A3 + vertical evidence.
+- D3.1 clearance-throat audit explains vehicle-width bottlenecks without changing maps.
 - D0 3D barrier audit remains optional and diagnostic only.
 
 All outputs from this script are EXPERIMENTAL_REVIEW_EVIDENCE, never formal map
@@ -67,6 +68,10 @@ from agt_offline_assets.navigation_ablation import (  # noqa: E402
     ABLATION_PROFILE_KEYS,
     apply_navigation_ablation_profile,
     navigation_ablation_spec,
+)
+from agt_offline_assets.vehicle_clearance_throat import (  # noqa: E402
+    build_vehicle_clearance_throat_audit,
+    write_vehicle_clearance_throat_overlays,
 )
 from agt_offline_assets.vehicle_collision_envelope import (  # noqa: E402
     VehicleCollisionEnvelope,
@@ -211,6 +216,20 @@ def _write_vehicle_collision_envelope_report(
     payload = {**document, "review_location_profile": profile}
     path.write_text(
         json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_vehicle_clearance_throat_report(
+    output: Path,
+    document: dict[str, object],
+) -> Path:
+    review = output / "vehicle_review"
+    review.mkdir(parents=True, exist_ok=True)
+    path = review / "clearance_throats.json"
+    path.write_text(
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     return path
@@ -471,6 +490,7 @@ def run(args) -> dict[str, object]:
         vertical_evidence_bundle = str(metadata_path.relative_to(output))
 
     d3_document: dict[str, object] | None = None
+    d31_document: dict[str, object] | None = None
     if vehicle_envelope is not None:
         vehicle_navigation = derive_vehicle_envelope_navigation(a3, d2_evidence, vehicle_envelope)
         vehicle_materialized = materialize_structure_aware_navigation_map(
@@ -488,6 +508,10 @@ def run(args) -> dict[str, object]:
             [],
             frame_id="map",
         )
+        vehicle_provenance = derive_hard_occupancy_provenance(
+            vehicle_navigation,
+            formal_policy,
+        )
         d3_document = build_vehicle_collision_envelope_audit(
             a3,
             d2_evidence,
@@ -497,6 +521,30 @@ def run(args) -> dict[str, object]:
             vehicle_accepted.navigation.occupancy,
             terminal_inset_m=args.vehicle_terminal_inset_m,
         )
+        d31_document = build_vehicle_clearance_throat_audit(
+            vehicle_navigation,
+            frozen_structure,
+            frozen_corridor,
+            vehicle_accepted.navigation.occupancy,
+            clearance_radius_m=float(vehicle_envelope.effective_lateral_radius_m),
+            terminal_inset_m=args.vehicle_terminal_inset_m,
+            materialized=vehicle_materialized,
+            provenance=vehicle_provenance,
+        )
+        throat_path = _write_vehicle_clearance_throat_report(output, d31_document)
+        throat_relpath = str(throat_path.relative_to(output))
+        overlay_relpath: str | None = None
+        if args.write_clearance_throat_overlays:
+            overlay_dir = output / "vehicle_review" / "clearance_throat_overlays"
+            write_vehicle_clearance_throat_overlays(
+                d31_document,
+                vehicle_navigation,
+                frozen_corridor,
+                vehicle_accepted.navigation.occupancy,
+                overlay_dir,
+                half_window_m=args.clearance_throat_overlay_half_window_m,
+            )
+            overlay_relpath = str(overlay_dir.relative_to(output))
         d3_document.update(
             {
                 "base_profile": "A3",
@@ -504,6 +552,15 @@ def run(args) -> dict[str, object]:
                 "derived_ground_navigation": vehicle_navigation.counts(),
                 "derived_formal_accepted": vehicle_accepted.navigation.counts(),
                 "materialization": vehicle_materialized.counts(),
+                "clearance_throat_audit": throat_relpath,
+                "clearance_throat_overlays": overlay_relpath,
+                "clearance_throat_summary": {
+                    "clearance_throat_aisles": int(d31_document["clearance_throat_aisles"]),
+                    "no_interior_terminal_path_aisles": int(
+                        d31_document["no_interior_terminal_path_aisles"]
+                    ),
+                    "vehicle_feasible_aisles": int(d31_document["vehicle_feasible_aisles"]),
+                },
             }
         )
 
@@ -725,6 +782,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--vehicle-lateral-safety-margin-m", type=float, default=0.0)
     parser.add_argument("--vehicle-collision-z-min-m", type=float, default=0.0)
     parser.add_argument("--vehicle-collision-z-max-m", type=float, default=0.60)
+    parser.add_argument(
+        "--write-clearance-throat-overlays",
+        action="store_true",
+        help="write D3.1 local PNG crops for vehicle-infeasible clearance throats",
+    )
+    parser.add_argument(
+        "--clearance-throat-overlay-half-window-m",
+        type=float,
+        default=1.50,
+        help="half-window radius for D3.1 local throat overlays",
+    )
     parser.add_argument("--enable-barrier-3d-audit", action="store_true")
     parser.add_argument("--write-barrier-plots", action="store_true")
     parser.add_argument("--barrier-longitudinal-half-window-m", type=float, default=0.40)
@@ -763,6 +831,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--vehicle-collision-z-min-m must be >= 0")
     if args.vehicle_collision_z_max_m <= args.vehicle_collision_z_min_m:
         parser.error("--vehicle-collision-z-max-m must be > --vehicle-collision-z-min-m")
+    if args.clearance_throat_overlay_half_window_m <= 0.0:
+        parser.error("--clearance-throat-overlay-half-window-m must be > 0")
+    if args.write_clearance_throat_overlays and args.vehicle_half_width_m is None:
+        parser.error("--write-clearance-throat-overlays requires --vehicle-half-width-m")
     if args.write_barrier_plots and not args.enable_barrier_3d_audit:
         parser.error("--write-barrier-plots requires --enable-barrier-3d-audit")
     document = run(args)
