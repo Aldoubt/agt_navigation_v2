@@ -36,6 +36,12 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_pointcloud_profile test/test_pointcloud_profile.py)
   ament_add_pytest_test(test_navigation_map_derivation test/test_navigation_map_derivation.py)
   ament_add_pytest_test(test_navigation_ablation test/test_navigation_ablation.py)
+  ament_add_pytest_test(test_vehicle_feasibility test/test_vehicle_feasibility.py)
+  ament_add_pytest_test(test_vehicle_collision_envelope test/test_vehicle_collision_envelope.py)
+  ament_add_pytest_test(
+    test_run_navigation_ablation_contract
+    test/test_run_navigation_ablation_contract.py
+  )
   ament_add_pytest_test(test_aisle_blocker_audit test/test_aisle_blocker_audit.py)
   ament_add_pytest_test(test_formal_navigation_map test/test_formal_navigation_map.py)
   ament_add_pytest_test(test_formal_navigation_recovery test/test_formal_navigation_recovery.py)
