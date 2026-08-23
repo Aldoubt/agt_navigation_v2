@@ -81,7 +81,7 @@ def test_e3_exact_review_outputs_are_siblings_of_main_report(tmp_path):
     }
 
 
-def test_e3_exact_review_summary_keeps_throats_and_disconnected_cases_separate():
+def test_e3_exact_review_summary_keeps_terminal_and_full_extent_scopes_separate():
     module = _load_module()
     throat_audit = {
         "aisle_count": 19,
@@ -93,6 +93,11 @@ def test_e3_exact_review_summary_keeps_throats_and_disconnected_cases_separate()
             "STEP_HARD": 3,
             "SLOPE_HARD": 3,
         },
+        "aisles": [
+            {"aisle_id": "aisle_005", "status": "NO_INTERIOR_TERMINAL_PATH"},
+            {"aisle_id": "aisle_011", "status": "NO_INTERIOR_TERMINAL_PATH"},
+            {"aisle_id": "aisle_017", "status": "VEHICLE_FEASIBLE"},
+        ],
     }
     blocker_reports = [
         {
@@ -110,11 +115,11 @@ def test_e3_exact_review_summary_keeps_throats_and_disconnected_cases_separate()
             "failure_mode": "NO_END_TO_END_COMPONENT",
         },
         {
-            "aisle_id": "aisle_016",
-            "grid_connectivity": True,
-            "minimum_blocker_cell_count": 0,
-            "dominant_blocker_cause": "NONE",
-            "failure_mode": "CONNECTED",
+            "aisle_id": "aisle_017",
+            "grid_connectivity": False,
+            "minimum_blocker_cell_count": 1,
+            "dominant_blocker_cause": "SLOPE_HARD",
+            "failure_mode": "NO_END_TO_END_COMPONENT",
         },
     ]
 
@@ -131,4 +136,17 @@ def test_e3_exact_review_summary_keeps_throats_and_disconnected_cases_separate()
     }
     assert summary["disconnected_aisle_count"] == 2
     assert summary["disconnected_aisle_ids"] == ["aisle_005", "aisle_011"]
+    assert summary["interior_terminal_disconnected_aisle_count"] == 2
+    assert summary["interior_terminal_disconnected_aisle_ids"] == [
+        "aisle_005",
+        "aisle_011",
+    ]
+    assert summary["full_extent_b0_disconnected_aisle_count"] == 3
+    assert summary["full_extent_b0_disconnected_aisle_ids"] == [
+        "aisle_005",
+        "aisle_011",
+        "aisle_017",
+    ]
+    assert summary["endpoint_only_full_extent_disconnected_aisle_ids"] == ["aisle_017"]
     assert summary["minimum_blocker_cells_total"] == 3
+    assert summary["full_extent_minimum_blocker_cells_total"] == 4
