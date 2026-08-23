@@ -67,3 +67,68 @@ def test_e3_runner_comparison_summary_keeps_coarse_and_exact_separate():
             "clearance_radius_delta_m": 0.30,
         }
     ]
+
+
+def test_e3_exact_review_outputs_are_siblings_of_main_report(tmp_path):
+    module = _load_module()
+    output = tmp_path / "vehicle_review" / "exact_vehicle_collision_ablation.json"
+
+    paths = module._exact_review_output_paths(output)
+
+    assert paths == {
+        "clearance_throats": output.parent / "exact_clearance_throats.json",
+        "disconnected_root_cause": output.parent / "exact_disconnected_aisle_root_cause.json",
+    }
+
+
+def test_e3_exact_review_summary_keeps_throats_and_disconnected_cases_separate():
+    module = _load_module()
+    throat_audit = {
+        "aisle_count": 19,
+        "clearance_throat_aisles": 12,
+        "no_interior_terminal_path_aisles": 2,
+        "vehicle_feasible_aisles": 5,
+        "nearest_environment_constraint_causes": {
+            "STRONG_SENSOR_OBSTACLE": 6,
+            "STEP_HARD": 3,
+            "SLOPE_HARD": 3,
+        },
+    }
+    blocker_reports = [
+        {
+            "aisle_id": "aisle_005",
+            "grid_connectivity": False,
+            "minimum_blocker_cell_count": 2,
+            "dominant_blocker_cause": "STEP_HARD",
+            "failure_mode": "NO_END_TO_END_COMPONENT",
+        },
+        {
+            "aisle_id": "aisle_011",
+            "grid_connectivity": False,
+            "minimum_blocker_cell_count": 1,
+            "dominant_blocker_cause": "SLOPE_HARD",
+            "failure_mode": "NO_END_TO_END_COMPONENT",
+        },
+        {
+            "aisle_id": "aisle_016",
+            "grid_connectivity": True,
+            "minimum_blocker_cell_count": 0,
+            "dominant_blocker_cause": "NONE",
+            "failure_mode": "CONNECTED",
+        },
+    ]
+
+    summary = module._build_exact_review_summary(throat_audit, blocker_reports)
+
+    assert summary["aisle_count"] == 19
+    assert summary["clearance_throat_aisles"] == 12
+    assert summary["no_interior_terminal_path_aisles"] == 2
+    assert summary["vehicle_feasible_aisles"] == 5
+    assert summary["nearest_environment_constraint_causes"] == {
+        "SLOPE_HARD": 3,
+        "STEP_HARD": 3,
+        "STRONG_SENSOR_OBSTACLE": 6,
+    }
+    assert summary["disconnected_aisle_count"] == 2
+    assert summary["disconnected_aisle_ids"] == ["aisle_005", "aisle_011"]
+    assert summary["minimum_blocker_cells_total"] == 3
