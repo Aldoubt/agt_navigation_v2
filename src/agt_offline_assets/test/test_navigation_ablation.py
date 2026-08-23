@@ -181,3 +181,68 @@ def test_a3_replaces_window_range_false_step_on_smooth_plane():
     assert np.count_nonzero(a2.occupancy == OCCUPIED) == a2.occupancy.size
     assert np.count_nonzero(a3.occupancy == OCCUPIED) == 0
     assert np.count_nonzero(a3.occupancy == FREE) == a3.occupancy.size
+
+
+def test_d2_height_layer_profiles_are_nested_and_full_matches_a3():
+    from agt_offline_assets.height_layer_ablation import (
+        HeightLayerObstacleEvidence,
+        apply_height_layer_ablation_profile,
+        height_layer_ablation_spec,
+    )
+
+    a3 = _result(shape=(1, 3))
+    obstacle = np.full((1, 3), 3, dtype=np.int32)
+    a3 = replace(a3, obstacle_count=obstacle, occupancy=np.full((1, 3), OCCUPIED, dtype=np.uint8))
+    evidence = HeightLayerObstacleEvidence(
+        low_count=np.asarray([[3, 0, 0]], dtype=np.int32),
+        mid_count=np.asarray([[0, 3, 0]], dtype=np.int32),
+        high_count=np.asarray([[0, 0, 3]], dtype=np.int32),
+        obstacle_min_height_m=0.12,
+        low_max_height_m=0.30,
+        mid_max_height_m=0.60,
+        obstacle_max_height_m=1.00,
+    )
+
+    full = apply_height_layer_ablation_profile(a3, evidence, "D2-FULL")
+    low_mid = apply_height_layer_ablation_profile(a3, evidence, "D2-LM")
+    low = apply_height_layer_ablation_profile(a3, evidence, "D2-L")
+
+    assert height_layer_ablation_spec("D2-FULL").included_layers == ("LOW", "MID", "HIGH")
+    assert np.array_equal(full.obstacle_count, a3.obstacle_count)
+    assert np.array_equal(full.occupancy, a3.occupancy)
+    assert np.array_equal(low_mid.occupancy, np.asarray([[OCCUPIED, OCCUPIED, FREE]], dtype=np.uint8))
+    assert np.array_equal(low.occupancy, np.asarray([[OCCUPIED, FREE, FREE]], dtype=np.uint8))
+
+
+def test_d2_height_layer_evidence_bins_ground_relative_points_once():
+    from types import SimpleNamespace
+
+    from agt_offline_assets.height_layer_ablation import derive_height_layer_obstacle_evidence
+
+    navigation = _result(shape=(1, 1))
+    xyz = np.asarray(
+        [
+            [0.05, 0.05, 0.05],
+            [0.05, 0.05, 0.15],
+            [0.05, 0.05, 0.29],
+            [0.05, 0.05, 0.30],
+            [0.05, 0.05, 0.59],
+            [0.05, 0.05, 0.60],
+            [0.05, 0.05, 0.99],
+            [0.05, 0.05, 1.20],
+        ],
+        dtype=np.float64,
+    )
+    cloud = SimpleNamespace(xyz=lambda: xyz)
+
+    evidence = derive_height_layer_obstacle_evidence(
+        cloud,
+        navigation,
+        low_max_height_m=0.30,
+        mid_max_height_m=0.60,
+    )
+
+    assert evidence.low_count[0, 0] == 2
+    assert evidence.mid_count[0, 0] == 2
+    assert evidence.high_count[0, 0] == 2
+    assert evidence.counts() == {"LOW": 2, "MID": 2, "HIGH": 2, "FULL": 6}
