@@ -46,6 +46,7 @@ jobs:
           src/agt_offline_assets/test/test_vehicle_exact_collision_ablation.py
           src/agt_offline_assets/test/test_vehicle_clearance_throat.py
           src/agt_offline_assets/test/test_vehicle_vertical_boundary_audit.py
+          src/agt_offline_assets/test/test_terrain_local_evidence.py
           src/agt_offline_assets/test/test_run_navigation_ablation_contract.py
           src/agt_offline_assets/test/test_run_vehicle_vertical_boundary_audit_contract.py
           src/agt_offline_assets/test/test_run_vehicle_exact_collision_ablation_contract.py
