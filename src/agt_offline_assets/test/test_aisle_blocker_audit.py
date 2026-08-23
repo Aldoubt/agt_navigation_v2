@@ -123,11 +123,18 @@ def test_full_cross_section_sensor_barrier_is_localized_and_classified():
     assert blocker["direct_obstacle_component_size_in_aisle"] == 3
     assert blocker["strong_sensor_neighbors_r1"] >= 1
     assert blocker["strong_sensor_component_size_in_aisle"] == 3
+    assert blocker["cross_section_cell_count"] == 3
+    assert blocker["cross_section_free_cell_count"] == 0
+    assert blocker["cross_section_strong_sensor_count"] == 3
+    assert blocker["cross_section_strong_sensor_fraction"] == 1.0
+    assert blocker["strong_sensor_component_longitudinal_span_m"] == 1.0
+    assert blocker["strong_sensor_component_transverse_span_m"] == 3.0
+    assert blocker["strong_sensor_component_transverse_fraction_of_aisle"] == 1.0
+    assert 0.0 <= blocker["normalized_transverse_position"] <= 1.0
+    assert blocker["distance_to_geometric_edge_m"] >= 0.0
 
 
 def test_isolated_sensor_blocker_reports_zero_spatial_persistence():
-    # Keep the aisle one cell wide so the isolated obstacle is genuinely
-    # critical to end-to-end connectivity rather than bypassable laterally.
     occupancy = np.full((1, 9), FREE, dtype=np.uint8)
     occupancy[0, 4] = OCCUPIED
     navigation, structure, corridor, provenance, materialized = _fixture(
@@ -142,16 +149,21 @@ def test_isolated_sensor_blocker_reports_zero_spatial_persistence():
         provenance,
         materialized=materialized,
     )[0]
-
     assert report["grid_connectivity"] is False
     assert report["minimum_blocker_cell_count"] == 1
     assert len(report["critical_blocker_cells"]) == 1
     blocker = report["critical_blocker_cells"][0]
+
     assert blocker["direct_obstacle_neighbors_r1"] == 0
     assert blocker["direct_obstacle_neighbors_r2"] == 0
     assert blocker["direct_obstacle_component_size_in_aisle"] == 1
     assert blocker["strong_sensor_neighbors_r1"] == 0
     assert blocker["strong_sensor_component_size_in_aisle"] == 1
+    assert blocker["cross_section_cell_count"] == 1
+    assert blocker["cross_section_strong_sensor_fraction"] == 1.0
+    assert blocker["strong_sensor_component_longitudinal_span_m"] == 1.0
+    assert blocker["strong_sensor_component_transverse_span_m"] == 1.0
+    assert blocker["strong_sensor_component_transverse_fraction_of_aisle"] == 1.0
 
 
 def test_missing_start_free_reports_start_block_and_slope_cause():
