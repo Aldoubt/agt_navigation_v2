@@ -94,6 +94,10 @@ if(BUILD_TESTING)
     test_review_export
     test/test_review_export.py
   )
+  ament_add_pytest_test(
+    test_ablation_workbench
+    test/test_ablation_workbench.py
+  )
 endif()
 
 ament_package()
