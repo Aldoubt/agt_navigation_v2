@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Iterable
 
+from .map_authority import verify_bound_map_authority
 from .project import load_project
 
 
@@ -72,6 +73,27 @@ def _summary(points: tuple[tuple[float, float], ...], bounds) -> dict:
     }
 
 
+def _formal_grid(project: dict, frame: dict) -> tuple[dict, str | None, str | None]:
+    authority = project.get("map_authority")
+    if authority is None:
+        return dict(frame.get("grid") or {}), None, None
+    verified = verify_bound_map_authority(authority)
+    authority_grid = dict(verified["grid"])
+    frame_grid = dict(frame.get("grid") or {})
+    mirrored = {
+        "resolution_m": frame_grid.get("resolution_m"),
+        "origin_xy_m": frame_grid.get("origin_xy_m"),
+        "width": frame_grid.get("width"),
+        "height": frame_grid.get("height"),
+    }
+    if mirrored != authority_grid:
+        raise ValueError("verified frame grid does not match bound map authority grid")
+    if frame_grid.get("map_yaml_sha256") != verified["accepted_map_yaml_sha256"]:
+        raise ValueError("verified frame map hash does not match bound map authority grid")
+    grid = {**authority_grid, "map_yaml_sha256": verified["accepted_map_yaml_sha256"]}
+    return grid, str(verified["authority"]), str(verified["status"])
+
+
 def build_frame_alignment_report(
     project_dir: Path | str,
     route_csv: Path | str | None = None,
@@ -84,7 +106,7 @@ def build_frame_alignment_report(
         raise ValueError("frame verification report requires a VERIFIED project frame")
     if frame.get("canonical_frame_id") != "map":
         raise ValueError("frame verification report requires canonical frame map")
-    grid = frame.get("grid") or {}
+    grid, authority_name, authority_status = _formal_grid(project, frame)
     try:
         resolution = float(grid["resolution_m"])
         origin_x, origin_y = (float(v) for v in grid["origin_xy_m"])
@@ -120,6 +142,8 @@ def build_frame_alignment_report(
         "site_id": project.get("site_id"),
         "canonical_frame_id": "map",
         "alignment_sha256": frame.get("alignment_sha256"),
+        "map_authority": authority_name,
+        "map_authority_status": authority_status,
         "grid": {
             "resolution_m": resolution,
             "origin_xy_m": [origin_x, origin_y],

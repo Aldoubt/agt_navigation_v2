@@ -36,6 +36,68 @@ def _canonical_hash(payload: dict[str, Any]) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def _verify_map_project_authority(
+    map_project_path: Path | str,
+    *,
+    map_yaml: Path,
+    map_image: Path,
+) -> tuple[dict[str, Any], Path]:
+    project_ref = Path(map_project_path)
+    project_manifest = project_ref / "project.yaml" if project_ref.is_dir() else project_ref
+    if not project_manifest.is_file():
+        raise ValueError(f"formal map project manifest does not exist: {project_manifest}")
+    project = yaml.safe_load(project_manifest.read_text(encoding="utf-8"))
+    if not isinstance(project, dict):
+        raise ValueError("formal map project manifest must be a mapping")
+    authority = project.get("map_authority")
+    if not isinstance(authority, dict):
+        raise ValueError("formal Paper site snapshot requires a bound map authority")
+    if str(authority.get("schema", "")) != "agt_v25_map_authority_binding/v1":
+        raise ValueError("formal Paper map authority schema is invalid")
+    if str(authority.get("authority", "")) != "V25_MAP_WORKBENCH":
+        raise ValueError("formal Paper map authority must be V25_MAP_WORKBENCH")
+    if str(authority.get("status", "")) != "BOUND_VERIFIED":
+        raise ValueError("formal Paper map authority must be BOUND_VERIFIED")
+    if str(authority.get("frame_id", "")) != "map":
+        raise ValueError("formal Paper map authority frame must be map")
+
+    pairs = (
+        ("generated map YAML", "generated_map_yaml_path", "generated_map_yaml_sha256"),
+        ("generated map PGM", "generated_map_pgm_path", "generated_map_pgm_sha256"),
+        ("accepted map YAML", "accepted_map_yaml_path", "accepted_map_yaml_sha256"),
+        ("accepted map PGM", "accepted_map_pgm_path", "accepted_map_pgm_sha256"),
+        ("derivation", "derivation_path", "derivation_sha256"),
+    )
+    for label, path_key, hash_key in pairs:
+        path_text = str(authority.get(path_key, "")).strip()
+        expected = str(authority.get(hash_key, "")).strip()
+        if not path_text or len(expected) != 64:
+            raise ValueError(f"formal map authority missing {label} identity")
+        actual = _sha256(Path(path_text))
+        if actual != expected:
+            raise ValueError(f"formal map authority {label} hash mismatch")
+
+    accepted_yaml_sha = str(authority["accepted_map_yaml_sha256"])
+    accepted_image_sha = str(authority["accepted_map_pgm_sha256"])
+    if _sha256(map_yaml) != accepted_yaml_sha:
+        raise ValueError("selected accepted map YAML does not match bound V25 accepted map")
+    if _sha256(map_image) != accepted_image_sha:
+        raise ValueError("selected accepted map image does not match bound V25 accepted map")
+
+    record = {
+        "schema": str(authority["schema"]),
+        "authority": "V25_MAP_WORKBENCH",
+        "status": "BOUND_VERIFIED",
+        "frame_id": "map",
+        "accepted_map_yaml_sha256": accepted_yaml_sha,
+        "accepted_map_pgm_sha256": accepted_image_sha,
+        "generated_map_yaml_sha256": str(authority["generated_map_yaml_sha256"]),
+        "generated_map_pgm_sha256": str(authority["generated_map_pgm_sha256"]),
+        "derivation_sha256": str(authority["derivation_sha256"]),
+    }
+    return record, project_manifest
+
+
 def _verify_curation_manifest(
     path: Path,
     *,
@@ -91,6 +153,7 @@ def create_site_snapshot(
     *,
     output_path: Path | str,
     curation_manifest_path: Path | str | None = None,
+    map_project_path: Path | str | None = None,
 ) -> dict[str, Any]:
     pcd = Path(pcd_path)
     map_yaml = Path(map_yaml_path)
@@ -120,6 +183,15 @@ def create_site_snapshot(
     image_path = (map_yaml.parent / str(map_data["image"])).resolve()
     if not image_path.is_file():
         raise ValueError(f"Nav2 map image does not exist: {image_path}")
+
+    map_authority_record = None
+    map_project_manifest = None
+    if map_project_path is not None:
+        map_authority_record, map_project_manifest = _verify_map_project_authority(
+            map_project_path,
+            map_yaml=map_yaml,
+            map_image=image_path,
+        )
 
     semantic_data = json.loads(semantic.read_text(encoding="utf-8"))
     if not isinstance(semantic_data, dict) or semantic_data.get("type") != "FeatureCollection":
@@ -186,6 +258,8 @@ def create_site_snapshot(
     }
     if curation_file is not None:
         assets["curation_manifest"] = _asset(curation_file)
+    if map_project_manifest is not None:
+        assets["map_project_manifest"] = _asset(map_project_manifest)
 
     acceptance_record = {
         "map_reliability_accepted": True,
@@ -207,6 +281,8 @@ def create_site_snapshot(
     }
     if curation_gate is not None:
         identity["curation_gate"] = curation_gate
+    if map_authority_record is not None:
+        identity["map_authority"] = map_authority_record
 
     snapshot = {
         "schema_version": "1.0",
@@ -224,6 +300,8 @@ def create_site_snapshot(
     }
     if curation_gate is not None:
         snapshot["curation_gate"] = curation_gate
+    if map_authority_record is not None:
+        snapshot["map_authority"] = map_authority_record
     snapshot["snapshot_sha256"] = _canonical_hash(identity)
     write_json_atomic(snapshot, output_path)
     return snapshot
@@ -244,6 +322,8 @@ def load_site_snapshot(path: Path | str, *, verify_assets: bool = False) -> dict
     }
     if "curation_gate" in data:
         identity["curation_gate"] = data.get("curation_gate")
+    if "map_authority" in data:
+        identity["map_authority"] = data.get("map_authority")
     expected = _canonical_hash(identity)
     if data.get("snapshot_sha256") != expected:
         raise ValueError("site snapshot checksum mismatch")

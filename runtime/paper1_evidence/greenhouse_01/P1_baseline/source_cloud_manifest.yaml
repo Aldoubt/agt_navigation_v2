@@ -1,0 +1,66 @@
+schema: agt_paper1_source_cloud/v1
+site_id: greenhouse_01
+role: PAPER1_AUTHORITATIVE_GEOMETRIC_INPUT
+
+source_cloud:
+  path: /home/yangxuan/agt_navigation_v2_paper1/runtime/maps/greenhouse_01_map_assets_v01/pointcloud/processed.pcd
+  filename: processed.pcd
+  sha256: 069abb9e7f89e78fd8529f224f953df19ec1d582c27dc6fe390b613ab7b0b12a
+  size_bytes: 2646843519
+  point_count: 82713852
+  fields: [x, y, z, intensity, normal_x, normal_y, normal_z, curvature]
+  field_sizes: [4, 4, 4, 4, 4, 4, 4, 4]
+  field_types: [F, F, F, F, F, F, F, F]
+  field_counts: [1, 1, 1, 1, 1, 1, 1, 1]
+  width: 82713852
+  height: 1
+  viewpoint: [0, 0, 0, 1, 0, 0, 0]
+  data_encoding: binary
+  evidence:
+    resource_manifest: runtime/maps/greenhouse_01_map_assets_v01/map_resource_manifest.yaml
+    processing_record: /home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run/processing.yaml
+    processing_report: /home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run/processing_report.json
+
+mapping:
+  method: FAST-LIVO2
+  mode: LIO-only
+  source_bag: /home/yangxuan/agt_navigation_v2/runtime/rosbag/green-house
+  source_bag_identity: author-confirmed corresponding raw bag; see source_bag_manifest.yaml
+  evidence: author-confirmed mapping provenance; processing record identifies the locked processed output
+
+derivation:
+  input_source_name: green house full.pcd
+  input_sha256: 01e849f33dc906b7a673cacb9784d15af5a9947e0ae8dc7879844bfc6f5ead86
+  input_point_count: 86355623
+  operation_count: 1
+  operation: crop_polygon
+  processing_content_sha256: ad8386d94621098669cc20a0d874ca925c6e73c046eb1db732e2ea6141abc5d5
+  evidence: /home/yangxuan/agt_navigation_v2/runtime/maps/agt_workbench_run/processing.yaml
+
+geometry_contract:
+  metric_scale_preserved: true
+  manual_scale_applied: false
+  non_rigid_warp_applied: false
+
+frame_contract:
+  source_frame: map
+  canonical_relation: TBD-EVIDENCE
+  scale: 1.0
+  alignment:
+    type: NONE_RECORDED
+    scale: 1.0
+    path: TBD-EVIDENCE
+  note: The processing record declares frame_id=map and the locked bundle uses frame_id=map. Formal V25 canonical binding still requires an immutable revision and frame verification.
+
+v25_relation:
+  compatible_with_v25: TBD-EVIDENCE
+  v25_revision: TBD-EVIDENCE
+  evidence:
+    resource_bundle: runtime/maps/greenhouse_01_map_assets_v01/map_resource_manifest.yaml
+    accepted_map_derivation: runtime/maps/greenhouse_01_map_assets_v01/navigation/derivation.yaml
+    formal_revision: TBD-EVIDENCE
+
+status:
+  identity_frozen: true
+  ready_for_v25_binding: false
+  blocker: no formal immutable greenhouse_01 V25 revision/frame verification found

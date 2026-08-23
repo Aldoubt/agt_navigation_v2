@@ -1,0 +1,6 @@
+repository: /home/yangxuan/agt_navigation_v2_paper1
+validated_candidate_commit: dea893c21d5205bcb97c0194e0fb17cf10b1d228
+branch: fix/paper1-m154b-v25-map-authority-recovery
+working_tree: clean_at_preflight
+paper1_stage: P1_EVIDENCE_BASELINE_FREEZE
+formal_experiments_run: none
