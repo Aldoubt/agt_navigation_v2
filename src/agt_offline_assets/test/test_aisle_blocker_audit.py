@@ -288,3 +288,30 @@ def test_vehicle_feasible_connectivity_rejects_one_cell_pixel_path():
     assert report["required_clearance_radius_m"] == 0.60
     assert report["maximum_clearance_m"] == 0.50
     assert report["feasible_cell_count"] == 0
+
+
+def test_vehicle_feasibility_uses_interior_terminals_not_virtual_end_caps():
+    from agt_offline_assets.vehicle_feasibility import build_vehicle_feasible_aisle_audit
+
+    occupancy = np.full((7, 11), FREE, dtype=np.uint8)
+    navigation, structure, corridor, _, _ = _fixture(occupancy)
+    geometry = np.zeros_like(occupancy, dtype=bool)
+    geometry[2:5, 1:10] = True
+    corridor.aisle_geometric_envelope = geometry
+
+    report = build_vehicle_feasible_aisle_audit(
+        navigation,
+        structure,
+        corridor,
+        occupancy,
+        clearance_radius_m=1.0,
+        terminal_inset_m=1.0,
+    )[0]
+
+    assert report["raster_grid_connectivity"] is True
+    assert report["vehicle_feasible_connectivity"] is True
+    assert report["start_has_feasible"] is True
+    assert report["end_has_feasible"] is True
+    assert report["terminal_inset_m"] == 1.0
+    assert report["clearance_contract"] == "ENVIRONMENT_PLUS_LATERAL_AISLE_BOUNDARY"
+    assert report["maximum_end_to_end_clearance_radius_m"] >= 1.0
