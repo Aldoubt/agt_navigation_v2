@@ -1,9 +1,16 @@
-"""D3.1 explainable clearance-throat diagnostics for aisle-aligned vehicle review.
+"""D3.2 explainable clearance-throat diagnostics for aisle-aligned vehicle review.
 
-The formal Navigation Map and D2 vertical evidence remain unchanged.  This
-module consumes the same D1.1 clearance fields used by vehicle feasibility and
-explains *where* an interior-terminal path becomes too narrow for the requested
-vehicle radius.
+The formal Navigation Map and D2 vertical evidence remain unchanged. This
+module consumes the same D1.1 clearance contract used by vehicle feasibility
+and explains *where* an interior-terminal path becomes too narrow for the
+requested vehicle radius.
+
+D3.2 separates two kinds of evidence that D3.1 previously conflated:
+
+* ``nearest_environment_constraint`` is the exact non-FREE cell selected by the
+  Euclidean distance transform (or ``MAP_EXTERIOR`` when padding is nearest);
+* ``LOWER_V`` / ``UPPER_V`` constraints remain same-u cross-section context for
+  interpreting the local aisle shape.
 
 For every accepted ROW_ROW aisle it distinguishes three states:
 
@@ -12,9 +19,7 @@ For every accepted ROW_ROW aisle it distinguishes three states:
   narrower bottleneck; and
 * ``NO_INTERIOR_TERMINAL_PATH`` -- even the review raster is disconnected.
 
-Constraint sources are reported in the row-aligned transverse coordinate.  The
-terms ``LOWER_V`` and ``UPPER_V`` are used deliberately instead of visual
-left/right so the diagnostic does not depend on display orientation.
+The audit is derived review evidence only and never mutates the formal PGM.
 """
 
 from __future__ import annotations
@@ -29,17 +34,18 @@ from .navigation_map_derivation import FREE
 from .vehicle_feasibility import (
     _ACCEPTED_AISLE_STATES,
     _CONNECTIVITY_SCOPE,
-    _environment_clearance_field_m,
     _grid_uv,
     _lateral_clearance_field_m,
     _owned_mask,
+    _require_scipy,
     _terminal_masks,
     _widest_end_to_end_clearance,
 )
 
 
-_SCHEMA = "agt_vehicle_clearance_throat_audit/v1"
+_SCHEMA = "agt_vehicle_clearance_throat_audit/v2"
 _AUTHORITY = "DERIVED_VEHICLE_REVIEW_NOT_NAVIGATION_MAP_AUTHORITY"
+_ENVIRONMENT_ATTRIBUTION_CONTRACT = "EDT_NEAREST_NON_FREE_CELL"
 _NEIGHBOURS = (
     (-1, -1),
     (-1, 0),
@@ -98,6 +104,36 @@ def _source_at(
     if np.asarray(occupancy, dtype=np.uint8)[row, col] != FREE:
         return "OTHER_NON_FREE"
     return "FREE"
+
+
+def _environment_clearance_with_nearest(
+    accepted_occupancy: np.ndarray,
+    resolution_m: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return D1.1 environment clearance plus exact EDT nearest-cell indices.
+
+    The one-cell non-FREE padding is identical to the D1.1 map-exterior
+    clearance contract. Returned nearest row/col indices are in the original
+    unpadded grid frame; values outside ``[0, height) x [0, width)`` therefore
+    identify map-exterior padding rather than a real grid cell.
+    """
+
+    resolution = float(resolution_m)
+    if resolution <= 0.0:
+        raise ValueError("environment clearance resolution must be > 0")
+    ndimage = _require_scipy()
+    occupancy = np.asarray(accepted_occupancy, dtype=np.uint8)
+    free = occupancy == FREE
+    padded = np.pad(free, 1, constant_values=False)
+    distance_centers, indices = ndimage.distance_transform_edt(
+        padded,
+        return_indices=True,
+    )
+    center_distance = np.asarray(distance_centers[1:-1, 1:-1], dtype=np.float64)
+    nearest_row = np.asarray(indices[0, 1:-1, 1:-1], dtype=np.int64) - 1
+    nearest_col = np.asarray(indices[1, 1:-1, 1:-1], dtype=np.int64) - 1
+    clearance = center_distance * resolution - 0.5 * resolution
+    return np.maximum(clearance, 0.0), nearest_row, nearest_col
 
 
 def _threshold_path(
@@ -186,6 +222,8 @@ def _constraint_on_side(
     source_masks: list[tuple[str, np.ndarray]],
     navigation: Any,
 ) -> dict[str, object]:
+    """Return same-u transverse context; this does not define EDT provenance."""
+
     throat_u = float(u[throat_row, throat_col])
     throat_v = float(v[throat_row, throat_col])
     tolerance_u = 0.51 * float(resolution_m)
@@ -248,6 +286,48 @@ def _constraint_on_side(
     }
 
 
+def _nearest_environment_constraint(
+    *,
+    throat_row: int,
+    throat_col: int,
+    environment_clearance_m: np.ndarray,
+    nearest_row: np.ndarray,
+    nearest_col: np.ndarray,
+    occupancy: np.ndarray,
+    source_masks: list[tuple[str, np.ndarray]],
+    navigation: Any,
+    u: np.ndarray,
+    v: np.ndarray,
+) -> dict[str, object]:
+    """Describe the exact non-FREE source selected by the EDT at a throat."""
+
+    rr = int(nearest_row[throat_row, throat_col])
+    cc = int(nearest_col[throat_row, throat_col])
+    resolution = float(navigation.resolution_m)
+    clearance = float(environment_clearance_m[throat_row, throat_col])
+    center_distance = clearance + 0.5 * resolution
+    height, width = np.asarray(occupancy).shape
+    if not (0 <= rr < height and 0 <= cc < width):
+        return {
+            "source": "MAP_EXTERIOR",
+            "distance_m": clearance,
+            "center_distance_m": center_distance,
+            "row": None,
+            "col": None,
+        }
+    return {
+        "source": _source_at(rr, cc, occupancy, source_masks),
+        "distance_m": clearance,
+        "center_distance_m": center_distance,
+        "row": rr,
+        "col": cc,
+        "world_x_m": float(navigation.origin_x_m) + (cc + 0.5) * resolution,
+        "world_y_m": float(navigation.origin_y_m) + (rr + 0.5) * resolution,
+        "u_m": float(u[rr, cc]),
+        "v_m": float(v[rr, cc]),
+    }
+
+
 def _primary_throat(
     path: list[tuple[int, int]],
     clearance: np.ndarray,
@@ -295,7 +375,10 @@ def build_vehicle_clearance_throat_audit(
     if resolution <= 0.0:
         raise ValueError("clearance throat resolution must be > 0")
     u, v = _grid_uv(navigation, structure)
-    environment_clearance = _environment_clearance_field_m(occupancy, resolution)
+    environment_clearance, nearest_row, nearest_col = _environment_clearance_with_nearest(
+        occupancy,
+        resolution,
+    )
     source_masks = _source_masks(
         occupancy.shape,
         materialized=materialized,
@@ -367,7 +450,22 @@ def build_vehicle_clearance_throat_audit(
             row, col = throat
             env_value = float(environment_clearance[row, col])
             lateral_value = float(lateral_clearance[row, col])
-            report["limiting_constraint"] = _limiting_constraint(env_value, lateral_value)
+            limiting = _limiting_constraint(env_value, lateral_value)
+            report["limiting_constraint"] = limiting
+            nearest_environment = None
+            if limiting in {"ENVIRONMENT_NON_FREE", "MIXED_ENVIRONMENT_AND_LATERAL"}:
+                nearest_environment = _nearest_environment_constraint(
+                    throat_row=row,
+                    throat_col=col,
+                    environment_clearance_m=environment_clearance,
+                    nearest_row=nearest_row,
+                    nearest_col=nearest_col,
+                    occupancy=occupancy,
+                    source_masks=source_masks,
+                    navigation=navigation,
+                    u=u,
+                    v=v,
+                )
             report["primary_throat"] = {
                 "row": row,
                 "col": col,
@@ -378,6 +476,7 @@ def build_vehicle_clearance_throat_audit(
                 "clearance_m": float(clearance[row, col]),
                 "environment_clearance_m": env_value,
                 "lateral_clearance_m": lateral_value,
+                "nearest_environment_constraint": nearest_environment,
                 "lower_v_constraint": _constraint_on_side(
                     side="LOWER_V",
                     throat_row=row,
@@ -410,6 +509,7 @@ def build_vehicle_clearance_throat_audit(
         "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
         "authority": _AUTHORITY,
         "connectivity_scope": _CONNECTIVITY_SCOPE,
+        "environment_attribution_contract": _ENVIRONMENT_ATTRIBUTION_CONTRACT,
         "clearance_radius_m": float(clearance_radius_m),
         "terminal_inset_m": float(terminal_inset_m),
         "aisle_count": len(reports),
