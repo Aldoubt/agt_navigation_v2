@@ -8,6 +8,10 @@ envelope, then compares:
 - E3-COARSE: current D3 whole-overlapping-layer collision evidence;
 - E3-EXACT: raw-PCD continuous ground-relative collision evidence.
 
+The exact branch also reuses the existing D3.2 clearance-throat provenance and
+B0 minimum-blocker diagnostics so the remaining vehicle bottlenecks are
+attributed after coarse vertical false positives have been removed.
+
 The result is EXPERIMENTAL_REVIEW_EVIDENCE only. Neither branch is Navigation
 Map authority and neither mutates Formal/Accepted PGM assets.
 """
@@ -15,6 +19,7 @@ Map authority and neither mutates Formal/Accepted PGM assets.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 import sys
@@ -38,6 +43,10 @@ from agt_offline_assets import (  # noqa: E402
     read_pcd,
     replay_formal_navigation_overrides,
 )
+from agt_offline_assets.aisle_blocker_audit import (  # noqa: E402
+    aggregate_aisle_blocker_causes,
+    build_aisle_blocker_audit,
+)
 from agt_offline_assets.formal_navigation_map import (  # noqa: E402
     StructureAwareNavigationConfig,
     derive_hard_occupancy_provenance,
@@ -47,6 +56,9 @@ from agt_offline_assets.height_layer_ablation import (  # noqa: E402
 )
 from agt_offline_assets.navigation_ablation import (  # noqa: E402
     apply_navigation_ablation_profile,
+)
+from agt_offline_assets.vehicle_clearance_throat import (  # noqa: E402
+    build_vehicle_clearance_throat_audit,
 )
 from agt_offline_assets.vehicle_collision_envelope import (  # noqa: E402
     VehicleCollisionEnvelope,
@@ -208,6 +220,51 @@ def _compare_aisle_reports(
     return result
 
 
+def _exact_review_output_paths(output: Path) -> dict[str, Path]:
+    parent = output.expanduser().parent
+    return {
+        "clearance_throats": parent / "exact_clearance_throats.json",
+        "disconnected_root_cause": parent / "exact_disconnected_aisle_root_cause.json",
+    }
+
+
+def _failure_mode_counts(reports: list[dict[str, object]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for report in reports:
+        counts[str(report.get("failure_mode", "UNKNOWN"))] += 1
+    return dict(sorted(counts.items()))
+
+
+def _build_exact_review_summary(
+    throat_audit: dict[str, object],
+    blocker_reports: list[dict[str, object]],
+) -> dict[str, object]:
+    disconnected = [
+        item for item in blocker_reports if not bool(item.get("grid_connectivity"))
+    ]
+    causes = throat_audit.get("nearest_environment_constraint_causes") or {}
+    if not isinstance(causes, dict):
+        raise ValueError("E3 exact throat cause summary must be an object")
+    return {
+        "aisle_count": int(throat_audit.get("aisle_count", 0)),
+        "clearance_throat_aisles": int(throat_audit.get("clearance_throat_aisles", 0)),
+        "no_interior_terminal_path_aisles": int(
+            throat_audit.get("no_interior_terminal_path_aisles", 0)
+        ),
+        "vehicle_feasible_aisles": int(throat_audit.get("vehicle_feasible_aisles", 0)),
+        "nearest_environment_constraint_causes": dict(
+            sorted((str(key), int(value)) for key, value in causes.items())
+        ),
+        "disconnected_aisle_count": len(disconnected),
+        "disconnected_aisle_ids": sorted(
+            str(item.get("aisle_id")) for item in disconnected
+        ),
+        "minimum_blocker_cells_total": sum(
+            int(item.get("minimum_blocker_cell_count", 0)) for item in disconnected
+        ),
+    }
+
+
 def _materialize_and_evaluate(
     navigation,
     *,
@@ -253,6 +310,30 @@ def _write_report(path: Path, document: dict[str, object]) -> Path:
         encoding="utf-8",
     )
     return output
+
+
+def _write_disconnected_root_cause_report(
+    path: Path,
+    blocker_reports: list[dict[str, object]],
+) -> Path:
+    disconnected = [
+        dict(item) for item in blocker_reports if not bool(item.get("grid_connectivity"))
+    ]
+    document = {
+        "schema": "agt_aisle_blocker_audit/v1",
+        "profile": "E3-EXACT",
+        "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
+        "authority": _AUTHORITY,
+        "connected_aisles": sum(bool(item.get("grid_connectivity")) for item in blocker_reports),
+        "disconnected_aisles": len(disconnected),
+        "dominant_blocker_causes": aggregate_aisle_blocker_causes(disconnected),
+        "failure_modes": _failure_mode_counts(disconnected),
+        "minimum_blocker_cells_total": sum(
+            int(item.get("minimum_blocker_cell_count", 0)) for item in disconnected
+        ),
+        "aisles": disconnected,
+    }
+    return _write_report(path, document)
 
 
 def run(args) -> dict[str, object]:
@@ -305,14 +386,45 @@ def run(args) -> dict[str, object]:
         envelope=envelope,
         terminal_inset_m=terminal_inset_m,
     )
-    _, exact_accepted, exact_provenance, exact_reports = _materialize_and_evaluate(
+    exact_materialized, exact_accepted, exact_provenance, exact_reports = (
+        _materialize_and_evaluate(
+            exact_navigation,
+            structure=structure,
+            corridor=corridor,
+            boundary=boundary,
+            policy=policy,
+            envelope=envelope,
+            terminal_inset_m=terminal_inset_m,
+        )
+    )
+
+    exact_throat_audit = build_vehicle_clearance_throat_audit(
         exact_navigation,
-        structure=structure,
-        corridor=corridor,
-        boundary=boundary,
-        policy=policy,
-        envelope=envelope,
+        structure,
+        corridor,
+        exact_accepted.navigation.occupancy,
+        clearance_radius_m=float(envelope.effective_lateral_radius_m),
         terminal_inset_m=terminal_inset_m,
+        materialized=exact_materialized,
+        provenance=exact_provenance,
+    )
+    exact_blocker_reports = build_aisle_blocker_audit(
+        exact_navigation,
+        structure,
+        corridor,
+        exact_accepted.navigation.occupancy,
+        exact_provenance,
+        materialized=exact_materialized,
+    )
+    review_paths = _exact_review_output_paths(args.output)
+    _write_report(review_paths["clearance_throats"], exact_throat_audit)
+    _write_disconnected_root_cause_report(
+        review_paths["disconnected_root_cause"],
+        exact_blocker_reports,
+    )
+    exact_review_summary = _build_exact_review_summary(
+        exact_throat_audit,
+        exact_blocker_reports,
     )
 
     coarse_metrics = _profile_metrics(
@@ -369,6 +481,11 @@ def run(args) -> dict[str, object]:
             "exact_ground_relative_height_interval_m": [float(lower), float(upper)],
             "upper_interval_semantics": "EXCLUSIVE_UNLESS_ENVIRONMENTAL_MAX_ENDPOINT",
             **exact_metrics,
+        },
+        "exact_final_blocker_review": {
+            "clearance_throat_audit": str(review_paths["clearance_throats"]),
+            "disconnected_root_cause_audit": str(review_paths["disconnected_root_cause"]),
+            **exact_review_summary,
         },
         "comparison": {
             "selected_obstacle_point_delta": int(
