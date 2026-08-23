@@ -52,6 +52,7 @@ class VehicleFeasibilityAudit:
     def obstacle_counterfactual(self):
         return {
             "authority": "EXPERIMENTAL_REVIEW_EVIDENCE",
+            "map_authority": "NOT_NAVIGATION_MAP_AUTHORITY",
             "removed_classes": [
                 "STRONG_SENSOR_OBSTACLE",
                 "SOFT_OCCUPIED",
