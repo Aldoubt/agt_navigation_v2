@@ -126,8 +126,10 @@ def test_full_cross_section_sensor_barrier_is_localized_and_classified():
 
 
 def test_isolated_sensor_blocker_reports_zero_spatial_persistence():
-    occupancy = np.full((5, 9), FREE, dtype=np.uint8)
-    occupancy[2, 4] = OCCUPIED
+    # Keep the aisle one cell wide so the isolated obstacle is genuinely
+    # critical to end-to-end connectivity rather than bypassable laterally.
+    occupancy = np.full((1, 9), FREE, dtype=np.uint8)
+    occupancy[0, 4] = OCCUPIED
     navigation, structure, corridor, provenance, materialized = _fixture(
         occupancy, cause="STRONG_SENSOR_OBSTACLE"
     )
@@ -140,8 +142,11 @@ def test_isolated_sensor_blocker_reports_zero_spatial_persistence():
         provenance,
         materialized=materialized,
     )[0]
-    blocker = report["critical_blocker_cells"][0]
 
+    assert report["grid_connectivity"] is False
+    assert report["minimum_blocker_cell_count"] == 1
+    assert len(report["critical_blocker_cells"]) == 1
+    blocker = report["critical_blocker_cells"][0]
     assert blocker["direct_obstacle_neighbors_r1"] == 0
     assert blocker["direct_obstacle_neighbors_r2"] == 0
     assert blocker["direct_obstacle_component_size_in_aisle"] == 1
