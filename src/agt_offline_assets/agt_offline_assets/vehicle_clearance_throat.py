@@ -24,7 +24,7 @@ The audit is derived review evidence only and never mutates the formal PGM.
 
 from __future__ import annotations
 
-from collections import deque
+from collections import Counter, deque
 from pathlib import Path
 from typing import Any
 
@@ -504,6 +504,19 @@ def build_vehicle_clearance_throat_audit(
             }
         reports.append(report)
 
+    nearest_causes: Counter[str] = Counter()
+    for report in reports:
+        if report.get("status") != "CLEARANCE_THROAT":
+            continue
+        throat = report.get("primary_throat")
+        if not isinstance(throat, dict):
+            continue
+        nearest = throat.get("nearest_environment_constraint")
+        if not isinstance(nearest, dict):
+            continue
+        source = str(nearest.get("source", "UNKNOWN"))
+        nearest_causes[source] += 1
+
     return {
         "schema": _SCHEMA,
         "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
@@ -518,6 +531,7 @@ def build_vehicle_clearance_throat_audit(
             item["status"] == "NO_INTERIOR_TERMINAL_PATH" for item in reports
         ),
         "vehicle_feasible_aisles": sum(item["status"] == "VEHICLE_FEASIBLE" for item in reports),
+        "nearest_environment_constraint_causes": dict(sorted(nearest_causes.items())),
         "aisles": reports,
     }
 
