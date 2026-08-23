@@ -206,3 +206,85 @@ def test_unknown_blocker_is_reported_without_inventing_obstacle_evidence():
     assert report["grid_connectivity"] is False
     assert report["dominant_blocker_cause"] == "UNKNOWN"
     assert report["critical_blocker_cause_counts"]["UNKNOWN"] >= 1
+
+
+def test_critical_barrier_3d_audit_bins_ground_relative_height():
+    from agt_offline_assets.critical_barrier_3d import build_critical_barrier_height_audit
+
+    occupancy = np.full((3, 7), FREE, dtype=np.uint8)
+    occupancy[:, 3] = OCCUPIED
+    navigation, structure, corridor, provenance, materialized = _fixture(
+        occupancy, cause="STRONG_SENSOR_OBSTACLE"
+    )
+    navigation.ground_height_m = np.zeros_like(occupancy, dtype=np.float64)
+    navigation.ground_valid = np.ones_like(occupancy, dtype=bool)
+    navigation.config = SimpleNamespace(obstacle_min_height_m=0.12, obstacle_max_height_m=1.0)
+    blocker_reports = build_aisle_blocker_audit(
+        navigation,
+        structure,
+        corridor,
+        occupancy,
+        provenance,
+        materialized=materialized,
+    )
+    xyz = np.asarray(
+        [
+            [3.5, 1.5, 0.05],
+            [3.5, 1.5, 0.15],
+            [3.5, 1.5, 0.20],
+            [3.5, 1.5, 0.30],
+            [3.5, 1.5, 0.60],
+            [3.5, 1.5, 0.80],
+            [3.5, 1.5, 1.20],
+        ],
+        dtype=np.float64,
+    )
+    cloud = SimpleNamespace(xyz=lambda: xyz)
+
+    result = build_critical_barrier_height_audit(
+        cloud,
+        navigation,
+        structure,
+        corridor,
+        blocker_reports,
+        longitudinal_half_window_m=0.45,
+    )
+
+    assert len(result.records) == 1
+    record = result.records[0]
+    assert record["aisle_id"] == "aisle_001"
+    assert record["classifiable_point_count"] == 7
+    assert record["obstacle_evidence_point_count"] == 5
+    assert record["height_band_counts"] == {
+        "below_0_12_m": 1,
+        "0_12_to_0_25_m": 2,
+        "0_25_to_0_50_m": 1,
+        "0_50_to_1_00_m": 2,
+        "above_1_00_m": 1,
+    }
+    assert record["obstacle_height_min_m"] == 0.15
+    assert record["obstacle_height_p50_m"] == 0.30
+    assert record["obstacle_height_max_m"] == 0.80
+
+
+def test_vehicle_feasible_connectivity_rejects_one_cell_pixel_path():
+    from agt_offline_assets.vehicle_feasibility import build_vehicle_feasible_aisle_audit
+
+    occupancy = np.full((1, 9), FREE, dtype=np.uint8)
+    navigation, structure, corridor, _, _ = _fixture(occupancy)
+
+    reports = build_vehicle_feasible_aisle_audit(
+        navigation,
+        structure,
+        corridor,
+        occupancy,
+        clearance_radius_m=0.60,
+    )
+
+    assert len(reports) == 1
+    report = reports[0]
+    assert report["raster_grid_connectivity"] is True
+    assert report["vehicle_feasible_connectivity"] is False
+    assert report["required_clearance_radius_m"] == 0.60
+    assert report["maximum_clearance_m"] == 0.50
+    assert report["feasible_cell_count"] == 0
