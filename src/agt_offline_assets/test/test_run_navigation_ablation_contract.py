@@ -66,3 +66,21 @@ def test_runner_writes_root_clearance_throat_report(tmp_path):
     assert path == tmp_path / "vehicle_review" / "clearance_throats.json"
     assert loaded["schema"] == "agt_vehicle_clearance_throat_audit/v1"
     assert loaded["clearance_throat_aisles"] == 2
+
+
+def test_runner_writes_root_sensor_evidence_root_cause_report(tmp_path):
+    module = _load_runner_module()
+    assert hasattr(module, "_write_vehicle_sensor_evidence_root_cause_report")
+    document = {
+        "schema": "agt_vehicle_sensor_evidence_root_cause/v1",
+        "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
+        "strong_sensor_throat_count": 3,
+        "records": [],
+    }
+
+    path = module._write_vehicle_sensor_evidence_root_cause_report(tmp_path, document)
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+
+    assert path == tmp_path / "vehicle_review" / "sensor_evidence_root_cause.json"
+    assert loaded["schema"] == "agt_vehicle_sensor_evidence_root_cause/v1"
+    assert loaded["strong_sensor_throat_count"] == 3
