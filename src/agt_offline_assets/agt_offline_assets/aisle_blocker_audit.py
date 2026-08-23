@@ -205,10 +205,15 @@ def _neighbor_count(mask: np.ndarray, owned: np.ndarray, row: int, col: int, rad
     return max(0, count)
 
 
-def _component_size(mask: np.ndarray, owned: np.ndarray, row: int, col: int) -> int:
+def _component_cells(
+    mask: np.ndarray,
+    owned: np.ndarray,
+    row: int,
+    col: int,
+) -> list[tuple[int, int]]:
     active = np.asarray(mask, dtype=bool) & np.asarray(owned, dtype=bool)
     if not bool(active[row, col]):
-        return 0
+        return []
     height, width = active.shape
     seen = {(int(row), int(col))}
     queue = deque([(int(row), int(col))])
@@ -224,7 +229,55 @@ def _component_size(mask: np.ndarray, owned: np.ndarray, row: int, col: int) -> 
                 continue
             seen.add(key)
             queue.append(key)
-    return len(seen)
+    return sorted(seen)
+
+
+def _component_size(mask: np.ndarray, owned: np.ndarray, row: int, col: int) -> int:
+    return len(_component_cells(mask, owned, row, col))
+
+
+def _component_shape(
+    mask: np.ndarray,
+    owned: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    row: int,
+    col: int,
+    resolution_m: float,
+) -> dict[str, float | int]:
+    cells = _component_cells(mask, owned, row, col)
+    if not cells:
+        return {
+            "size": 0,
+            "longitudinal_span_m": 0.0,
+            "transverse_span_m": 0.0,
+            "transverse_fraction_of_aisle": 0.0,
+        }
+
+    rr = np.fromiter((item[0] for item in cells), dtype=np.int64)
+    cc = np.fromiter((item[1] for item in cells), dtype=np.int64)
+    u_values = np.asarray(u[rr, cc], dtype=np.float64)
+    v_values = np.asarray(v[rr, cc], dtype=np.float64)
+    longitudinal_span = float(np.max(u_values) - np.min(u_values) + resolution_m)
+    transverse_span = float(np.max(v_values) - np.min(v_values) + resolution_m)
+
+    owned_v = np.asarray(v[owned], dtype=np.float64)
+    aisle_width = (
+        float(np.max(owned_v) - np.min(owned_v) + resolution_m)
+        if owned_v.size
+        else 0.0
+    )
+    fraction = (
+        min(1.0, max(0.0, transverse_span / aisle_width))
+        if aisle_width > 0.0
+        else 0.0
+    )
+    return {
+        "size": len(cells),
+        "longitudinal_span_m": longitudinal_span,
+        "transverse_span_m": transverse_span,
+        "transverse_fraction_of_aisle": float(fraction),
+    }
 
 
 def _critical_blocker_cells(
@@ -232,6 +285,8 @@ def _critical_blocker_cells(
     critical: np.ndarray,
     owned: np.ndarray,
     occupancy: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
     provenance: Any,
     materialized: Any | None,
 ) -> list[dict[str, object]]:
@@ -258,6 +313,13 @@ def _critical_blocker_cells(
     resolution = float(navigation.resolution_m)
     origin_x = float(navigation.origin_x_m)
     origin_y = float(navigation.origin_y_m)
+    owned_v = np.asarray(v[owned], dtype=np.float64)
+    if owned_v.size:
+        geometric_low_v = float(np.min(owned_v) - 0.5 * resolution)
+        geometric_high_v = float(np.max(owned_v) + 0.5 * resolution)
+    else:
+        geometric_low_v = geometric_high_v = 0.0
+    geometric_width_v = max(0.0, geometric_high_v - geometric_low_v)
 
     records: list[dict[str, object]] = []
     for row, col in np.argwhere(critical):
@@ -265,12 +327,41 @@ def _critical_blocker_cells(
         cc = int(col)
         points = int(point_count[rr, cc])
         obstacles = int(obstacle_count[rr, cc])
+        strong_shape = _component_shape(strong, owned, u, v, rr, cc, resolution)
+        direct_shape = _component_shape(direct, owned, u, v, rr, cc, resolution)
+
+        section = owned & (np.abs(u - float(u[rr, cc])) <= 0.51 * resolution)
+        section_count = int(np.count_nonzero(section))
+        section_free = int(np.count_nonzero(section & (occupancy == FREE)))
+        section_occupied = int(np.count_nonzero(section & (occupancy == OCCUPIED)))
+        section_unknown = int(np.count_nonzero(section & (occupancy == UNKNOWN)))
+        section_direct = int(np.count_nonzero(section & direct))
+        section_strong = int(np.count_nonzero(section & strong))
+
+        v_here = float(v[rr, cc])
+        if geometric_width_v > 0.0:
+            normalized_transverse = min(
+                1.0,
+                max(0.0, (v_here - geometric_low_v) / geometric_width_v),
+            )
+            distance_to_edge = max(
+                0.0,
+                min(v_here - geometric_low_v, geometric_high_v - v_here),
+            )
+            offset_from_mid = v_here - 0.5 * (geometric_low_v + geometric_high_v)
+        else:
+            normalized_transverse = 0.5
+            distance_to_edge = 0.0
+            offset_from_mid = 0.0
+
         records.append(
             {
                 "row": rr,
                 "col": cc,
                 "x_m": float(origin_x + (cc + 0.5) * resolution),
                 "y_m": float(origin_y + (rr + 0.5) * resolution),
+                "u_m": float(u[rr, cc]),
+                "v_m": v_here,
                 "cause": _exclusive_blocker_cause(
                     rr,
                     cc,
@@ -285,15 +376,44 @@ def _critical_blocker_cells(
                 "ground_support_count": int(ground_support[rr, cc]),
                 "slope_deg": float(slope[rr, cc]),
                 "step_m": float(step[rr, cc]),
+                "normalized_transverse_position": float(normalized_transverse),
+                "offset_from_geometric_mid_m": float(offset_from_mid),
+                "distance_to_geometric_edge_m": float(distance_to_edge),
+                "cross_section_cell_count": section_count,
+                "cross_section_free_cell_count": section_free,
+                "cross_section_occupied_cell_count": section_occupied,
+                "cross_section_unknown_cell_count": section_unknown,
+                "cross_section_direct_obstacle_count": section_direct,
+                "cross_section_direct_obstacle_fraction": (
+                    float(section_direct / section_count) if section_count else 0.0
+                ),
+                "cross_section_strong_sensor_count": section_strong,
+                "cross_section_strong_sensor_fraction": (
+                    float(section_strong / section_count) if section_count else 0.0
+                ),
                 "direct_obstacle_neighbors_r1": _neighbor_count(direct, owned, rr, cc, 1),
                 "direct_obstacle_neighbors_r2": _neighbor_count(direct, owned, rr, cc, 2),
-                "direct_obstacle_component_size_in_aisle": _component_size(
-                    direct, owned, rr, cc
+                "direct_obstacle_component_size_in_aisle": int(direct_shape["size"]),
+                "direct_obstacle_component_longitudinal_span_m": float(
+                    direct_shape["longitudinal_span_m"]
+                ),
+                "direct_obstacle_component_transverse_span_m": float(
+                    direct_shape["transverse_span_m"]
+                ),
+                "direct_obstacle_component_transverse_fraction_of_aisle": float(
+                    direct_shape["transverse_fraction_of_aisle"]
                 ),
                 "strong_sensor_neighbors_r1": _neighbor_count(strong, owned, rr, cc, 1),
                 "strong_sensor_neighbors_r2": _neighbor_count(strong, owned, rr, cc, 2),
-                "strong_sensor_component_size_in_aisle": _component_size(
-                    strong, owned, rr, cc
+                "strong_sensor_component_size_in_aisle": int(strong_shape["size"]),
+                "strong_sensor_component_longitudinal_span_m": float(
+                    strong_shape["longitudinal_span_m"]
+                ),
+                "strong_sensor_component_transverse_span_m": float(
+                    strong_shape["transverse_span_m"]
+                ),
+                "strong_sensor_component_transverse_fraction_of_aisle": float(
+                    strong_shape["transverse_fraction_of_aisle"]
                 ),
             }
         )
@@ -344,6 +464,8 @@ def build_aisle_blocker_audit(
             critical,
             owned,
             occupancy,
+            u,
+            v,
             provenance,
             materialized,
         )
