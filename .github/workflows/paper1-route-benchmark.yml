@@ -43,6 +43,7 @@ jobs:
           src/agt_offline_assets/test/test_navigation_ablation.py
           src/agt_offline_assets/test/test_vehicle_feasibility.py
           src/agt_offline_assets/test/test_vehicle_collision_envelope.py
+          src/agt_offline_assets/test/test_run_navigation_ablation_contract.py
           src/agt_offline_assets/test/test_aisle_blocker_audit.py
           src/agt_offline_assets/test/test_formal_navigation_map.py
           src/agt_offline_assets/test/test_formal_navigation_recovery.py
