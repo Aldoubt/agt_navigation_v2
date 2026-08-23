@@ -4,7 +4,9 @@
 Experimental control contract:
 - Row/Corridor geometry is derived once from A0 and frozen.
 - D2 profiles are derived from A3 and change only vertical obstacle evidence.
-- D1 vehicle feasibility is a downstream review layer; it never inflates PGM.
+- D1.1 vehicle feasibility is a downstream interior-terminal review layer.
+- D2.1 vertical evidence is persisted as a sidecar, never map authority.
+- D3 vehicle collision-envelope review is derived from A3 + vertical evidence.
 - D0 3D barrier audit remains optional and diagnostic only.
 
 All outputs from this script are EXPERIMENTAL_REVIEW_EVIDENCE, never formal map
@@ -59,16 +61,24 @@ from agt_offline_assets.height_layer_ablation import (  # noqa: E402
     apply_height_layer_ablation_profile,
     derive_height_layer_obstacle_evidence,
     height_layer_ablation_spec,
+    write_height_layer_evidence_bundle,
 )
 from agt_offline_assets.navigation_ablation import (  # noqa: E402
     ABLATION_PROFILE_KEYS,
     apply_navigation_ablation_profile,
     navigation_ablation_spec,
 )
+from agt_offline_assets.vehicle_collision_envelope import (  # noqa: E402
+    VehicleCollisionEnvelope,
+    build_vehicle_collision_envelope_audit,
+    derive_vehicle_envelope_navigation,
+)
 from agt_offline_assets.vehicle_feasibility import build_vehicle_feasible_aisle_audit  # noqa: E402
 
 
 ALL_PROFILE_KEYS = tuple(ABLATION_PROFILE_KEYS) + tuple(D2_PROFILE_KEYS)
+_CONNECTIVITY_SCOPE = "INTERIOR_TERMINAL_BANDS"
+_CLEARANCE_CONTRACT = "ENVIRONMENT_PLUS_LATERAL_AISLE_BOUNDARY"
 
 
 def _profile_spec(profile: str) -> dict[str, object]:
@@ -98,6 +108,18 @@ def _failure_mode_counts(reports: list[dict[str, object]]) -> dict[str, int]:
     for report in reports:
         counts[str(report.get("failure_mode", "UNKNOWN"))] += 1
     return dict(sorted(counts.items()))
+
+
+def _interior_terminal_connected_count(reports: list[dict[str, object]]) -> int:
+    return sum(
+        bool(
+            item.get(
+                "interior_terminal_raster_connectivity",
+                item.get("raster_grid_connectivity", False),
+            )
+        )
+        for item in reports
+    )
 
 
 def _write_aisle_root_cause_report(
@@ -153,16 +175,18 @@ def _write_vehicle_feasibility_report(
     validation = revision / "validation"
     validation.mkdir(parents=True, exist_ok=True)
     path = validation / "vehicle_feasibility.json"
+    connected = _interior_terminal_connected_count(reports)
     document = {
-        "schema": "agt_vehicle_feasible_aisle_audit/v2",
+        "schema": "agt_vehicle_feasible_aisle_audit/v3",
         "profile": profile,
         "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
-        "clearance_contract": "ENVIRONMENT_PLUS_LATERAL_AISLE_BOUNDARY",
+        "clearance_contract": _CLEARANCE_CONTRACT,
+        "connectivity_scope": _CONNECTIVITY_SCOPE,
         "clearance_radius_m": float(clearance_radius_m),
         "terminal_inset_m": float(terminal_inset_m),
-        "raster_connected_aisles": sum(
-            bool(item.get("raster_grid_connectivity")) for item in reports
-        ),
+        "interior_terminal_raster_connected_aisles": connected,
+        # Compatibility alias for D1/D1.0 consumers.
+        "raster_connected_aisles": connected,
         "vehicle_feasible_connected_aisles": sum(
             bool(item.get("vehicle_feasible_connectivity")) for item in reports
         ),
@@ -170,6 +194,23 @@ def _write_vehicle_feasibility_report(
     }
     path.write_text(
         json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_vehicle_collision_envelope_report(
+    revision: Path,
+    *,
+    profile: str,
+    document: dict[str, object],
+) -> Path:
+    validation = revision / "validation"
+    validation.mkdir(parents=True, exist_ok=True)
+    path = validation / "vehicle_collision_envelope.json"
+    payload = {**document, "review_location_profile": profile}
+    path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
     return path
@@ -204,17 +245,26 @@ def _write_critical_barrier_3d_report(
     return path
 
 
-def _write_d2_height_layer_report(revision: Path, *, profile: str, evidence) -> Path:
+def _write_d2_height_layer_report(
+    revision: Path,
+    *,
+    profile: str,
+    evidence,
+    vertical_evidence_bundle: str | None,
+) -> Path:
     validation = revision / "validation"
     validation.mkdir(parents=True, exist_ok=True)
     path = validation / "height_layer_ablation.json"
     document = {
-        "schema": "agt_height_layer_ablation/v1",
+        "schema": "agt_height_layer_ablation/v2",
         "profile": profile,
         "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
         "profile_spec": height_layer_ablation_spec(profile).to_dict(),
         "evidence": evidence.metadata(),
-        "selected_obstacle_point_count": int(np.sum(evidence.selected_count(profile), dtype=np.int64)),
+        "vertical_evidence_bundle": vertical_evidence_bundle,
+        "selected_obstacle_point_count": int(
+            np.sum(evidence.selected_count(profile), dtype=np.int64)
+        ),
     }
     path.write_text(
         json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
@@ -244,6 +294,7 @@ def _profile_summary(
         for item in (qa.get("aisles") or [])
         if str(item.get("pair_kind")) == "ROW_ROW"
     ]
+    interior_terminal_connected = _interior_terminal_connected_count(vehicle_reports)
     summary: dict[str, object] = {
         "profile": profile,
         "profile_spec": _profile_spec(profile),
@@ -281,24 +332,30 @@ def _profile_summary(
             ),
         },
         "vehicle_feasibility": {
-            "clearance_contract": "ENVIRONMENT_PLUS_LATERAL_AISLE_BOUNDARY",
+            "clearance_contract": _CLEARANCE_CONTRACT,
+            "connectivity_scope": _CONNECTIVITY_SCOPE,
             "clearance_radius_m": float(vehicle_clearance_radius_m),
             "terminal_inset_m": float(vehicle_terminal_inset_m),
-            "raster_connected_aisles": sum(
-                bool(item.get("raster_grid_connectivity")) for item in vehicle_reports
-            ),
+            "interior_terminal_raster_connected_aisles": interior_terminal_connected,
+            "raster_connected_aisles": interior_terminal_connected,
             "vehicle_feasible_connected_aisles": sum(
                 bool(item.get("vehicle_feasible_connectivity")) for item in vehicle_reports
             ),
             "minimum_of_end_to_end_clearance_radius_m": float(
                 min(
-                    (float(item.get("maximum_end_to_end_clearance_radius_m", 0.0)) for item in vehicle_reports),
+                    (
+                        float(item.get("maximum_end_to_end_clearance_radius_m", 0.0))
+                        for item in vehicle_reports
+                    ),
                     default=0.0,
                 )
             ),
             "maximum_of_end_to_end_clearance_radius_m": float(
                 max(
-                    (float(item.get("maximum_end_to_end_clearance_radius_m", 0.0)) for item in vehicle_reports),
+                    (
+                        float(item.get("maximum_end_to_end_clearance_radius_m", 0.0))
+                        for item in vehicle_reports
+                    ),
                     default=0.0,
                 )
             ),
@@ -324,6 +381,17 @@ def _profile_summary(
     return summary
 
 
+def _vehicle_envelope_from_args(args) -> VehicleCollisionEnvelope | None:
+    if args.vehicle_half_width_m is None:
+        return None
+    return VehicleCollisionEnvelope(
+        half_width_m=float(args.vehicle_half_width_m),
+        lateral_safety_margin_m=float(args.vehicle_lateral_safety_margin_m),
+        collision_z_min_m=float(args.vehicle_collision_z_min_m),
+        collision_z_max_m=float(args.vehicle_collision_z_max_m),
+    )
+
+
 def run(args) -> dict[str, object]:
     output = args.output.expanduser().resolve()
     if output.exists() and any(output.iterdir()):
@@ -336,6 +404,7 @@ def run(args) -> dict[str, object]:
             "the 80M+ point PCD should not be rescanned per profile"
         )
 
+    vehicle_envelope = _vehicle_envelope_from_args(args)
     cloud = read_pcd(args.pcd)
     base_config = GroundRelativeNavigationConfig(
         resolution_m=args.resolution,
@@ -350,6 +419,14 @@ def run(args) -> dict[str, object]:
         obstacle_padding_m=args.obstacle_padding_m,
     )
     base_config.validate()
+    if (
+        vehicle_envelope is not None
+        and vehicle_envelope.collision_z_max_m > float(base_config.obstacle_max_height_m) + 1.0e-12
+    ):
+        raise ValueError(
+            "D3 collision_z_max_m exceeds available vertical obstacle evidence; "
+            "increase --obstacle-max-height or lower the vehicle envelope"
+        )
     a0 = derive_ground_relative_navigation_map(cloud, base_config)
 
     frozen_structure = derive_navigation_structure(a0, NavigationStructureConfig())
@@ -366,10 +443,12 @@ def run(args) -> dict[str, object]:
         soft_recovery_max_gap_m=args.soft_recovery_max_gap_m,
     )
 
-    d2_requested = any(profile in D2_PROFILE_KEYS for profile in args.profiles)
-    a3 = apply_navigation_ablation_profile(a0, "A3") if d2_requested else None
+    d2_profiles_requested = any(profile in D2_PROFILE_KEYS for profile in args.profiles)
+    evidence_requested = d2_profiles_requested or vehicle_envelope is not None
+    a3 = apply_navigation_ablation_profile(a0, "A3") if evidence_requested else None
     d2_evidence = None
-    if d2_requested:
+    vertical_evidence_bundle: str | None = None
+    if evidence_requested:
         d2_evidence = derive_height_layer_obstacle_evidence(
             cloud,
             a3,
@@ -384,16 +463,59 @@ def run(args) -> dict[str, object]:
                 "D2-FULL contract violated: LOW+MID+HIGH must reproduce A3 "
                 f"obstacle_count exactly; mismatched_cells={mismatch}"
             )
+        metadata_path = write_height_layer_evidence_bundle(
+            d2_evidence,
+            a3,
+            output / "vertical_evidence",
+        )
+        vertical_evidence_bundle = str(metadata_path.relative_to(output))
+
+    d3_document: dict[str, object] | None = None
+    if vehicle_envelope is not None:
+        vehicle_navigation = derive_vehicle_envelope_navigation(a3, d2_evidence, vehicle_envelope)
+        vehicle_materialized = materialize_structure_aware_navigation_map(
+            vehicle_navigation,
+            frozen_corridor,
+            boundary,
+            frame_id="map",
+            row_direction_xy=frozen_structure.row_model.direction_xy,
+            config=formal_policy,
+        )
+        vehicle_accepted = replay_formal_navigation_overrides(
+            vehicle_materialized.navigation,
+            frozen_corridor,
+            boundary,
+            [],
+            frame_id="map",
+        )
+        d3_document = build_vehicle_collision_envelope_audit(
+            a3,
+            d2_evidence,
+            vehicle_envelope,
+            frozen_structure,
+            frozen_corridor,
+            vehicle_accepted.navigation.occupancy,
+            terminal_inset_m=args.vehicle_terminal_inset_m,
+        )
+        d3_document.update(
+            {
+                "base_profile": "A3",
+                "vertical_evidence_bundle": vertical_evidence_bundle,
+                "derived_ground_navigation": vehicle_navigation.counts(),
+                "derived_formal_accepted": vehicle_accepted.navigation.counts(),
+                "materialization": vehicle_materialized.counts(),
+            }
+        )
 
     document: dict[str, object] = {
-        "schema": "agt_navigation_ablation/v2",
+        "schema": "agt_navigation_ablation/v3",
         "input_pcd": str(args.pcd.expanduser().resolve()),
         "site_boundary": str(args.site_boundary.expanduser().resolve()),
         "points": int(cloud.points.shape[0]),
         "profiles": {},
         "control": {
             "structure_source_profile": "A0",
-            "d2_base_profile": "A3" if d2_requested else None,
+            "d2_base_profile": "A3" if evidence_requested else None,
             "row_count": len(frozen_structure.row_model.centers_v_m),
             "accepted_row_count": len(frozen_corridor.accepted_row_centers_v_m),
             "expected_interior_aisles": int(frozen_geometric.expected_interior_aisles),
@@ -401,10 +523,19 @@ def run(args) -> dict[str, object]:
             "navigation_config_A0": vars(base_config),
             "vehicle_clearance_radius_m": float(args.vehicle_clearance_radius_m),
             "vehicle_terminal_inset_m": float(args.vehicle_terminal_inset_m),
+            "vehicle_connectivity_scope": _CONNECTIVITY_SCOPE,
+            "vehicle_collision_envelope": (
+                None if vehicle_envelope is None else vehicle_envelope.to_dict()
+            ),
             "barrier_3d_enabled": bool(args.enable_barrier_3d_audit),
             "d2_height_evidence": None if d2_evidence is None else d2_evidence.metadata(),
+            "vertical_evidence_bundle": vertical_evidence_bundle,
         },
     }
+    if d3_document is not None:
+        document["vehicle_collision_envelope"] = {
+            key: value for key, value in d3_document.items() if key != "aisles"
+        }
 
     for profile in args.profiles:
         if profile in D2_PROFILE_KEYS:
@@ -492,7 +623,16 @@ def run(args) -> dict[str, object]:
         )
         if profile in D2_PROFILE_KEYS:
             _write_d2_height_layer_report(
-                revision, profile=profile, evidence=d2_evidence
+                revision,
+                profile=profile,
+                evidence=d2_evidence,
+                vertical_evidence_bundle=vertical_evidence_bundle,
+            )
+        if d3_document is not None:
+            _write_vehicle_collision_envelope_report(
+                revision,
+                profile=profile,
+                document=d3_document,
             )
         if barrier_3d_result is not None:
             _write_critical_barrier_3d_report(
@@ -508,8 +648,13 @@ def run(args) -> dict[str, object]:
                     "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
                     "frozen_structure_source": "A0",
                     "d2_base_profile": "A3" if profile in D2_PROFILE_KEYS else None,
+                    "vertical_evidence_bundle": vertical_evidence_bundle,
                     "vehicle_clearance_radius_m": float(args.vehicle_clearance_radius_m),
                     "vehicle_terminal_inset_m": float(args.vehicle_terminal_inset_m),
+                    "vehicle_connectivity_scope": _CONNECTIVITY_SCOPE,
+                    "vehicle_collision_envelope": (
+                        None if vehicle_envelope is None else vehicle_envelope.to_dict()
+                    ),
                     "barrier_3d_enabled": bool(args.enable_barrier_3d_audit),
                 },
                 indent=2,
@@ -547,7 +692,7 @@ def run(args) -> dict[str, object]:
     return document
 
 
-def main(argv: list[str] | None = None) -> int:
+def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pcd", type=Path, required=True)
     parser.add_argument("--site-boundary", type=Path, required=True)
@@ -559,13 +704,27 @@ def main(argv: list[str] | None = None) -> int:
         default=list(ABLATION_PROFILE_KEYS),
     )
     parser.add_argument("--write-overlays", action="store_true")
-    parser.add_argument("--vehicle-clearance-radius-m", type=float, default=0.30)
+    parser.add_argument(
+        "--vehicle-clearance-radius-m",
+        type=float,
+        default=0.30,
+        help="legacy D1 circular clearance proxy; retained for compatibility",
+    )
     parser.add_argument(
         "--vehicle-terminal-inset-m",
         type=float,
         default=0.50,
-        help="D1 longitudinal inset for interior start/end terminal bands",
+        help="D1/D3 longitudinal inset for interior start/end terminal bands",
     )
+    parser.add_argument(
+        "--vehicle-half-width-m",
+        type=float,
+        default=None,
+        help="enable D3 using this physical vehicle half-width",
+    )
+    parser.add_argument("--vehicle-lateral-safety-margin-m", type=float, default=0.0)
+    parser.add_argument("--vehicle-collision-z-min-m", type=float, default=0.0)
+    parser.add_argument("--vehicle-collision-z-max-m", type=float, default=0.60)
     parser.add_argument("--enable-barrier-3d-audit", action="store_true")
     parser.add_argument("--write-barrier-plots", action="store_true")
     parser.add_argument("--barrier-longitudinal-half-window-m", type=float, default=0.40)
@@ -586,11 +745,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--soft-obstacle-max-count", type=int, default=4)
     parser.add_argument("--soft-obstacle-max-ratio", type=float, default=0.05)
     parser.add_argument("--soft-recovery-max-gap-m", type=float, default=0.60)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
     args = parser.parse_args(argv)
     if args.vehicle_clearance_radius_m < 0.0:
         parser.error("--vehicle-clearance-radius-m must be >= 0")
     if args.vehicle_terminal_inset_m < 0.0:
         parser.error("--vehicle-terminal-inset-m must be >= 0")
+    if args.vehicle_half_width_m is not None and args.vehicle_half_width_m <= 0.0:
+        parser.error("--vehicle-half-width-m must be > 0 when D3 is enabled")
+    if args.vehicle_lateral_safety_margin_m < 0.0:
+        parser.error("--vehicle-lateral-safety-margin-m must be >= 0")
+    if args.vehicle_collision_z_min_m < 0.0:
+        parser.error("--vehicle-collision-z-min-m must be >= 0")
+    if args.vehicle_collision_z_max_m <= args.vehicle_collision_z_min_m:
+        parser.error("--vehicle-collision-z-max-m must be > --vehicle-collision-z-min-m")
     if args.write_barrier_plots and not args.enable_barrier_3d_audit:
         parser.error("--write-barrier-plots requires --enable-barrier-3d-audit")
     document = run(args)
