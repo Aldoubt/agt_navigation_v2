@@ -9,6 +9,11 @@ D1 deliberately does not treat the longitudinal start/end caps of an aisle as
 virtual obstacles. Start and end are interior terminal bands inset from the
 geometric extrema, while clearance is constrained by real environment evidence
 and by lateral aisle width. The audit never mutates or inflates the formal PGM.
+
+D1.1 makes the connectivity scope explicit. ``interior_terminal_raster_connectivity``
+means connectivity between the inset terminal bands, not full geometric-extent
+QA connectivity. ``raster_grid_connectivity`` is retained as a compatibility
+alias for existing review JSON consumers.
 """
 
 from __future__ import annotations
@@ -33,6 +38,7 @@ _NEIGHBOURS = (
     (1, 1),
 )
 _CLEARANCE_CONTRACT = "ENVIRONMENT_PLUS_LATERAL_AISLE_BOUNDARY"
+_CONNECTIVITY_SCOPE = "INTERIOR_TERMINAL_BANDS"
 
 
 def _require_scipy():
@@ -91,9 +97,6 @@ def _terminal_masks(
     u_min = float(np.min(u[owned]))
     u_max = float(np.max(u[owned]))
     span = max(0.0, u_max - u_min)
-    # Preserve at least roughly one raster interval between terminal bands. A
-    # short synthetic aisle therefore remains auditable instead of producing
-    # empty terminal sets when the requested inset is larger than half its span.
     maximum_inset = max(0.0, 0.5 * (span - float(resolution_m)))
     effective_inset = min(float(terminal_inset_m), maximum_inset)
     start_u = u_min + effective_inset
@@ -127,13 +130,7 @@ def _lateral_clearance_field_m(
     v: np.ndarray,
     resolution_m: float,
 ) -> np.ndarray:
-    """Approximate local clearance to aisle side boundaries, excluding end caps.
-
-    Per-u bins estimate local transverse bounds. Neighbouring bins are merged to
-    remain stable when a row-aligned aisle is oblique to the raster axes. This
-    preserves local width variation without converting u-min/u-max into virtual
-    obstacles.
-    """
+    """Approximate local clearance to aisle side boundaries, excluding end caps."""
 
     clearance = np.zeros_like(u, dtype=np.float64)
     if not np.any(owned):
@@ -153,12 +150,8 @@ def _lateral_clearance_field_m(
     for shift in (-1, 1):
         source = np.arange(bin_count, dtype=np.int64) + shift
         valid = (source >= 0) & (source < bin_count)
-        local_minimum[valid] = np.minimum(
-            local_minimum[valid], minimum_v[source[valid]]
-        )
-        local_maximum[valid] = np.maximum(
-            local_maximum[valid], maximum_v[source[valid]]
-        )
+        local_minimum[valid] = np.minimum(local_minimum[valid], minimum_v[source[valid]])
+        local_maximum[valid] = np.maximum(local_maximum[valid], maximum_v[source[valid]])
 
     bins = np.clip(bin_index[owned], 0, bin_count - 1)
     low_edge = local_minimum[bins] - 0.5 * resolution
@@ -222,7 +215,7 @@ def build_vehicle_feasible_aisle_audit(
     clearance_radius_m: float,
     terminal_inset_m: float = 0.50,
 ) -> list[dict[str, object]]:
-    """Return D1 raster and vehicle-clearance connectivity for ROW_ROW aisles."""
+    """Return D1.1 interior-terminal and vehicle-clearance connectivity for ROW_ROW aisles."""
 
     if clearance_radius_m < 0.0:
         raise ValueError("clearance_radius_m must be >= 0")
@@ -251,10 +244,7 @@ def build_vehicle_feasible_aisle_audit(
         owned = _owned_mask(geometric, v, diagnostic)
         traversable = owned & (occupancy == FREE)
         start_zone, end_zone, effective_inset, start_u, end_u = _terminal_masks(
-            owned,
-            u,
-            resolution,
-            terminal_inset_m,
+            owned, u, resolution, terminal_inset_m
         )
         start_has_free = bool(np.any(start_zone & traversable))
         end_has_free = bool(np.any(end_zone & traversable))
@@ -262,34 +252,29 @@ def build_vehicle_feasible_aisle_audit(
         lateral_clearance = _lateral_clearance_field_m(owned, u, v, resolution)
         clearance = np.minimum(environment_clearance, lateral_clearance)
         clearance = np.where(traversable, clearance, 0.0)
-        widest = _widest_end_to_end_clearance(
-            traversable,
-            clearance,
-            start_zone,
-            end_zone,
-        )
-        raster_connected = bool(start_has_free and end_has_free and widest > 0.0)
+        widest = _widest_end_to_end_clearance(traversable, clearance, start_zone, end_zone)
+        interior_terminal_connected = bool(start_has_free and end_has_free and widest > 0.0)
 
         feasible = traversable & (clearance + 1.0e-12 >= float(clearance_radius_m))
         start_has_feasible = bool(np.any(start_zone & feasible))
         end_has_feasible = bool(np.any(end_zone & feasible))
         vehicle_connected = bool(
-            raster_connected
+            interior_terminal_connected
             and start_has_feasible
             and end_has_feasible
             and widest + 1.0e-12 >= float(clearance_radius_m)
         )
 
-        maximum_clearance = (
-            float(np.max(clearance[traversable])) if np.any(traversable) else 0.0
-        )
+        maximum_clearance = float(np.max(clearance[traversable])) if np.any(traversable) else 0.0
         reports.append(
             {
                 "aisle_id": f"aisle_{int(diagnostic.pair_index):03d}",
                 "pair_index": int(diagnostic.pair_index),
                 "diagnostic_status": str(diagnostic.status),
                 "clearance_contract": _CLEARANCE_CONTRACT,
-                "raster_grid_connectivity": raster_connected,
+                "connectivity_scope": _CONNECTIVITY_SCOPE,
+                "interior_terminal_raster_connectivity": interior_terminal_connected,
+                "raster_grid_connectivity": interior_terminal_connected,
                 "required_clearance_radius_m": float(clearance_radius_m),
                 "terminal_inset_m": float(terminal_inset_m),
                 "effective_terminal_inset_m": float(effective_inset),
