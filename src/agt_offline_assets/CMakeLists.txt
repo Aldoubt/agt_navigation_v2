@@ -40,6 +40,14 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_vehicle_collision_envelope test/test_vehicle_collision_envelope.py)
   ament_add_pytest_test(test_vehicle_clearance_throat test/test_vehicle_clearance_throat.py)
   ament_add_pytest_test(
+    test_vehicle_vertical_boundary_audit
+    test/test_vehicle_vertical_boundary_audit.py
+  )
+  ament_add_pytest_test(
+    test_run_vehicle_vertical_boundary_audit_contract
+    test/test_run_vehicle_vertical_boundary_audit_contract.py
+  )
+  ament_add_pytest_test(
     test_run_navigation_ablation_contract
     test/test_run_navigation_ablation_contract.py
   )
