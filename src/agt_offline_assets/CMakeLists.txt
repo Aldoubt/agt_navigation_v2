@@ -38,6 +38,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_navigation_ablation test/test_navigation_ablation.py)
   ament_add_pytest_test(test_vehicle_feasibility test/test_vehicle_feasibility.py)
   ament_add_pytest_test(test_vehicle_collision_envelope test/test_vehicle_collision_envelope.py)
+  ament_add_pytest_test(
+    test_vehicle_exact_collision_ablation
+    test/test_vehicle_exact_collision_ablation.py
+  )
   ament_add_pytest_test(test_vehicle_clearance_throat test/test_vehicle_clearance_throat.py)
   ament_add_pytest_test(
     test_vehicle_vertical_boundary_audit
@@ -46,6 +50,10 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_run_vehicle_vertical_boundary_audit_contract
     test/test_run_vehicle_vertical_boundary_audit_contract.py
+  )
+  ament_add_pytest_test(
+    test_run_vehicle_exact_collision_ablation_contract
+    test/test_run_vehicle_exact_collision_ablation_contract.py
   )
   ament_add_pytest_test(
     test_run_navigation_ablation_contract
