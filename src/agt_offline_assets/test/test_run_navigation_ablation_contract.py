@@ -13,6 +13,16 @@ def _load_runner_module():
     return module
 
 
+def _load_e1_runner_module():
+    root = Path(__file__).resolve().parents[3]
+    path = root / "scripts" / "run_vehicle_sensor_evidence_audit.py"
+    spec = importlib.util.spec_from_file_location("run_vehicle_sensor_evidence_audit_contract", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_runner_exposes_d3_vehicle_envelope_flags_and_parser_factory():
     module = _load_runner_module()
     assert hasattr(module, "_build_parser")
@@ -68,19 +78,23 @@ def test_runner_writes_root_clearance_throat_report(tmp_path):
     assert loaded["clearance_throat_aisles"] == 2
 
 
-def test_runner_writes_root_sensor_evidence_root_cause_report(tmp_path):
-    module = _load_runner_module()
-    assert hasattr(module, "_write_vehicle_sensor_evidence_root_cause_report")
+def test_e1_runner_exposes_replay_inputs_and_root_report_writer(tmp_path):
+    module = _load_e1_runner_module()
+    assert hasattr(module, "_build_parser")
+    help_text = module._build_parser().format_help()
+    assert "--ablation-summary" in help_text
+    assert "--clearance-throats" in help_text
+    assert "--output" in help_text
+    assert "--soft-obstacle-max-count" in help_text
+    assert "--soft-obstacle-max-ratio" in help_text
+
     document = {
         "schema": "agt_vehicle_sensor_evidence_root_cause/v1",
         "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
         "strong_sensor_throat_count": 3,
         "records": [],
     }
-
-    path = module._write_vehicle_sensor_evidence_root_cause_report(tmp_path, document)
+    path = module._write_report(tmp_path / "sensor_evidence_root_cause.json", document)
     loaded = json.loads(path.read_text(encoding="utf-8"))
-
-    assert path == tmp_path / "vehicle_review" / "sensor_evidence_root_cause.json"
     assert loaded["schema"] == "agt_vehicle_sensor_evidence_root_cause/v1"
     assert loaded["strong_sensor_throat_count"] == 3
