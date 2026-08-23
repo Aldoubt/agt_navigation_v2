@@ -1,0 +1,481 @@
+"""D3.1 explainable clearance-throat diagnostics for aisle-aligned vehicle review.
+
+The formal Navigation Map and D2 vertical evidence remain unchanged.  This
+module consumes the same D1.1 clearance fields used by vehicle feasibility and
+explains *where* an interior-terminal path becomes too narrow for the requested
+vehicle radius.
+
+For every accepted ROW_ROW aisle it distinguishes three states:
+
+* ``VEHICLE_FEASIBLE`` -- an end-to-end path satisfies the requested radius;
+* ``CLEARANCE_THROAT`` -- raster connectivity exists, but every path contains a
+  narrower bottleneck; and
+* ``NO_INTERIOR_TERMINAL_PATH`` -- even the review raster is disconnected.
+
+Constraint sources are reported in the row-aligned transverse coordinate.  The
+terms ``LOWER_V`` and ``UPPER_V`` are used deliberately instead of visual
+left/right so the diagnostic does not depend on display orientation.
+"""
+
+from __future__ import annotations
+
+from collections import deque
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+
+from .navigation_map_derivation import FREE
+from .vehicle_feasibility import (
+    _ACCEPTED_AISLE_STATES,
+    _CONNECTIVITY_SCOPE,
+    _environment_clearance_field_m,
+    _grid_uv,
+    _lateral_clearance_field_m,
+    _owned_mask,
+    _terminal_masks,
+    _widest_end_to_end_clearance,
+)
+
+
+_SCHEMA = "agt_vehicle_clearance_throat_audit/v1"
+_AUTHORITY = "DERIVED_VEHICLE_REVIEW_NOT_NAVIGATION_MAP_AUTHORITY"
+_NEIGHBOURS = (
+    (-1, -1),
+    (-1, 0),
+    (-1, 1),
+    (0, -1),
+    (0, 1),
+    (1, -1),
+    (1, 0),
+    (1, 1),
+)
+
+
+def _mask(owner: Any | None, name: str, shape: tuple[int, int]) -> np.ndarray:
+    if owner is None or not hasattr(owner, name):
+        return np.zeros(shape, dtype=bool)
+    values = np.asarray(getattr(owner, name), dtype=bool)
+    if values.shape != shape:
+        raise ValueError(f"clearance throat source mask {name} shape mismatch")
+    return values
+
+
+def _source_masks(
+    shape: tuple[int, int],
+    *,
+    materialized: Any | None,
+    provenance: Any | None,
+) -> list[tuple[str, np.ndarray]]:
+    slope = _mask(provenance, "slope_hard_mask", shape)
+    step = _mask(provenance, "step_hard_mask", shape)
+    return [
+        ("SITE_BOUNDARY_BLOCK", _mask(materialized, "site_boundary_blocked_mask", shape)),
+        ("ROW_STRUCTURAL_BLOCK", _mask(materialized, "row_structural_blocked_mask", shape)),
+        ("SLOPE_AND_STEP_HARD", slope & step),
+        ("SLOPE_HARD", slope & ~step),
+        ("STEP_HARD", step & ~slope),
+        (
+            "STRONG_SENSOR_OBSTACLE",
+            _mask(provenance, "strong_sensor_obstacle_mask", shape),
+        ),
+        ("SOFT_OCCUPIED", _mask(provenance, "soft_occupied_mask", shape)),
+        ("UNRESOLVED_UNKNOWN", _mask(materialized, "unresolved_unknown_mask", shape)),
+        ("BASE_HARD_OCCUPIED", _mask(materialized, "base_hard_occupied_mask", shape)),
+        ("BASE_SOFT_OCCUPIED", _mask(materialized, "base_soft_occupied_mask", shape)),
+    ]
+
+
+def _source_at(
+    row: int,
+    col: int,
+    occupancy: np.ndarray,
+    source_masks: list[tuple[str, np.ndarray]],
+) -> str:
+    for name, mask in source_masks:
+        if bool(mask[row, col]):
+            return name
+    if np.asarray(occupancy, dtype=np.uint8)[row, col] != FREE:
+        return "OTHER_NON_FREE"
+    return "FREE"
+
+
+def _threshold_path(
+    traversable: np.ndarray,
+    clearance_m: np.ndarray,
+    start_zone: np.ndarray,
+    end_zone: np.ndarray,
+    widest_m: float,
+) -> list[tuple[int, int]]:
+    """Recover one deterministic path that realizes the widest bottleneck."""
+
+    if widest_m <= 0.0:
+        return []
+    allowed = (
+        np.asarray(traversable, dtype=bool)
+        & (np.asarray(clearance_m, dtype=np.float64) + 1.0e-12 >= float(widest_m))
+    )
+    start = np.asarray(start_zone, dtype=bool) & allowed
+    end = np.asarray(end_zone, dtype=bool) & allowed
+    if not np.any(start) or not np.any(end):
+        return []
+
+    height, width = allowed.shape
+    visited = np.zeros_like(allowed, dtype=bool)
+    parent_row = np.full((height, width), -1, dtype=np.int32)
+    parent_col = np.full((height, width), -1, dtype=np.int32)
+    queue: deque[tuple[int, int]] = deque()
+    for row, col in np.argwhere(start):
+        rr = int(row)
+        cc = int(col)
+        visited[rr, cc] = True
+        queue.append((rr, cc))
+
+    goal: tuple[int, int] | None = None
+    while queue:
+        row, col = queue.popleft()
+        if bool(end[row, col]):
+            goal = (row, col)
+            break
+        for dr, dc in _NEIGHBOURS:
+            rr = row + dr
+            cc = col + dc
+            if not (0 <= rr < height and 0 <= cc < width):
+                continue
+            if not allowed[rr, cc] or visited[rr, cc]:
+                continue
+            visited[rr, cc] = True
+            parent_row[rr, cc] = row
+            parent_col[rr, cc] = col
+            queue.append((rr, cc))
+
+    if goal is None:
+        return []
+    path: list[tuple[int, int]] = []
+    row, col = goal
+    while True:
+        path.append((row, col))
+        pr = int(parent_row[row, col])
+        pc = int(parent_col[row, col])
+        if pr < 0 or pc < 0:
+            break
+        row, col = pr, pc
+    path.reverse()
+    return path
+
+
+def _limiting_constraint(environment_m: float, lateral_m: float) -> str:
+    tolerance = 1.0e-9
+    if environment_m + tolerance < lateral_m:
+        return "ENVIRONMENT_NON_FREE"
+    if lateral_m + tolerance < environment_m:
+        return "LATERAL_AISLE_BOUNDARY"
+    return "MIXED_ENVIRONMENT_AND_LATERAL"
+
+
+def _constraint_on_side(
+    *,
+    side: str,
+    throat_row: int,
+    throat_col: int,
+    owned: np.ndarray,
+    u: np.ndarray,
+    v: np.ndarray,
+    occupancy: np.ndarray,
+    resolution_m: float,
+    source_masks: list[tuple[str, np.ndarray]],
+    navigation: Any,
+) -> dict[str, object]:
+    throat_u = float(u[throat_row, throat_col])
+    throat_v = float(v[throat_row, throat_col])
+    tolerance_u = 0.51 * float(resolution_m)
+    cross_section = np.abs(u - throat_u) <= tolerance_u
+
+    local_owned = owned & cross_section
+    if not np.any(local_owned):
+        return {
+            "side": side,
+            "source": "NO_LOCAL_AISLE_GEOMETRY",
+            "distance_m": None,
+        }
+    local_v = v[local_owned]
+    low_edge = float(np.min(local_v)) - 0.5 * float(resolution_m)
+    high_edge = float(np.max(local_v)) + 0.5 * float(resolution_m)
+    boundary_distance = (
+        throat_v - low_edge if side == "LOWER_V" else high_edge - throat_v
+    )
+    boundary_distance = max(0.0, float(boundary_distance))
+
+    non_free = cross_section & (np.asarray(occupancy, dtype=np.uint8) != FREE)
+    if side == "LOWER_V":
+        candidates = np.argwhere(non_free & (v < throat_v - 1.0e-12))
+    else:
+        candidates = np.argwhere(non_free & (v > throat_v + 1.0e-12))
+
+    environment_distance = float("inf")
+    environment_cell: tuple[int, int] | None = None
+    if candidates.size:
+        distances = np.abs(v[candidates[:, 0], candidates[:, 1]] - throat_v)
+        index = int(np.argmin(distances))
+        rr = int(candidates[index, 0])
+        cc = int(candidates[index, 1])
+        environment_distance = max(
+            0.0,
+            float(distances[index]) - 0.5 * float(resolution_m),
+        )
+        environment_cell = (rr, cc)
+
+    if environment_cell is not None and environment_distance <= boundary_distance + 1.0e-12:
+        rr, cc = environment_cell
+        return {
+            "side": side,
+            "source": _source_at(rr, cc, occupancy, source_masks),
+            "distance_m": float(environment_distance),
+            "row": rr,
+            "col": cc,
+            "world_x_m": float(navigation.origin_x_m)
+            + (cc + 0.5) * float(resolution_m),
+            "world_y_m": float(navigation.origin_y_m)
+            + (rr + 0.5) * float(resolution_m),
+            "u_m": float(u[rr, cc]),
+            "v_m": float(v[rr, cc]),
+        }
+    return {
+        "side": side,
+        "source": "LATERAL_AISLE_BOUNDARY",
+        "distance_m": float(boundary_distance),
+        "boundary_v_m": float(low_edge if side == "LOWER_V" else high_edge),
+    }
+
+
+def _primary_throat(
+    path: list[tuple[int, int]],
+    clearance: np.ndarray,
+    widest: float,
+) -> tuple[int, int] | None:
+    if not path:
+        return None
+    candidates = [
+        (index, row, col)
+        for index, (row, col) in enumerate(path)
+        if float(clearance[row, col]) <= float(widest) + 1.0e-9
+    ]
+    if not candidates:
+        return None
+    midpoint = 0.5 * (len(path) - 1)
+    _, row, col = min(candidates, key=lambda item: (abs(item[0] - midpoint), item[0]))
+    return int(row), int(col)
+
+
+def build_vehicle_clearance_throat_audit(
+    navigation: Any,
+    structure: Any,
+    corridor: Any,
+    accepted_occupancy: np.ndarray,
+    *,
+    clearance_radius_m: float,
+    terminal_inset_m: float = 0.50,
+    materialized: Any | None = None,
+    provenance: Any | None = None,
+) -> dict[str, object]:
+    """Explain aisle bottlenecks under the same D1.1 clearance contract."""
+
+    if clearance_radius_m < 0.0:
+        raise ValueError("clearance_radius_m must be >= 0")
+    if terminal_inset_m < 0.0:
+        raise ValueError("terminal_inset_m must be >= 0")
+    occupancy = np.asarray(accepted_occupancy, dtype=np.uint8)
+    geometric = np.asarray(corridor.aisle_geometric_envelope, dtype=bool)
+    if occupancy.shape != geometric.shape:
+        raise ValueError("clearance throat grid shape mismatch")
+    if np.asarray(navigation.occupancy).shape != occupancy.shape:
+        raise ValueError("clearance throat navigation shape mismatch")
+
+    resolution = float(navigation.resolution_m)
+    if resolution <= 0.0:
+        raise ValueError("clearance throat resolution must be > 0")
+    u, v = _grid_uv(navigation, structure)
+    environment_clearance = _environment_clearance_field_m(occupancy, resolution)
+    source_masks = _source_masks(
+        occupancy.shape,
+        materialized=materialized,
+        provenance=provenance,
+    )
+
+    reports: list[dict[str, object]] = []
+    for diagnostic in corridor.aisle_pair_diagnostics:
+        if str(getattr(diagnostic, "pair_kind", "ROW_ROW")) != "ROW_ROW":
+            continue
+        if str(getattr(diagnostic, "status", "")) not in _ACCEPTED_AISLE_STATES:
+            continue
+
+        owned = _owned_mask(geometric, v, diagnostic)
+        traversable = owned & (occupancy == FREE)
+        start_zone, end_zone, effective_inset, start_u, end_u = _terminal_masks(
+            owned,
+            u,
+            resolution,
+            terminal_inset_m,
+        )
+        lateral_clearance = _lateral_clearance_field_m(owned, u, v, resolution)
+        clearance = np.minimum(environment_clearance, lateral_clearance)
+        clearance = np.where(traversable, clearance, 0.0)
+        widest = _widest_end_to_end_clearance(
+            traversable,
+            clearance,
+            start_zone,
+            end_zone,
+        )
+        path = _threshold_path(
+            traversable,
+            clearance,
+            start_zone,
+            end_zone,
+            widest,
+        )
+        connected = bool(widest > 0.0 and path)
+        vehicle_feasible = bool(
+            connected and widest + 1.0e-12 >= float(clearance_radius_m)
+        )
+        if not connected:
+            status = "NO_INTERIOR_TERMINAL_PATH"
+        elif vehicle_feasible:
+            status = "VEHICLE_FEASIBLE"
+        else:
+            status = "CLEARANCE_THROAT"
+
+        report: dict[str, object] = {
+            "aisle_id": f"aisle_{int(diagnostic.pair_index):03d}",
+            "pair_index": int(diagnostic.pair_index),
+            "status": status,
+            "connectivity_scope": _CONNECTIVITY_SCOPE,
+            "required_clearance_radius_m": float(clearance_radius_m),
+            "terminal_inset_m": float(terminal_inset_m),
+            "effective_terminal_inset_m": float(effective_inset),
+            "start_terminal_u_m": float(start_u),
+            "end_terminal_u_m": float(end_u),
+            "interior_terminal_raster_connectivity": connected,
+            "vehicle_feasible_connectivity": vehicle_feasible,
+            "bottleneck_clearance_m": float(widest),
+            "clearance_deficit_m": float(max(0.0, float(clearance_radius_m) - widest)),
+            "widest_path_cell_count": len(path),
+            "primary_throat": None,
+            "limiting_constraint": None,
+        }
+        throat = _primary_throat(path, clearance, widest)
+        if throat is not None:
+            row, col = throat
+            env_value = float(environment_clearance[row, col])
+            lateral_value = float(lateral_clearance[row, col])
+            report["limiting_constraint"] = _limiting_constraint(env_value, lateral_value)
+            report["primary_throat"] = {
+                "row": row,
+                "col": col,
+                "world_x_m": float(navigation.origin_x_m) + (col + 0.5) * resolution,
+                "world_y_m": float(navigation.origin_y_m) + (row + 0.5) * resolution,
+                "u_m": float(u[row, col]),
+                "v_m": float(v[row, col]),
+                "clearance_m": float(clearance[row, col]),
+                "environment_clearance_m": env_value,
+                "lateral_clearance_m": lateral_value,
+                "lower_v_constraint": _constraint_on_side(
+                    side="LOWER_V",
+                    throat_row=row,
+                    throat_col=col,
+                    owned=owned,
+                    u=u,
+                    v=v,
+                    occupancy=occupancy,
+                    resolution_m=resolution,
+                    source_masks=source_masks,
+                    navigation=navigation,
+                ),
+                "upper_v_constraint": _constraint_on_side(
+                    side="UPPER_V",
+                    throat_row=row,
+                    throat_col=col,
+                    owned=owned,
+                    u=u,
+                    v=v,
+                    occupancy=occupancy,
+                    resolution_m=resolution,
+                    source_masks=source_masks,
+                    navigation=navigation,
+                ),
+            }
+        reports.append(report)
+
+    return {
+        "schema": _SCHEMA,
+        "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
+        "authority": _AUTHORITY,
+        "connectivity_scope": _CONNECTIVITY_SCOPE,
+        "clearance_radius_m": float(clearance_radius_m),
+        "terminal_inset_m": float(terminal_inset_m),
+        "aisle_count": len(reports),
+        "clearance_throat_aisles": sum(item["status"] == "CLEARANCE_THROAT" for item in reports),
+        "no_interior_terminal_path_aisles": sum(
+            item["status"] == "NO_INTERIOR_TERMINAL_PATH" for item in reports
+        ),
+        "vehicle_feasible_aisles": sum(item["status"] == "VEHICLE_FEASIBLE" for item in reports),
+        "aisles": reports,
+    }
+
+
+def write_vehicle_clearance_throat_overlays(
+    audit: dict[str, object],
+    navigation: Any,
+    corridor: Any,
+    accepted_occupancy: np.ndarray,
+    output_dir: str | Path,
+    *,
+    half_window_m: float = 1.50,
+) -> list[Path]:
+    """Write compact local PNG crops for clearance-throat cases only."""
+
+    try:
+        from PIL import Image, ImageDraw
+    except ImportError as exc:
+        raise RuntimeError("clearance throat overlays require Pillow") from exc
+    if half_window_m <= 0.0:
+        raise ValueError("half_window_m must be > 0")
+
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    occupancy = np.asarray(accepted_occupancy, dtype=np.uint8)
+    geometric = np.asarray(corridor.aisle_geometric_envelope, dtype=bool)
+    resolution = float(navigation.resolution_m)
+    radius = max(1, int(np.ceil(float(half_window_m) / resolution)))
+    written: list[Path] = []
+
+    for report in audit.get("aisles", []):
+        if report.get("status") != "CLEARANCE_THROAT":
+            continue
+        throat = report.get("primary_throat")
+        if not isinstance(throat, dict):
+            continue
+        row = int(throat["row"])
+        col = int(throat["col"])
+        r0 = max(0, row - radius)
+        r1 = min(occupancy.shape[0], row + radius + 1)
+        c0 = max(0, col - radius)
+        c1 = min(occupancy.shape[1], col + radius + 1)
+        local_occ = occupancy[r0:r1, c0:c1]
+        local_geo = geometric[r0:r1, c0:c1]
+
+        rgb = np.full((*local_occ.shape, 3), 235, dtype=np.uint8)
+        rgb[~local_geo] = (170, 170, 170)
+        rgb[local_occ != FREE] = (45, 45, 45)
+        image = Image.fromarray(np.flipud(rgb), mode="RGB").resize(
+            (rgb.shape[1] * 8, rgb.shape[0] * 8),
+            resample=Image.Resampling.NEAREST,
+        )
+        draw = ImageDraw.Draw(image)
+        x = (col - c0 + 0.5) * 8
+        y = (r1 - 1 - row + 0.5) * 8
+        draw.line((x - 7, y, x + 7, y), fill=(220, 40, 40), width=2)
+        draw.line((x, y - 7, x, y + 7), fill=(220, 40, 40), width=2)
+        path = output / f"{report['aisle_id']}_throat.png"
+        image.save(path)
+        written.append(path)
+    return written
