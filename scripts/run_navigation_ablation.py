@@ -3,14 +3,21 @@
 
 This runner is intentionally stricter than switching profiles in the GUI:
 agricultural Row/Corridor geometry is derived once from A0 and then frozen for
-all profiles.  Therefore A1/A2/A3 change only Ground-navigation occupancy
+all profiles. Therefore A1/A2/A3 change only Ground-navigation occupancy
 policy while PCD, Site Boundary, Row geometry and Corridor geometry stay
 identical.
+
+Each profile also emits a planner-independent per-aisle blocker audit. For a
+disconnected geometric aisle the audit finds a minimum-blocker end-to-end path
+and attributes only the non-FREE cells on that path to sensor, terrain,
+structure, boundary or UNKNOWN evidence. This is diagnostic evidence; it never
+repairs the map.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 from pathlib import Path
 import sys
@@ -36,6 +43,10 @@ from agt_offline_assets import (  # noqa: E402
     read_pcd,
     replay_formal_navigation_overrides,
     write_formal_navigation_qa,
+)
+from agt_offline_assets.aisle_blocker_audit import (  # noqa: E402
+    aggregate_aisle_blocker_causes,
+    build_aisle_blocker_audit,
 )
 from agt_offline_assets.aisle_centerlines import (  # noqa: E402
     derive_geometric_aisle_centerlines,
@@ -67,6 +78,56 @@ def _write_overlay(revision: Path) -> None:
     )
 
 
+def _failure_mode_counts(reports: list[dict[str, object]]) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for report in reports:
+        counts[str(report.get("failure_mode", "UNKNOWN"))] += 1
+    return dict(sorted(counts.items()))
+
+
+def _write_aisle_root_cause_report(
+    revision: Path,
+    *,
+    profile: str,
+    reports: list[dict[str, object]],
+) -> tuple[Path, Path]:
+    validation = revision / "validation"
+    validation.mkdir(parents=True, exist_ok=True)
+    json_path = validation / "aisle_root_cause.json"
+    txt_path = validation / "aisle_root_cause.txt"
+    document = {
+        "schema": "agt_aisle_blocker_audit/v1",
+        "profile": profile,
+        "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
+        "connected_aisles": sum(bool(item.get("grid_connectivity")) for item in reports),
+        "disconnected_aisles": sum(not bool(item.get("grid_connectivity")) for item in reports),
+        "dominant_blocker_causes": aggregate_aisle_blocker_causes(reports),
+        "failure_modes": _failure_mode_counts(reports),
+        "aisles": reports,
+    }
+    json_path.write_text(
+        json.dumps(document, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+
+    lines = [
+        f"profile: {profile}",
+        f"connected: {document['connected_aisles']}/{len(reports)}",
+        f"dominant causes: {json.dumps(document['dominant_blocker_causes'], ensure_ascii=False)}",
+        "",
+        "aisle | connected | failure mode | min blocker cells | dominant cause",
+        "----- | --------- | ------------ | ----------------- | --------------",
+    ]
+    for report in reports:
+        lines.append(
+            f"{report['aisle_id']} | {bool(report['grid_connectivity'])} | "
+            f"{report['failure_mode']} | {int(report['minimum_blocker_cell_count'])} | "
+            f"{report['dominant_blocker_cause']}"
+        )
+    txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return json_path, txt_path
+
+
 def _profile_summary(
     profile: str,
     *,
@@ -76,6 +137,7 @@ def _profile_summary(
     accepted,
     qa,
     provenance,
+    blocker_reports: list[dict[str, object]],
 ) -> dict[str, object]:
     interior = [
         dict(item)
@@ -106,6 +168,18 @@ def _profile_summary(
             qa.get("largest_free_component_fraction", 0.0)
         ),
         "map_unknown_fraction": float(qa.get("map_unknown_fraction", 0.0)),
+        "aisle_root_cause": {
+            "disconnected_aisle_count": sum(
+                not bool(item.get("grid_connectivity")) for item in blocker_reports
+            ),
+            "dominant_blocker_causes": aggregate_aisle_blocker_causes(blocker_reports),
+            "failure_modes": _failure_mode_counts(blocker_reports),
+            "minimum_blocker_cells_total": sum(
+                int(item.get("minimum_blocker_cell_count", 0))
+                for item in blocker_reports
+                if not bool(item.get("grid_connectivity"))
+            ),
+        },
     }
 
 
@@ -131,7 +205,7 @@ def run(args) -> dict[str, object]:
     base_config.validate()
     a0 = derive_ground_relative_navigation_map(cloud, base_config)
 
-    # Freeze agricultural structure from A0.  This is the key experimental
+    # Freeze agricultural structure from A0. This is the key experimental
     # control: A1/A2/A3 must not silently change the Row/Corridor hypothesis.
     frozen_structure = derive_navigation_structure(a0, NavigationStructureConfig())
     frozen_corridor = derive_corridor_refinement(
@@ -196,6 +270,14 @@ def run(args) -> dict[str, object]:
             site_boundary=boundary,
         )
         provenance = derive_hard_occupancy_provenance(navigation, formal_policy)
+        blocker_reports = build_aisle_blocker_audit(
+            navigation,
+            frozen_structure,
+            frozen_corridor,
+            accepted.navigation.occupancy,
+            provenance,
+            materialized=materialized,
+        )
 
         destination = output / profile
         revision = export_structure_aware_navigation_revision(
@@ -211,6 +293,11 @@ def run(args) -> dict[str, object]:
         write_formal_navigation_qa(
             qa,
             revision / "validation" / "navigation_validation.json",
+        )
+        _write_aisle_root_cause_report(
+            revision,
+            profile=profile,
+            reports=blocker_reports,
         )
         (revision / "validation" / "ablation_profile.json").write_text(
             json.dumps(
@@ -237,6 +324,7 @@ def run(args) -> dict[str, object]:
             accepted=accepted,
             qa=qa,
             provenance=provenance,
+            blocker_reports=blocker_reports,
         )
 
     (output / "ablation_summary.json").write_text(
