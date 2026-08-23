@@ -24,6 +24,8 @@ def test_runner_exposes_d3_vehicle_envelope_flags_and_parser_factory():
     assert "--vehicle-collision-z-min-m" in help_text
     assert "--vehicle-collision-z-max-m" in help_text
     assert "--vehicle-terminal-inset-m" in help_text
+    assert "--write-clearance-throat-overlays" in help_text
+    assert "--clearance-throat-overlay-half-window-m" in help_text
 
 
 def test_runner_writes_additive_vehicle_collision_envelope_report(tmp_path):
@@ -46,3 +48,21 @@ def test_runner_writes_additive_vehicle_collision_envelope_report(tmp_path):
     assert loaded["schema"] == "agt_vehicle_collision_envelope_audit/v1"
     assert loaded["review_location_profile"] == "A3"
     assert loaded["selected_vertical_layers"] == ["LOW", "MID"]
+
+
+def test_runner_writes_root_clearance_throat_report(tmp_path):
+    module = _load_runner_module()
+    assert hasattr(module, "_write_vehicle_clearance_throat_report")
+    document = {
+        "schema": "agt_vehicle_clearance_throat_audit/v1",
+        "status": "EXPERIMENTAL_REVIEW_EVIDENCE",
+        "clearance_throat_aisles": 2,
+        "aisles": [],
+    }
+
+    path = module._write_vehicle_clearance_throat_report(tmp_path, document)
+    loaded = json.loads(path.read_text(encoding="utf-8"))
+
+    assert path == tmp_path / "vehicle_review" / "clearance_throats.json"
+    assert loaded["schema"] == "agt_vehicle_clearance_throat_audit/v1"
+    assert loaded["clearance_throat_aisles"] == 2
