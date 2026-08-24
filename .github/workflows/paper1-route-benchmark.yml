@@ -40,6 +40,24 @@ jobs:
           python -m pytest -q
           src/agt_offline_assets/test/test_navigation_map_freeze_export.py
           src/agt_offline_assets/test/test_navigation_map_derivation.py
+          src/agt_offline_assets/test/test_navigation_ablation.py
+          src/agt_offline_assets/test/test_vehicle_feasibility.py
+          src/agt_offline_assets/test/test_vehicle_collision_envelope.py
+          src/agt_offline_assets/test/test_vehicle_exact_collision_ablation.py
+          src/agt_offline_assets/test/test_vehicle_clearance_throat.py
+          src/agt_offline_assets/test/test_vehicle_vertical_boundary_audit.py
+          src/agt_offline_assets/test/test_terrain_local_evidence.py
+          src/agt_offline_assets/test/test_run_navigation_ablation_contract.py
+          src/agt_offline_assets/test/test_run_vehicle_vertical_boundary_audit_contract.py
+          src/agt_offline_assets/test/test_run_vehicle_exact_collision_ablation_contract.py
+          src/agt_offline_assets/test/test_run_terrain_local_evidence_audit_contract.py
+          src/agt_offline_assets/test/test_aisle_blocker_audit.py
+          src/agt_offline_assets/test/test_formal_navigation_map.py
+          src/agt_offline_assets/test/test_formal_navigation_recovery.py
+          src/agt_offline_assets/test/test_formal_navigation_override.py
+          src/agt_offline_assets/test/test_formal_navigation_revision.py
+          src/agt_offline_assets/test/test_formal_navigation_qa.py
+          src/agt_offline_assets/test/test_formal_navigation_usability.py
       - name: Run agricultural terrain, structure, row-track and corridor regressions
         env:
           PYTHONPATH: src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
@@ -49,6 +67,7 @@ jobs:
           src/agt_offline_assets/test/test_navigation_structure.py
           src/agt_offline_assets/test/test_navigation_row_tracks.py
           src/agt_offline_assets/test/test_navigation_corridor.py
+          src/agt_offline_assets/test/test_navigation_corridor_centerlines.py
           src/agt_offline_assets/test/test_navigation_corridor_boundary_candidates.py
       - name: Run Workbench formal-map and resource-bundle contracts
         env:
@@ -59,16 +78,25 @@ jobs:
           src/agt_map_workbench/test/test_navigation_override_metadata.py
           src/agt_map_workbench/test/test_resource_bundle.py
           src/agt_map_workbench/test/test_paper1_resource_bundle_integration.py
+          src/agt_map_workbench/test/test_structure_aware_navigation_workbench.py
+          src/agt_map_workbench/test/test_review_export.py
+          src/agt_map_workbench/test/test_ablation_workbench.py
       - name: Run map pipeline contracts
         env:
           PYTHONPATH: src/agt_map_pipeline:src/agt_offline_assets:src/agt_ui_bridge:src/agt_coverage_planning
         run: python -m pytest -q src/agt_map_pipeline/test
+      - name: Run structure-aware map-quality compatibility
+        env:
+          MPLBACKEND: Agg
+          PYTHONPATH: src/agt_route_benchmark:src/agt_coverage_planning:src/agt_offline_assets:src/agt_ui_bridge
+        run: python -m pytest -q src/agt_route_benchmark/test/test_map_quality_structure_aware.py
       - name: Run Paper I benchmark unit tests
         env:
           MPLBACKEND: Agg
           PYTHONPATH: src/agt_route_benchmark:src/agt_coverage_planning:src/agt_offline_assets:src/agt_ui_bridge
         run: python -m pytest -q src/agt_route_benchmark/test
       - name: Compile changed Python sources
+        if: always()
         run: >-
           python -m compileall -q
           src/agt_route_benchmark/agt_route_benchmark
@@ -78,3 +106,8 @@ jobs:
           src/agt_map_pipeline/agt_map_pipeline
           src/agt_map_pipeline/scripts
           src/agt_map_workbench/scripts/paper1_map_workbench_launcher.py
+          scripts/run_navigation_ablation.py
+          scripts/run_vehicle_sensor_evidence_audit.py
+          scripts/run_vehicle_vertical_boundary_audit.py
+          scripts/run_vehicle_exact_collision_ablation.py
+          scripts/run_terrain_local_evidence_audit.py

@@ -6,7 +6,7 @@ find_package(ament_cmake_python REQUIRED)
 
 ament_python_install_package(${PROJECT_NAME})
 
-# Repository API writes may not preserve the executable Git mode. With
+# Repository API writes may not preserve an executable Git mode. With
 # --symlink-install, install build-tree launchers with explicit execute bits.
 set(AGT_MAP_WORKBENCH_CLI_DIR "${CMAKE_CURRENT_BINARY_DIR}/cli")
 set(AGT_MAP_WORKBENCH_LAUNCHER_SOURCE
@@ -89,6 +89,14 @@ if(BUILD_TESTING)
   ament_add_pytest_test(
     test_navigation_override_metadata
     test/test_navigation_override_metadata.py
+  )
+  ament_add_pytest_test(
+    test_review_export
+    test/test_review_export.py
+  )
+  ament_add_pytest_test(
+    test_ablation_workbench
+    test/test_ablation_workbench.py
   )
 endif()
 

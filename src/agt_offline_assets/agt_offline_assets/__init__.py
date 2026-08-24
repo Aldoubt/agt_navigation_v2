@@ -57,6 +57,22 @@ from .navigation_map_derivation import (
     write_navigation_map_files,
     write_navigation_map_derivation,
 )
+from .formal_navigation_map import (
+    StructureAwareNavigationResult,
+    materialize_structure_aware_navigation_map,
+)
+from .formal_navigation_override import (
+    FormalOverrideReplayResult,
+    replay_formal_navigation_overrides,
+)
+from .formal_navigation_qa import (
+    evaluate_formal_navigation_qa,
+    write_formal_navigation_qa,
+)
+from .formal_navigation_revision import (
+    export_structure_aware_navigation_revision,
+    write_structure_aware_navigation_payload,
+)
 from .navigation_grid import NavigationGridEvidence, load_navigation_grid
 from .navigation_structure import (
     NavigationStructureConfig,

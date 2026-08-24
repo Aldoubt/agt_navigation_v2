@@ -35,11 +35,54 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_pcd_compressed test/test_pcd_compressed.py)
   ament_add_pytest_test(test_pointcloud_profile test/test_pointcloud_profile.py)
   ament_add_pytest_test(test_navigation_map_derivation test/test_navigation_map_derivation.py)
+  ament_add_pytest_test(test_navigation_ablation test/test_navigation_ablation.py)
+  ament_add_pytest_test(test_vehicle_feasibility test/test_vehicle_feasibility.py)
+  ament_add_pytest_test(test_vehicle_collision_envelope test/test_vehicle_collision_envelope.py)
+  ament_add_pytest_test(
+    test_vehicle_exact_collision_ablation
+    test/test_vehicle_exact_collision_ablation.py
+  )
+  ament_add_pytest_test(test_vehicle_clearance_throat test/test_vehicle_clearance_throat.py)
+  ament_add_pytest_test(
+    test_vehicle_vertical_boundary_audit
+    test/test_vehicle_vertical_boundary_audit.py
+  )
+  ament_add_pytest_test(
+    test_terrain_local_evidence
+    test/test_terrain_local_evidence.py
+  )
+  ament_add_pytest_test(
+    test_run_vehicle_vertical_boundary_audit_contract
+    test/test_run_vehicle_vertical_boundary_audit_contract.py
+  )
+  ament_add_pytest_test(
+    test_run_vehicle_exact_collision_ablation_contract
+    test/test_run_vehicle_exact_collision_ablation_contract.py
+  )
+  ament_add_pytest_test(
+    test_run_terrain_local_evidence_audit_contract
+    test/test_run_terrain_local_evidence_audit_contract.py
+  )
+  ament_add_pytest_test(
+    test_run_navigation_ablation_contract
+    test/test_run_navigation_ablation_contract.py
+  )
+  ament_add_pytest_test(test_aisle_blocker_audit test/test_aisle_blocker_audit.py)
+  ament_add_pytest_test(test_formal_navigation_map test/test_formal_navigation_map.py)
+  ament_add_pytest_test(test_formal_navigation_recovery test/test_formal_navigation_recovery.py)
+  ament_add_pytest_test(test_formal_navigation_override test/test_formal_navigation_override.py)
+  ament_add_pytest_test(test_formal_navigation_revision test/test_formal_navigation_revision.py)
+  ament_add_pytest_test(test_formal_navigation_qa test/test_formal_navigation_qa.py)
+  ament_add_pytest_test(test_formal_navigation_usability test/test_formal_navigation_usability.py)
   ament_add_pytest_test(test_navigation_grid test/test_navigation_grid.py)
   ament_add_pytest_test(test_navigation_structure test/test_navigation_structure.py)
   ament_add_pytest_test(test_terrain_morphology test/test_terrain_morphology.py)
   ament_add_pytest_test(test_navigation_row_tracks test/test_navigation_row_tracks.py)
   ament_add_pytest_test(test_navigation_corridor test/test_navigation_corridor.py)
+  ament_add_pytest_test(
+    test_navigation_corridor_centerlines
+    test/test_navigation_corridor_centerlines.py
+  )
   ament_add_pytest_test(
     test_navigation_corridor_boundary_candidates
     test/test_navigation_corridor_boundary_candidates.py
