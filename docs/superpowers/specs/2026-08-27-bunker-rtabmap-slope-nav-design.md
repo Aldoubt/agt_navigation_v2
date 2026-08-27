@@ -71,14 +71,27 @@ odometry             |
 默认 TF 合同保持：
 
 ```text
-map -> odom              RTAB-Map path启用时由 RTAB-Map/adapter唯一发布
+map -> odom              RTAB-Map path启用时由 rtabmap_slam 唯一发布
 odom -> base_footprint   agt_mapping_fast_livo2_adapter
 base_footprint -> base_link / sensors   robot_state_publisher/static TF
 ```
 
 RTAB-Map 路径启用时，现有 `agt_localization` 不得同时发布 `map -> odom`。launch 必须 fail-fast 拒绝这类非法组合。
 
-RTAB-Map 本身是否直接发布 `map -> odom` 由实现阶段确认其 ROS2 参数行为；若直接发布会破坏项目 TF 合同，则增加项目 adapter，仅保留一个权威发布者。
+第一阶段直接使用 RTAB-Map ROS2 官方外部 odometry 模式，不增加项目自定义 TF adapter：
+
+```text
+frame_id:=base_footprint
+odom_topic:=/agt/mapping/odometry
+odom_frame_id:=''          # 空值表示从 odom topic 获取里程计，而不是从 TF 反查
+visual_odometry:=false
+icp_odometry:=false
+publish_tf_odom:=false
+map_frame_id:=map
+publish_tf_map:=true
+```
+
+因此 `rtabmap_slam` 只负责 `map -> odom`，FAST-LIVO2 adapter 继续唯一负责 `odom -> base_footprint`。如果实际安装版本的 RTAB-Map 参数行为与上述官方 ROS2 launch 合同不一致，启动测试必须 fail-fast，不通过增加第二个 TF 发布者来规避。
 
 ## 4. MID360 与 RTAB-Map 适配策略
 
@@ -94,23 +107,38 @@ RTAB-Map只消费：
 
 - 标准外部 odometry
 - 注册后的 `sensor_msgs/PointCloud2`
-- IMU（若 RTAB-Map 后端需要）
+- IMU（用于图优化重力约束）
 - GNSS `sensor_msgs/NavSatFix`（可选）
 
 ### 4.2 Topic 适配
 
 项目侧不让 RTAB-Map直接依赖 Livox CustomMsg。统一通过 FAST-LIVO2 注册后的 PointCloud2 接入，避免再做一层 CustomMsg 转换。
 
-建议接口：
+固定第一阶段接口：
 
 ```text
-/agt/mapping/odometry
-/agt/mapping/registered_points_lidar
-/agt/sensors/imu/data
-/agt/sensors/gnss/fix      # 可选
+RTAB odom              <- /agt/mapping/odometry
+RTAB scan_cloud        <- /agt/mapping/registered_points_lidar
+RTAB imu               <- /agt/sensors/imu/data
+RTAB gps/fix           <- /agt/sensors/gnss/fix      # 可选
+RTAB map output        -> /agt/rtabmap/map
+RTAB obstacle/debug    -> /agt/rtabmap/*
 ```
 
-RTAB-Map 输出统一 remap 到项目命名空间，避免裸 `/map`、`/cloud_map` 等 topic 与现有链冲突。
+对应 RTAB-Map launch 必须显式：
+
+```text
+subscribe_scan_cloud:=true
+scan_cloud_topic:=/agt/mapping/registered_points_lidar
+visual_odometry:=false
+icp_odometry:=false
+odom_topic:=/agt/mapping/odometry
+imu_topic:=/agt/sensors/imu/data
+gps_topic:=/agt/sensors/gnss/fix
+map_topic:=/agt/rtabmap/map
+```
+
+所有 RTAB-Map 输出统一进入项目命名空间，避免裸 `/map`、`/cloud_map` 等 topic 与现有链冲突。
 
 ## 5. GNSS 接入
 
@@ -130,6 +158,8 @@ sensor_msgs/msg/NavSatFix
 - covariance
 - 时间戳
 - 天线外参 `base_link -> gps_link`
+
+RTAB-Map ROS2 官方 launch 的 `gps_topic` 是异步 GPS 输入，用于 SLAM graph optimization 和 loop-closure candidate selection。实现配置必须显式关闭“忽略 priors”的行为，使有效 GNSS 能实际进入优化；无 GNSS 时允许以纯 LIO + loop 模式运行。
 
 ### 5.2 质量门控
 
@@ -210,6 +240,7 @@ RTAB-Map 生成/发布 2D `nav_msgs/OccupancyGrid`，作为 Nav2 global costmap 
 - 原始 OccupancyGrid 不预先烘焙 inflation。
 - 不把局部瞬时障碍永久写入静态图。
 - 地图必须有明确 frame、resolution、origin 和版本身份。
+- A/B 测试时 global costmap 的 `map_topic` 显式切到 `/agt/rtabmap/map`，不同时订阅旧地图源。
 
 ### 7.2 局部实时障碍层
 
